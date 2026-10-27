@@ -1,0 +1,26 @@
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+*.auto.tfvars
+terraform.tfvars
+
+# Secrets and local config
+.env
+.env.*
+*.pem
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Databricks bundle state
+.databricks/
+
+# Local data downloads
+data/

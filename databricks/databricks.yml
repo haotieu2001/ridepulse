@@ -1,0 +1,22 @@
+bundle:
+  name: ridepulse
+
+include:
+  - resources/*.yml
+
+variables:
+  catalog:
+    description: Unity Catalog catalog for this target.
+    default: ridepulse_dev
+  tlc_month:
+    description: TLC high-volume FHV month used by feasibility test S10 (YYYY-MM).
+    default: "2025-01"
+
+targets:
+  dev:
+    default: true
+    mode: development
+    workspace:
+      profile: ridepulse
+    variables:
+      catalog: ridepulse_dev

@@ -1,0 +1,18 @@
+resources:
+  schemas:
+    raw:
+      catalog_name: ${var.catalog}
+      name: raw
+      comment: Landed source files (TLC, NOAA, rule book, payouts).
+    bronze:
+      catalog_name: ${var.catalog}
+      name: bronze
+      comment: Raw records as ingested.
+
+  volumes:
+    tlc:
+      catalog_name: ${var.catalog}
+      schema_name: ${resources.schemas.raw.name}
+      name: tlc
+      volume_type: MANAGED
+      comment: TLC monthly Parquet files, pushed through the Files API.

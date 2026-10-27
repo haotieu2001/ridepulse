@@ -1,0 +1,19 @@
+resources:
+  jobs:
+    s10_tlc_month:
+      name: s10_tlc_month
+      description: "Feasibility test S10: one full TLC month into bronze within the Free Edition daily quota."
+      tasks:
+        - task_key: load_month
+          environment_key: default
+          spark_python_task:
+            python_file: ../src/feasibility/s10_tlc_month.py
+            parameters:
+              - --catalog
+              - ${var.catalog}
+              - --month
+              - ${var.tlc_month}
+      environments:
+        - environment_key: default
+          spec:
+            environment_version: "3"
