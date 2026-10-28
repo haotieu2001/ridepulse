@@ -222,6 +222,8 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
 - All 10 tests pass: S1-S10. Terraform state in S3 for bootstrap, confluent, debezium.
 - Open items: Neon password exposed in chat (reset before real data); rotate `ridepulse-ci`
   secret before 2027-01-26; Confluent trial credit ends about 2026-11-27; write ADR-0001/0002.
+- Progress saved for the second laptop: all repos pushed; `docs/new-laptop.md` lists the sign-in
+  URLs (AWS access portal, Databricks, Neon, Confluent, GitHub) and the setup steps.
 
 ### S6 Apps: pass
 - Stdlib-only app `scripts/feasibility/s6_app` (`app.py` + `app.yaml`): `databricks apps create`,
