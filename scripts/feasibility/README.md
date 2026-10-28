@@ -54,5 +54,28 @@ scripts/feasibility/neon.sh scripts/feasibility/s9_neon_changes.sql         # up
 (cd databricks && databricks bundle run -t dev s9_neon_reference)            # then check bronze again
 ```
 
+## S1 + S2 · Confluent Cloud -> Databricks
+Needs `infra/terraform/confluent` applied (keys land in SSM `/ridepulse/confluent/dev/*`).
+```bash
+uv run --with 'confluent-kafka[avro,schemaregistry]' python scripts/feasibility/s1_s2_produce.py
+scripts/feasibility/ssm_to_secret.sh /ridepulse/confluent/dev/kafka_api_key=kafka-api-key \
+  /ridepulse/confluent/dev/kafka_api_secret=kafka-api-secret \
+  /ridepulse/confluent/dev/sr_api_key=sr-api-key /ridepulse/confluent/dev/sr_api_secret=sr-api-secret
+(cd databricks && databricks bundle deploy -t dev && databricks bundle run -t dev s1_s2_kafka)
+```
+
+## S8 · Neon -> Debezium on EC2 -> Confluent
+```bash
+scripts/feasibility/neon.sh scripts/feasibility/s8_neon_trips.sql
+terraform -chdir=infra/terraform/debezium init && terraform -chdir=infra/terraform/debezium apply
+# wait until Neon shows slot debezium_s8 active, then:
+scripts/feasibility/sql.sh scripts/feasibility/s8_replay_sample.sql      # export; convert to TSV, \copy into trips_replay_input
+scripts/feasibility/neon.sh scripts/feasibility/s8_replay.sql            # 4 lifecycle stages + WAL bytes
+uv run --with confluent-kafka python scripts/feasibility/s8_consume.py  # events, bytes, newest events
+scripts/feasibility/ec2_run.sh 'journalctl -u debezium -n 50'           # logs, through SSM
+terraform -chdir=infra/terraform/debezium destroy                         # then:
+scripts/feasibility/neon.sh scripts/feasibility/s8_teardown.sql          # drop the slot, or Neon keeps WAL
+```
+
 ## S7 + S10 · Files API and one TLC month
 `make s10` (see the Makefile).

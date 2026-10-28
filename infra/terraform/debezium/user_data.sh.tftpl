@@ -1,0 +1,95 @@
+#!/bin/bash
+# Boot script for the Debezium Server EC2 (rendered by Terraform; $${...} is a shell variable).
+set -euo pipefail
+exec > >(tee /var/log/ridepulse-bootstrap.log) 2>&1
+
+dnf install -y java-21-amazon-corretto-headless python3
+
+# --- Debezium Server, verified against Maven Central's SHA-512 --------------------------------
+cd /opt
+curl -fsSL --retry 3 -o debezium.tar.gz "${debezium_url}"
+echo "${debezium_sha512}  debezium.tar.gz" | sha512sum -c -
+tar -xzf debezium.tar.gz
+rm debezium.tar.gz
+useradd --system --home-dir /opt/debezium-server --shell /sbin/nologin debezium
+# Debezium Server 3.x reads config/application.properties (Quarkus layout), not conf/.
+mkdir -p /opt/debezium-server/data /opt/debezium-server/config
+chown -R debezium:debezium /opt/debezium-server
+
+# --- config renderer: secrets come from SSM at every start, into a file only debezium can read --
+cat > /opt/debezium-server/render-config.sh <<'RENDER'
+#!/bin/bash
+set -euo pipefail
+p() { aws ssm get-parameter --region us-east-2 --name "$1" --with-decryption --query Parameter.Value --output text; }
+NEON_URL="$(p /ridepulse/dev/neon/url)"
+BOOTSTRAP="$(p /ridepulse/confluent/dev/bootstrap_servers)"
+KAFKA_KEY="$(p /ridepulse/confluent/dev/kafka_api_key)"
+KAFKA_SECRET="$(p /ridepulse/confluent/dev/kafka_api_secret)"
+umask 077
+NEON_URL="$NEON_URL" BOOTSTRAP="$BOOTSTRAP" KAFKA_KEY="$KAFKA_KEY" KAFKA_SECRET="$KAFKA_SECRET" python3 - <<'PY' > /opt/debezium-server/config/application.properties
+import os, urllib.parse as u
+p = u.urlparse(os.environ["NEON_URL"])
+host = p.hostname.replace("-pooler.", ".")  # logical replication needs Neon's direct endpoint
+props = {
+    "debezium.source.connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "debezium.source.offset.storage.file.filename": "/opt/debezium-server/data/offsets.dat",
+    "debezium.source.offset.flush.interval.ms": "0",
+    "debezium.source.database.hostname": host,
+    "debezium.source.database.port": str(p.port or 5432),
+    "debezium.source.database.user": p.username,
+    "debezium.source.database.password": u.unquote(p.password),
+    "debezium.source.database.dbname": p.path.lstrip("/"),
+    "debezium.source.database.sslmode": "require",
+    "debezium.source.topic.prefix": "cdc",
+    "debezium.source.plugin.name": "pgoutput",
+    "debezium.source.slot.name": "debezium_s8",
+    "debezium.source.publication.name": "dbz_s8",
+    "debezium.source.publication.autocreate.mode": "filtered",
+    "debezium.source.table.include.list": "dispatch.trips",
+    "debezium.source.snapshot.mode": "no_data",
+    # NUMERIC as exact strings ("49.53"), not base64 binary decimals ("E1k="): money stays
+    # exact and Spark casts it with a plain CAST(... AS DECIMAL(8,2)).
+    "debezium.source.decimal.handling.mode": "string",
+    "debezium.sink.type": "kafka",
+    "debezium.sink.kafka.producer.bootstrap.servers": os.environ["BOOTSTRAP"],
+    "debezium.sink.kafka.producer.security.protocol": "SASL_SSL",
+    "debezium.sink.kafka.producer.sasl.mechanism": "PLAIN",
+    "debezium.sink.kafka.producer.sasl.jaas.config":
+        'org.apache.kafka.common.security.plain.PlainLoginModule required '
+        f'username="{os.environ["KAFKA_KEY"]}" password="{os.environ["KAFKA_SECRET"]}";',
+    "debezium.sink.kafka.producer.key.serializer": "org.apache.kafka.common.serialization.StringSerializer",
+    "debezium.sink.kafka.producer.value.serializer": "org.apache.kafka.common.serialization.StringSerializer",
+    "debezium.format.value": "json",
+    "debezium.format.value.schemas.enable": "false",
+    "debezium.format.key": "json",
+    "debezium.format.key.schemas.enable": "false",
+}
+for k, v in props.items():
+    print(f"{k}={v}")
+PY
+RENDER
+chmod 750 /opt/debezium-server/render-config.sh
+chown debezium:debezium /opt/debezium-server/render-config.sh
+
+cat > /etc/systemd/system/debezium.service <<'UNIT'
+[Unit]
+Description=Debezium Server (Neon -> Confluent Cloud)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=debezium
+WorkingDirectory=/opt/debezium-server
+Environment=JAVA_OPTS=-Xmx1g
+ExecStartPre=/opt/debezium-server/render-config.sh
+ExecStart=/opt/debezium-server/run.sh
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+systemctl daemon-reload
+systemctl enable --now debezium
+echo "bootstrap done"

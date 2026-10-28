@@ -199,6 +199,23 @@ resource "confluent_kafka_topic" "avro_smoke" {
   }
 }
 
+# S8: Debezium's change events for dispatch.trips (topic.prefix "cdc").
+resource "confluent_kafka_topic" "cdc_trips" {
+  kafka_cluster {
+    id = confluent_kafka_cluster.this.id
+  }
+  topic_name       = "cdc.dispatch.trips"
+  partitions_count = 1
+  rest_endpoint    = confluent_kafka_cluster.this.rest_endpoint
+  credentials {
+    key    = confluent_api_key.manager_kafka.id
+    secret = confluent_api_key.manager_kafka.secret
+  }
+  config = {
+    "retention.ms" = "86400000"
+  }
+}
+
 # --- publish connection details for Databricks, Debezium and scripts -------------------------
 locals {
   ssm = {

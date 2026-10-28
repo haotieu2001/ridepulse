@@ -170,9 +170,58 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   (delete missed). Confirms ADR-0005 with measurements.
 - Kept: connection, secret, foreign catalog, pipeline and the Neon table, for phase 4's real pull.
 
-### Phase 0 status after day 2
-- Done: S3, S4, S5, S6, S7, S9, S10, Terraform bootstrap with S3 state, catalogs dev + stg.
-- Left: S1, S2, S8 together in one 30-day Confluent window (sign up for Confluent that day).
+### Confluent Cloud set up
+- Signed up (trial: $400 credit for 30 days, from 2026-10-28). Onboarding answers: no private
+  networking (Basic + public endpoint). The onboarding defaulted to a **Standard** cluster on
+  **GCP us-east1** at $0.75/h; changed to **Basic, AWS us-east-2** before launching.
+  Cluster `lkc-w7k1r9m` "ridepulse-dev", environment `env-mn0m17` (found in the browser URL).
+- First API key was a Kafka cluster key (same shape as a Cloud key) -> Terraform 401. Checked
+  without printing it: 16/64 chars, not swapped, still 401 on `GET /org/v2/environments`.
+  Created a Cloud resource management key (Administration -> API keys -> My account) -> HTTP 200.
+  Keys in SSM `/ridepulse/confluent/cloud_api_key|cloud_api_secret`, overwritten with `--overwrite`.
+- `infra/terraform/confluent` (provider pinned ~> 2.90.0, not the day-old 2.92.0): import blocks
+  adopt the environment and cluster (plan: 2 import, 0 change); service accounts `ridepulse-manager`
+  (CloudClusterAdmin, creates topics) and `ridepulse-app` (`sa-19dp876`, data access); app keys and
+  bootstrap/SR URL in SSM `/ridepulse/confluent/dev/*`.
+- First apply failed on 3 role bindings: "Basic Clusters can not use resource roles". Replaced with
+  6 Kafka ACLs (topic read/write/describe, group read, cluster idempotent-write/describe).
+  The Schema Registry role binding works. Outputs moved off SSM values (they are marked sensitive).
+
+### S1 + S2: pass
+- `scripts/feasibility/s1_s2_produce.py` (uv, confluent-kafka): 20 JSON + 20 Avro trip events;
+  schema id 100001. Keys copied SSM -> Databricks secrets with `scripts/feasibility/ssm_to_secret.sh`.
+- Dev-only job `s1_s2_kafka`: `availableNow` streams. S1 20/20 rows, fare sum 582.50 exact;
+  S2 `from_avro` with Schema Registry 20/20 rows, typed values. 1.5 min serverless.
+
+### S8 Neon -> Debezium -> Confluent: pass
+- Preflight: default VPC with public subnets (no NAT needed); Debezium Server 3.7.0.Final
+  (2026-09-29, 747 MB, SHA-512 pinned); Neon has 2 internal physical slots (normal);
+  `neondb_owner` has REPLICATION.
+- Topic `cdc.dispatch.trips` in Terraform; Neon `dispatch.trips` + `trips_replay_input`
+  (gotcha: `LIKE` copies NOT NULL, so staging had to drop it on status/updated_at).
+- `infra/terraform/debezium` (own state, ephemeral): t4g.small AL2023 arm64, no inbound, IMDSv2,
+  encrypted disk, IAM reads only 4 SSM parameters + Session Manager. `scripts/feasibility/ec2_run.sh`
+  runs commands through SSM Run Command (no SSH).
+- Crash loop 1: "debezium.sink.type is required": Debezium 3.x reads `config/`, the script wrote
+  `conf/`. Fixed in the template and replaced the instance (proves the code, not a hand-fixed box).
+- Replay: 5% of Mon 2025-01-06 08:00-09:00 = 2,009 real trips, through requested -> assigned ->
+  picked_up -> completed. 8,036/8,036 events in Kafka (2,009 c + 6,027 u), 4 per trip.
+  Day = 562,584 trips, hour = 39,136 -> factor 14.38.
+- Measured: Neon WAL 3,331,832 B per sampled hour; Kafka 7,252,557 B (903 B/event).
+  Per simulated day 47.9 MB WAL -> 1.44 GB/month (1 day/day), 2.40 GB/month at the plan's
+  10x-4h pace, against Neon Free's 5 GB. Fits.
+- Fix 2: NUMERIC arrived as base64 (`"E1k="`); set `decimal.handling.mode=string`, replaced the
+  instance, verified `"18.91"`.
+- Finding: after that replacement, 2,009 `completed` events arrived twice (old instance had not
+  confirmed its last LSN; offsets lived on the destroyed disk). At-least-once, as expected: bronze
+  must dedupe by event id / LSN. For phase 2: heartbeat + durable offsets.
+- Teardown: `terraform destroy` (6 resources), slot `debezium_s8` + publication dropped,
+  0 instances left. Kept: Confluent environment/cluster/topics (Basic: no base fee), Neon tables.
+
+### Phase 0 status after day 2: complete
+- All 10 tests pass: S1-S10. Terraform state in S3 for bootstrap, confluent, debezium.
+- Open items: Neon password exposed in chat (reset before real data); rotate `ridepulse-ci`
+  secret before 2027-01-26; Confluent trial credit ends about 2026-11-27; write ADR-0001/0002.
 
 ### S6 Apps: pass
 - Stdlib-only app `scripts/feasibility/s6_app` (`app.py` + `app.yaml`): `databricks apps create`,
