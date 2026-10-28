@@ -1,0 +1,20 @@
+{
+  "messages": [
+    {"role": "user", "content": "What was the fare for trip 2025-01-05_HV0003_123?"}
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "get_trip_fare",
+        "description": "Itemised charges for one trip: base fare, tolls, fees, tip.",
+        "parameters": {
+          "type": "object",
+          "properties": {"trip_key": {"type": "string", "description": "RidePulse trip key"}},
+          "required": ["trip_key"]
+        }
+      }
+    }
+  ],
+  "max_tokens": 300
+}

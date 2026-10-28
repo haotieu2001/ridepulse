@@ -8,9 +8,9 @@ a failed test means switching to its fallback and recording why in an ADR.
 | S1 Kafka read | Free Edition reaches Confluent from us-east-2 | Structured Streaming read of a test topic | ⬜ | Aiven, or a Volume file drop |
 | S2 Schema Registry | Avro + Schema Registry from Free Edition | `from_avro` with the registry URL | ⬜ | JSON with a contract check |
 | S3 bundle from CI | GitHub Actions deploys the bundle | `databricks bundle deploy` in a workflow | ⬜ | Deploy from the laptop, CI validates only |
-| S4 Genie + LLMs | Genie API, available LLMs, metric views | Genie space over a test table | ⬜ | Genie UI only; UC keys + Joins tab |
-| S5 search | Two AI Search indexes on one endpoint | Two Delta Sync indexes | ⬜ | One combined index with a filter |
-| S6 Apps | Databricks Apps can be created | Hello-world App | ⬜ | Streamlit locally |
+| S4 Genie + LLMs | Genie API, available LLMs, metric views | Genie space over a test table | ✅ 2026-10-28: 12 model endpoints READY (9 chat, 3 embedding incl. gte-large-en); tool calling works on llama-3.3-70b and gpt-oss-120b; metric view created and queried with `MEASURE()`; Genie space created and answered through the Conversation API with correct SQL (`scripts/feasibility/s4_*`) | Genie UI only; UC keys + Joins tab |
+| S5 search | Two AI Search indexes on one endpoint | Two Delta Sync indexes | ✅ 2026-10-28: endpoint `ridepulse-search` holds two Delta Sync indexes (managed gte-large-en, TRIGGERED); ~21 min to provision; semantic ("guide dog" → service-animal rule, 0.70) and hybrid ("59D-22" → exact, 1.00) both right; test indexes and tables removed, endpoint kept (`scripts/feasibility/s5_*`) | One combined index with a filter |
+| S6 Apps | Databricks Apps can be created | Hello-world App | ✅ 2026-10-28: stdlib-only app (`scripts/feasibility/s6_app`) created, deployed, HTTP 200 with the caller's identity in `X-Forwarded-Email`; 302 to sign-in without a token; deleted after to free the slot | Streamlit locally |
 | S7 Files API | Files land in a UC Volume from outside | `databricks fs cp` (done by `make s10-upload`) | ✅ 2026-10-28: 491,076,642 bytes in 5 min 40 s (~1.4 MB/s from the laptop), size identical in the Volume | Upload through the workspace UI |
 | S8 Neon + Debezium | Neon → Debezium on EC2 → Confluent; one simulated day's egress | Debezium Server on t4g.small | ⬜ | RDS PostgreSQL |
 | S9 Lakeflow Connect | Query-based pull from Neon works | Lakeflow Connect PostgreSQL connector | ⬜ | Lambda export to S3 (path D) |
@@ -37,3 +37,8 @@ Things the plan didn't anticipate, found while running the tests.
 |---|---|---|
 | Only Default Storage: the catalogs API rejects `catalogs create` without a storage root | A catalog can't be created through the API | `make catalog` runs `CREATE CATALOG` on the SQL warehouse instead |
 | Bundle `mode: development` prefixes UC schemas (`dev_<user>_raw`) and ignores `presets.name_prefix: ""` | Volume paths stop matching `ridepulse_dev.raw.tlc` | The `dev` target has no `mode`; the catalog separates environments |
+| `databricks serving-endpoints query` drops the `tools` field ("unknown field: tools") | Tool calling looks broken from the CLI when it isn't | Call `POST /serving-endpoints/<name>/invocations` (`databricks api post`), as the agent SDKs do |
+| The SQL statements API runs one statement per call, and RTAS rejects a column list | Multi-statement setup files fail | `scripts/feasibility/sql.sh` runs one file = one statement |
+| `databricks vector-search-indexes query-index` (CLI 1.22.1) fails to parse a valid 200 response, and takes columns only in `--json` | Search looks broken from the CLI when it isn't | Query with `databricks api post /api/2.0/vector-search/indexes/<name>/query` |
+| The AI Search endpoint took ~21 min to become usable (it reports ONLINE before indexes can build) | A teardown/rebuild costs half an hour | Keep `ridepulse-search` running; delete indexes, not the endpoint |
+| Apps forward the signed-in user as `X-Forwarded-Email` | The copilot knows who is asking without its own login | Use it for the driver-earnings row filter (on-behalf-of auth comes later) |
