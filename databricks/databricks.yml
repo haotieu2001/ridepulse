@@ -15,7 +15,9 @@ variables:
 targets:
   dev:
     default: true
-    mode: development
+    # No `mode: development`: it renames schemas to dev_<user>_raw and ignores an
+    # empty name_prefix. The catalog already separates environments, so the
+    # plain names the plan uses (ridepulse_dev.raw.tlc) stay.
     workspace:
       profile: ridepulse
     variables:
