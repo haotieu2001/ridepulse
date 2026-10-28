@@ -22,6 +22,30 @@ targets:
       profile: ridepulse
     variables:
       catalog: ridepulse_dev
+    resources:
+      pipelines:
+        # S9 / plan path C: daily query-based pull from the Neon dispatch database,
+        # incremental on the updated_at cursor. Dev only: the neon_dev connection
+        # and its secret belong to this environment.
+        s9_neon_reference:
+          name: s9_neon_reference
+          catalog: ${var.catalog}
+          schema: bronze
+          ingestion_definition:
+            connection_name: neon_dev
+            objects:
+              - table:
+                  source_catalog: neondb
+                  source_schema: dispatch
+                  source_table: driver_profiles
+                  destination_catalog: ${var.catalog}
+                  destination_schema: bronze
+                  destination_table: ref_driver_profiles
+                  table_configuration:
+                    scd_type: SCD_TYPE_1
+                    query_based_connector_config:
+                      cursor_columns:
+                        - updated_at
 
   # Deployed only by GitHub Actions, as the ridepulse-ci service principal
   # (DATABRICKS_CLIENT_ID / DATABRICKS_CLIENT_SECRET). The default root path

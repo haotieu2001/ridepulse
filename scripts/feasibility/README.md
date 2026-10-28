@@ -40,5 +40,19 @@ curl -H "Authorization: Bearer $(databricks auth token --profile ridepulse -o js
 databricks apps delete ridepulse-hello --profile ridepulse    # frees one of the 3 app slots
 ```
 
+## S9 · Lakeflow Connect query-based pull from Neon
+Needs the Neon URL in SSM `/ridepulse/dev/neon/url` (see docs/journal.md for how to store it safely).
+```bash
+scripts/feasibility/neon.sh scripts/feasibility/s9_neon_setup.sql          # test table in Neon
+scripts/feasibility/neon_secret_to_databricks.sh                             # password -> secret scope
+scripts/feasibility/sql.sh scripts/feasibility/s9_connection.sql            # UC connection neon_dev
+scripts/feasibility/sql.sh scripts/feasibility/s9_foreign_catalog.sql       # network check:
+scripts/feasibility/sql.sh scripts/feasibility/s9_federated_query.sql       #   serverless -> Neon
+(cd databricks && databricks bundle deploy -t dev && databricks bundle run -t dev s9_neon_reference)
+scripts/feasibility/sql.sh scripts/feasibility/s9_check_bronze.sql
+scripts/feasibility/neon.sh scripts/feasibility/s9_neon_changes.sql         # update, insert, delete
+(cd databricks && databricks bundle run -t dev s9_neon_reference)            # then check bronze again
+```
+
 ## S7 + S10 · Files API and one TLC month
 `make s10` (see the Makefile).

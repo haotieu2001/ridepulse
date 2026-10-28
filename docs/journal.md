@@ -148,9 +148,31 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
 - Run 40719519221: green in 12 s, "deploying as *** (ridepulse-ci)", 5 resources created
   (schemas raw/bronze owned by the principal, Volume, job + permissions).
 
+### S9 Lakeflow Connect from Neon: pass
+- Neon connection string stored in SSM SecureString `/ridepulse/dev/neon/url` with
+  `read -rs NEON_URL` (run alone, then paste) + `aws ssm put-parameter`.
+  Mistake on the way: the URL was typed on the same line as `read -rs`, so zsh treated `?` as a glob
+  and `&` as background; nothing was stored, but the password showed up in the chat and shell history.
+  **Open item: the Neon `neondb_owner` password was exposed in chat; the user chose not to reset it.
+  Reset it (Neon -> Roles -> Reset password, then update SSM and re-run
+  `scripts/feasibility/neon_secret_to_databricks.sh`) before anything real lives in Neon.**
+- `scripts/feasibility/neon.sh`: reads SSM, uses the direct host (drops `-pooler`), passes the
+  password only via `PGPASSWORD`. Created `dispatch.driver_profiles` (5 synthetic drivers, index on updated_at).
+- `scripts/feasibility/neon_secret_to_databricks.sh`: password from SSM into Databricks secret scope
+  `ridepulse` / key `neon-dev-password`, via a private temp file.
+- `CREATE CONNECTION neon_dev TYPE postgresql` (password `secret('ridepulse','neon-dev-password')`).
+- Network check first: foreign catalog `neon_dev_fc` + a SELECT from the SQL warehouse read all 5 rows,
+  so Free Edition serverless can reach Neon.
+- Dev-only pipeline `s9_neon_reference` in `databricks.yml` (ingestion_definition, cursor `updated_at`,
+  SCD_TYPE_1) into `ridepulse_dev.bronze.ref_driver_profiles`. First run 1.5 min, 5 rows.
+- Incremental check: update D0002, update D0003 twice (sedan -> suv -> wav), insert D0006, delete D0005.
+  Second run: D0002 and D0006 correct, D0003 only `wav` (intermediate lost), D0005 still present
+  (delete missed). Confirms ADR-0005 with measurements.
+- Kept: connection, secret, foreign catalog, pipeline and the Neon table, for phase 4's real pull.
+
 ### Phase 0 status after day 2
-- Done: S3, S4, S5, S6, S7, S10, Terraform bootstrap with S3 state, catalogs dev + stg.
-- Left: S9 (Lakeflow Connect -> Neon), then S1, S2, S8 together in one 30-day Confluent window.
+- Done: S3, S4, S5, S6, S7, S9, S10, Terraform bootstrap with S3 state, catalogs dev + stg.
+- Left: S1, S2, S8 together in one 30-day Confluent window (sign up for Confluent that day).
 
 ### S6 Apps: pass
 - Stdlib-only app `scripts/feasibility/s6_app` (`app.py` + `app.yaml`): `databricks apps create`,
