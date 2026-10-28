@@ -23,9 +23,14 @@ bootstrap-plan:
 bootstrap-apply:
 	terraform -chdir=$(BOOTSTRAP) apply bootstrap.tfplan
 
+# Free Edition only has Default Storage, which the catalogs API can't target
+# (it wants a storage root), so create the catalog with SQL on the warehouse.
 catalog:
-	databricks catalogs get $(CATALOG) --profile $(DBX_PROFILE) >/dev/null 2>&1 \
-	  || databricks catalogs create $(CATALOG) --profile $(DBX_PROFILE)
+	databricks catalogs get $(CATALOG) --profile $(DBX_PROFILE) >/dev/null 2>&1 || { \
+	  wh=$$(databricks warehouses list --profile $(DBX_PROFILE) -o json | jq -r '.[0].id'); \
+	  databricks api post /api/2.0/sql/statements --profile $(DBX_PROFILE) \
+	    --json "{\"warehouse_id\":\"$$wh\",\"statement\":\"CREATE CATALOG IF NOT EXISTS $(CATALOG)\",\"wait_timeout\":\"50s\"}" \
+	    | jq -e '.status.state == "SUCCEEDED"' >/dev/null && echo "created catalog $(CATALOG)"; }
 
 deploy:
 	cd databricks && databricks bundle deploy -t dev
