@@ -22,5 +22,8 @@ __pycache__/
 # Databricks bundle state
 .databricks/
 
+# Editor swap files
+*.swp
+
 # Local data downloads
 data/

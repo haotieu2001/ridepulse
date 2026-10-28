@@ -8,10 +8,11 @@ terraform {
     }
   }
 
-  # First apply runs with local state (the bucket doesn't exist yet).
-  # Then uncomment this block and run `terraform init -migrate-state`.
+  # Keep this commented until `make bootstrap-apply` has created the bucket:
+  # the first apply has to run with local state. Then uncomment it and run
+  # `terraform -chdir=infra/terraform/bootstrap init -migrate-state`.
   # backend "s3" {
-  #   bucket       = "ridepulse-tfstate-<account_id>"
+  #   bucket       = "ridepulse-tfstate-121403124761"
   #   key          = "bootstrap/terraform.tfstate"
   #   region       = "us-east-2"
   #   use_lockfile = true
