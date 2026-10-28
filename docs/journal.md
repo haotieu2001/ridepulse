@@ -129,10 +129,28 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   /api/2.0/vector-search/indexes/<name>/query --json @file` works.
 - Cleaned up: both test indexes and tables deleted. Endpoint `ridepulse-search` kept for real use.
 
+### S3 bundle from CI: pass
+- Free Edition allows a workspace service principal: `databricks service-principals create
+  --display-name ridepulse-ci` (application id 39a85987-...); entitlement `workspace-access` via a
+  SCIM PATCH (`scripts/feasibility/s3_sp_entitlements.json`).
+- 90-day OAuth secret (`service-principal-secrets-proxy create --lifetime 7776000s`), piped straight
+  into GitHub secrets `DATABRICKS_CLIENT_ID` / `DATABRICKS_CLIENT_SECRET`, never printed.
+  **Rotate before 2027-01-26.**
+- Catalog `ridepulse_stg` (`make catalog CATALOG=ridepulse_stg`); grant USE CATALOG + CREATE SCHEMA
+  to the principal only (`s3_grant_stg.sql`).
+- Bundle target `stg`: host set, default root path (the deploying principal's own folder; an
+  explicit `/Workspace/Shared` path drew a "writable by all users" warning), you get CAN_MANAGE.
+- `.github/workflows/deploy.yml`: on push to main under `databricks/`, validate + deploy `stg`;
+  actions pinned to SHAs (checkout v7.0.1 3d3c42e, setup-cli v1.22.1 8de769e).
+- Push rejected: an OAuth token needs the `workflow` scope to push workflow files. The GitHub device
+  page would not enable Authorize, so the remote was switched to SSH
+  (`git remote set-url origin git@github.com:haotieu2001/ridepulse.git`), which needs no scope.
+- Run 40719519221: green in 12 s, "deploying as *** (ridepulse-ci)", 5 resources created
+  (schemas raw/bronze owned by the principal, Volume, job + permissions).
+
 ### Phase 0 status after day 2
-- Done: S4, S5, S6, S7, S10, Terraform bootstrap with S3 state, catalog.
-- Left: S3 (bundle from CI, needs a Databricks token as a GitHub secret), S9 (Lakeflow Connect -> Neon),
-  then S1, S2, S8 together in one 30-day Confluent window.
+- Done: S3, S4, S5, S6, S7, S10, Terraform bootstrap with S3 state, catalogs dev + stg.
+- Left: S9 (Lakeflow Connect -> Neon), then S1, S2, S8 together in one 30-day Confluent window.
 
 ### S6 Apps: pass
 - Stdlib-only app `scripts/feasibility/s6_app` (`app.py` + `app.yaml`): `databricks apps create`,
