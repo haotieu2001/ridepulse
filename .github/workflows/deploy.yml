@@ -1,0 +1,46 @@
+name: deploy
+
+# Deploys the Databricks bundle to the stg target as the ridepulse-ci service
+# principal (OAuth M2M). Feasibility test S3; grows into the plan's full
+# deploy pipeline (staging -> E2E -> approval -> prod) in later phases.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "databricks/**"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-stg
+  cancel-in-progress: false
+
+jobs:
+  stg:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATABRICKS_HOST: https://dbc-f915d382-6d5f.cloud.databricks.com
+      DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+      DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+    defaults:
+      run:
+        working-directory: databricks
+    steps:
+      # Third-party actions are pinned to a commit SHA: tags can be force-pushed.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: databricks/setup-cli@8de769ec2543ee05e456ee2121350efc7efc4bda # v1.22.1
+
+      - name: Who is deploying
+        run: databricks current-user me -o json | jq -r '"deploying as " + .userName + " (" + .displayName + ")"'
+
+      - name: Validate
+        run: databricks bundle validate -t stg
+
+      - name: Deploy
+        run: databricks bundle deploy -t stg

@@ -22,3 +22,16 @@ targets:
       profile: ridepulse
     variables:
       catalog: ridepulse_dev
+
+  # Deployed only by GitHub Actions, as the ridepulse-ci service principal
+  # (DATABRICKS_CLIENT_ID / DATABRICKS_CLIENT_SECRET). The default root path
+  # puts the bundle state in that principal's own folder, not /Workspace/Shared,
+  # which every workspace user could write to.
+  stg:
+    workspace:
+      host: https://dbc-f915d382-6d5f.cloud.databricks.com
+    variables:
+      catalog: ridepulse_stg
+    permissions:
+      - level: CAN_MANAGE
+        user_name: haokimtieu2001@gmail.com
