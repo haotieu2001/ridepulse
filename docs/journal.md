@@ -420,3 +420,32 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   schema `feasibility_s8_s9` (kept, reversible) to free the name; then V001 + V002 applied. Debezium's
   topic names (`cdc.dispatch.*`) depend on the schema being `dispatch`. The S8/S9 scripts now need
   that schema name if ever rerun.
+
+### #2 Prep job: contract check, quarantine, 5% sample, event-time slices
+- `services/prep` (`make prep MONTH=2025-01`, or the `prep` workflow): reads the version the
+  downloader's manifest calls current (sha256-checked), one row group at a time; computes base keys
+  for all rows; quarantines rows failing the contract's 5 `fail` expectations or the 2 V001 CHECKs a
+  replayed trip could break (dropoff before pickup, a completed trip without fare/pay); keeps the 5%
+  sample with collision suffixes in file order; builds 4 events per trip on the ADR-0004 §5 schedule
+  with raw TLC values in payloads (named like `dispatch.trips` columns).
+- Layout: `derived/replay/<month>/etag=<etag>/events/YYYY/MM/DD/HH.jsonl.gz`, plus
+  `quarantine.jsonl.gz` and `_manifest.json` (written last: counts, every slice with events and
+  sha256), and `manifests/replay/<month>/prep.json` pointing at the current version. Slices live
+  under their month's prefix because a month reaches outside itself (Jan 2025: from 2024-12-31 23:00
+  to 2025-02-01 01:00), so a boundary hour has a slice in each of two months; the replayer reads
+  both. Hours with no events have no file; the manifest is the list.
+- Memory: trips are streamed in request order through a heap, and an hour is written once a request
+  falls past it (every event is due at or after its request), so only trips in flight are held.
+- Dry run on January 2025 (laptop, local copy, outputs to a directory): 20,405,666 rows, 1,020,410
+  sampled, 0 quarantined, 0 sample key collisions, 4,081,640 events in 747 slices (193 MB gzip),
+  reordered 10,143 / 9,298 / 475 trips (= ADR-0004), max 11,961 events in an hour (= the ADR's 60x
+  max per tick). 2 min 3 s, 1.65 GB peak RSS. A forced rerun gave byte-identical slices (gzip with
+  no timestamp).
+- Correction: ADR-0004 said the file's 4 `dropoff_after_pickup` failures are dropoff before pickup;
+  they are dropoff = pickup (V001 allows it), and no row in the month has dropoff before pickup.
+- 9 tests on a crafted month: quarantine reasons and counts, contract keys incl. a pooled collision
+  across row groups, slice hour bounds and order, the early-request and February-dropoff slices, the
+  pre-arranged trip schedule, raw payload values, no-op rerun, identical bytes on force and for any
+  row-group size, a re-published month in a new prefix, a wrong local file refused.
+- CI role gets PutObject on `derived/replay/*` and `manifests/replay/*` only (landing stack). pyarrow
+  26.0.0 is now a project dependency (released 2026-10-09).

@@ -11,13 +11,14 @@ YEAR        ?= 2025
 
 export AWS_PROFILE
 
-.PHONY: help bootstrap-plan bootstrap-apply landing-plan landing-apply land-month land-zones land-noaa db-status db-migrate db-test catalog deploy s10-upload s10-run s10
+.PHONY: help bootstrap-plan bootstrap-apply landing-plan landing-apply land-month land-zones land-noaa prep db-status db-migrate db-test catalog deploy s10-upload s10-run s10
 
 help:
 	@echo "bootstrap-plan / bootstrap-apply  Terraform: state bucket, GitHub OIDC role, budget"
 	@echo "landing-plan / landing-apply      Terraform: the S3 landing bucket"
 	@echo "land-month MONTH=2025-01          land one HVFHV month in S3 (pinned to its ETag)"
 	@echo "land-zones / land-noaa YEAR=2025  land the zone files / one NOAA GHCN-Daily year"
+	@echo "prep MONTH=2025-01 [OUT_DIR=dir]  prep job: contract, sample, event-time slices"
 	@echo "db-status / db-migrate            dispatch migrations on the dev Neon database"
 	@echo "db-test                           migrations + SQL tests in throwaway Neon databases"
 	@echo "catalog                           create the $(CATALOG) catalog (once)"
@@ -46,6 +47,13 @@ land-zones:
 
 land-noaa:
 	uv run python -m services.tlc_downloader noaa $(YEAR) --bucket $(LANDING_BUCKET)
+
+# The real run is the prep workflow on GitHub Actions; this is the same job from a laptop. With
+# OUT_DIR it writes under that directory instead of the bucket (a dry run); SOURCE_FILE skips the
+# download (checked against the manifest's sha256).
+prep:
+	uv run python -m services.prep $(MONTH) --bucket $(LANDING_BUCKET) \
+	  $(if $(SOURCE_FILE),--source-file $(SOURCE_FILE)) $(if $(OUT_DIR),--out-dir $(OUT_DIR))
 
 db-status:
 	scripts/db.sh uv run python db/migrate.py --schema dispatch --status
