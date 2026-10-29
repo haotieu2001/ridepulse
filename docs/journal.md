@@ -306,3 +306,21 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
 - `curl` with `databricks auth token` as bearer: HTTP 200, and the app sees the caller in
   `X-Forwarded-Email`. Without a token: 302 to sign-in.
 - Deleted the app and its workspace folder to free one of the 3 app slots.
+
+### Phase 1 step 4: ERDs and the dispatch schema
+- `db/migrations/V001__dispatch.sql`: zones, fare_rules (dated rows, never updated in place),
+  drivers, driver_profiles, trips, outbox, replay_state, `advance_watermark()` (greatest()),
+  `set_updated_at()` triggers, cursor indexes, and the publication `ridepulse_cdc` for outbox,
+  drivers, driver_profiles and replay_state only (trips is not streamed, per sizing).
+- `db/tests/test_dispatch.sql` (run with `scripts/feasibility/neon.sh`): applies V001 to a throwaway
+  schema and asserts insert-once, forward-only transitions with exactly one outbox event, an empty
+  outbox at rest, invalid states rejected by CHECKs, a monotonic watermark, database-owned
+  updated_at, the publication's 4 tables, and the planted profile hard delete. All pass on Neon;
+  the test schema and publication are dropped afterwards.
+- The test caught a design contradiction: `trips.driver_id ON DELETE SET NULL` clashed with "an
+  assigned trip needs a driver". Changed to RESTRICT: a leaving driver goes offline, and the
+  planted hard delete targets a profile, not a driver.
+- `docs/design/erd.md`: Mermaid ERDs for dispatch (matches V001) and the gold star schema
+  (fct_trips, fct_driver_shifts, SCD2 dim_driver from path B, zone/provider/date/hour/weather dims),
+  the marts, `mv_trip_economics` (ratios of sums, so take_rate can't be averaged), and how each
+  Postgres table reaches gold.
