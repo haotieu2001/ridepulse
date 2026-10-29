@@ -324,3 +324,30 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   (fct_trips, fct_driver_shifts, SCD2 dim_driver from path B, zone/provider/date/hour/weather dims),
   the marts, `mv_trip_economics` (ratios of sums, so take_rate can't be averaged), and how each
   Postgres table reaches gold.
+
+### Phase 1 step 5: supply-model and simulated-clock ADRs
+- Zone geometry from the TLC shapefile (`ref/build_zone_geo.py`): `ref/zone_centroids.csv` (State
+  Plane ft + lat/lon) and `ref/zone_neighbours.csv` (651 pairs, mean 5 neighbours; Newark and 5 islands
+  have none). These feed dispatch now and `dim_zone.neighbour_ids` / surge areas later.
+- Supply simulation (`docs/design/supply/simulate_supply.py`) replayed all 1,020,410 sampled January
+  trips through synthetic pools, 10 scenarios in parallel:
+  - Peak need is 1,393 busy drivers (assignment to dropoff, 01:11 on Jan 1), not 906; the plan's
+    fixed 1,200 pool runs out 566 times.
+  - Without repositioning, ~1/3 of requests find no idle driver in the surge area, even with 2,000
+    drivers, and R1 surge fires in ~80% of busy areas.
+  - Chosen: demand-shaped shifts (hourly target = peak busy / 0.6, 4-10 h shifts, 8 h rest) +
+    repositioning every 10 simulated minutes toward the heat map: 97.8% near, surge 15%, alerts 3.4%,
+    pool ~3,100, 967 online on average, 510 busy, $26 per online hour.
+  - Trade-off recorded: TLC utilisation 43% vs the real 58% (TLC rule default; 54.8% observed 2023).
+    At realistic utilisation R1 fires in 72% of busy areas.
+- Clock measurements (`docs/design/clock/measure_clock.py`): last dropoff at most 3 h 03 min past its
+  pickup day (D+30 h kept); 1.0% of trips are picked up before their request; max 2,131 events per
+  10x tick.
+- ADR-0003 (supply model) and ADR-0004 (clock): tick-driven clock, the watermark committed in the
+  same transaction as the tick (DynamoDB no longer holds the cursor), event-time slices, a monotonic
+  per-trip schedule, contract-quarantined rows, forward-only time (re-runs are backfills), pings
+  produced before commit.
+- sizing.md updated: pool ~3,100, pings for busy drivers only (2.9M/simulated day), Kafka ~19 GB and
+  ~$1.9 per month, Neon egress ~82 MB/simulated day (3.3 GB for 40 days).
+- Plan numbering note: the plan listed ADR-0004 as storage formats; it moves to a later number.
+- Fixed two em dashes left in requirements.md.

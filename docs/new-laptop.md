@@ -73,6 +73,18 @@ Both plans must say **No changes**. If one wants to change something, stop and c
 other laptop before applying. `infra/terraform/debezium` is ephemeral: only `init` it when running
 CDC (and destroy it afterwards, then run `scripts/feasibility/s8_teardown.sql`).
 
+## 5b · Local data (only to rerun the design measurements)
+
+`data/` is gitignored. The sizing, supply and clock scripts in `docs/design/` and `ref/build_zone_geo.py`
+read these files:
+
+```bash
+mkdir -p data
+curl -sSfL -o data/fhvhv_tripdata_2025-01.parquet https://d37ci6vzurychx.cloudfront.net/trip-data/fhvhv_tripdata_2025-01.parquet
+curl -sSfL -o data/taxi_zones.zip https://d37ci6vzurychx.cloudfront.net/misc/taxi_zones.zip
+unzip -oq data/taxi_zones.zip -d data
+```
+
 ## 6 · Check
 
 ```bash

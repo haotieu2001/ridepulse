@@ -106,8 +106,8 @@ At the default replay: **5% sample, 10x speed, demo windows of at most 3 h/day**
 
 | Resource | Load | Limit | Status |
 |---|---|---|---|
-| Trips replayed | 661k trips/day (Aug 2026 average; 563k on Mon 2025-01-06, a snow day) x 5% ≈ 33k/simulated day | — | trivial for Postgres |
-| Replay rate at 10x | ≈ 14k trips per wall-clock hour on average (33k/day ÷ 24 × 10); the 08:00 rush hour is 1.7x the day's average (39,136 vs 23,441 trips/hour on 2025-01-06; S8 replayed its 5% sample, 2,009 trips) | — | S8 replayed 2,009 trips' 4 stages in < 5 s |
+| Trips replayed | 661k trips/day (Aug 2026 average; 563k on Mon 2025-01-06, a snow day) x 5% ≈ 33k/simulated day | n/a | trivial for Postgres |
+| Replay rate at 10x | ≈ 14k trips per wall-clock hour on average (33k/day ÷ 24 × 10); the 08:00 rush hour is 1.7x the day's average (39,136 vs 23,441 trips/hour on 2025-01-06; S8 replayed its 5% sample, 2,009 trips) | n/a | S8 replayed 2,009 trips' 4 stages in < 5 s |
 | **Neon egress** (logical replication) | measured: 47.9 MB WAL per simulated day for trip updates alone (S8); planned full design (outbox + driver updates, compact events) ≈ 95 MB/day | **5 GB/month** | **cap at <= 40 simulated days/month** -> <= 3.8 GB. At 10x that is **<= 3 h/day** (37.5 days/month). Re-measure in Phase 2 with the outbox. |
 | Neon compute | awake while Debezium is connected: 3 h/day x 30 x 0.25 CU ≈ 23 CU-h | 100 CU-h/month | fits |
 | Neon storage | 48 simulated-hour hot window ≈ 66k trip rows, under 50 MB | 1 GB | fits; drop the replication slot on teardown |

@@ -30,9 +30,10 @@ Reproduce the measurements with `docs/design/sizing/measure_sample.py` and `delt
 | Trip lifecycle events per trip | 4 (requested, assigned, picked up, completed) | M | S8 replayed them: 8,036 events for 2,009 trips |
 | Replay rate at 10x | ≈ 13.8k trips per real hour on average, peak hour ≈ 1.7x | M+E | 33,070 / 24 x 10; peak from the 08:00 rush hour of 2025-01-06 |
 
-**Driver pool.** At the worst minute 906 drivers are on a trip. The plan's pool of about 1,200 leaves
-about 25% idle at that minute, less than the plan assumed (it estimated a peak of 800). The pool size,
-shifts and where idle drivers wait are decided in the supply-model ADR (Phase 1, step 5).
+**Driver pool.** At the worst minute 906 drivers are on a trip, but counting the drive to the pickup
+the peak need is **1,393 busy drivers** (01:11 on New Year's Day). A month-long dispatch simulation
+(ADR-0003) replaced the plan's fixed pool of about 1,200: demand-shaped shifts plus repositioning give
+a pool of **≈ 3,100** drivers, **967 online on average** (2,322 at the peak) and about **510 busy**.
 
 ## 3. Kafka topics
 
@@ -42,22 +43,22 @@ throughput (every topic is far below a single partition's capacity).
 | Topic | Producer | Key | Events per simulated day | Event size | Bytes per simulated day | Partitions | Retention |
 |---|---|---|---|---|---|---|---|
 | `trips.v1` | Debezium Outbox Event Router | trip_key | 4 x 39,648 ≈ 159k (max day) | E ≈ 250 B (ids and times), ≈ 600 B for TripCompleted with fares | E ≈ 55 MB | 3 | 7 d |
-| `cdc.dispatch.drivers` | Debezium table CDC | driver_id | E ≈ 3 status changes per trip ≈ 119k | M ≈ 900 B (S8's row-change envelope) | E ≈ 107 MB | 3 | compact + 7 d |
+| `cdc.dispatch.drivers` | Debezium table CDC | driver_id | 3 status changes per trip ≈ 119k + M ≈ 12k repositioning moves + M ≈ 5.6k sign-ons/offs ≈ 137k (ADR-0003) | M ≈ 900 B (S8's row-change envelope) | E ≈ 123 MB | 3 | compact + 7 d |
 | `cdc.dispatch.driver_profiles` | Debezium table CDC | driver_id | E < 100 (profile edits) | M ≈ 900 B | ≈ 0.1 MB | 1 | 7 d |
 | `cdc.dispatch.replay_state` | Debezium table CDC | constant | E ≈ 1,440 (one watermark per simulated minute) | E ≈ 400 B | ≈ 0.6 MB | 1 | compact |
-| `driver.locations.v1` | Replayer (Avro) | driver_id | E 1,200 drivers x 1 ping / 15 s = 6.9M at most (on-shift drivers only, so less) | E ≈ 100 B Avro incl. headers | E <= 690 MB | 6 | 1 d |
+| `driver.locations.v1` | Replayer (Avro) | driver_id | M 510 busy drivers on average (ADR-0003: busy drivers only) x 1 ping / 15 s ≈ 2.9M | E ≈ 100 B Avro incl. headers | E ≈ 290 MB | 6 | 1 d |
 | `ops.alerts.v1` | Databricks | area_id | E < 1,000 | E ≈ 500 B | < 1 MB | 1 | 7 d |
-| `*.dlq` | Databricks | source key | E 0.5% of pings (injected malformed) ≈ 35k | E ≈ 200 B | ≈ 7 MB | 1 | 14 d |
+| `*.dlq` | Databricks | source key | E 0.5% of pings (injected malformed) ≈ 15k | E ≈ 200 B | ≈ 3 MB | 1 | 14 d |
 
 Totals at the demo pace (1.25 simulated days per real day, <= 40 a month):
 
 | | Per real demo day | Per month (40 simulated days) |
 |---|---|---|
-| Into Kafka | E ≈ 1.1 GB | E ≈ 34 GB, almost all pings |
-| Confluent Basic usage cost (≈ $0.05/GB in, ≈ $0.05/GB out to one consumer) | | E ≈ $3.4/month after the trial credit |
+| Into Kafka | E ≈ 0.6 GB (≈ 470 MB per simulated day) | E ≈ 19 GB, mostly pings |
+| Confluent Basic usage cost (≈ $0.05/GB in, ≈ $0.05/GB out to one consumer) | | E ≈ $1.9/month after the trial credit |
 
-The pings dominate. If the cost matters, ping every 30 simulated seconds instead of 15 (half the
-bytes); the rules only need one ping per 3 minutes (R4).
+Pings are the largest share (≈ 60%). If the cost matters, ping every 30 simulated seconds instead of
+15 (half the ping bytes); the rules only need one ping per 3 minutes (R4).
 
 ## 4. Postgres (Neon)
 
@@ -65,16 +66,16 @@ bytes); the rules only need one ping per 3 minutes (R4).
 |---|---|---|---|
 | `dispatch.trips` | 48 simulated hours x 39,648/day ≈ 79k (max) | E ≈ 30 MB with indexes | the plan's hot window; older trips are deleted by the replayer |
 | `dispatch.outbox` | ≈ 0 at rest | ≈ 0 | rows are inserted and deleted in the same transaction |
-| `dispatch.drivers` | ≈ 1,200 | < 1 MB | one row per synthetic driver, updated in place |
-| `dispatch.driver_profiles`, `zones`, `fare_rules` | 1,200 / 265 / tens | < 1 MB | reference tables (path C pulls them) |
+| `dispatch.drivers` | ≈ 3,100 | < 1 MB | one row per synthetic driver, updated in place (ADR-0003) |
+| `dispatch.driver_profiles`, `zones`, `fare_rules` | 3,100 / 265 / tens | < 1 MB | reference tables (path C pulls them) |
 | Storage total | | E < 100 MB | limit 1 GB |
-| **Egress** (logical replication) | | E ≈ 75 MB/simulated day (plan: ≈ 95) | 40 simulated days -> E ≈ 3.0-3.8 GB of 5 GB; re-measure in Phase 2 |
+| **Egress** (logical replication) | | E ≈ 82 MB/simulated day (plan: ≈ 95) | 40 simulated days -> E ≈ 3.3 GB of 5 GB; re-measure in Phase 2 |
 
 How the egress estimate is built: only published tables are sent, and in the full design `trips`
 is **not** published (trip events go through the outbox; the plan's recovery snapshot is the only
 time `trips` is read). S8 measured Neon's WAL at 0.46x the Kafka JSON bytes for the same changes
-(3.33 MB vs 7.25 MB). Applied to the outbox (≈ 55 MB JSON/day) and driver changes (≈ 107 MB):
-≈ 25 + 49 ≈ 75 MB per simulated day. S8's 47.9 MB/day was for publishing `trips` directly, which
+(3.33 MB vs 7.25 MB). Applied to the outbox (≈ 55 MB JSON/day) and driver changes (≈ 123 MB with
+ADR-0003's repositioning and shifts): ≈ 25 + 57 ≈ 82 MB per simulated day. S8's 47.9 MB/day was for publishing `trips` directly, which
 the design avoids.
 
 ## 5. Lakehouse tables
@@ -86,7 +87,7 @@ the design avoids.
 | `silver.tlc_trips` (file) | n/a | 20.4M per TLC month | M ≈ 534 MB per month (bronze size) | the full month, published as a data product |
 | `gold.agg_zone_hourly` | 265 zones x 24 h = 6,360 | ≈ 254k | < 50 MB | |
 | `gold.agg_daily_economics` | tens | ≈ 1k | tiny | |
-| `gold.agg_driver_weekly` | ≈ 1,200 per week | | tiny | row-filtered for drivers |
+| `gold.agg_driver_weekly` | ≈ 3,100 per week | | tiny | row-filtered for drivers |
 | `ops.alerts`, `ops.late_events` | E < 1,000 | | tiny | |
 
 ## 6. Compute (Databricks Free Edition)
@@ -107,12 +108,13 @@ is the main thing to watch in Phases 3-4 (requirements, open question 3).
 |---|---|
 | the sample goes from 5% to 10% | trips, drivers and every trip-driven topic double; Neon egress doubles (over the 5 GB budget at 40 days) |
 | the demo runs 4 h/day instead of 3 | 50 simulated days a month: over Neon's cap (requirements §9) |
-| pings every 30 s instead of 15 s | Kafka bytes and cost roughly halve |
+| pings every 30 s instead of 15 s | Kafka bytes and cost drop by about 30% |
 | production scale (100% of trips) | ≈ 20x everything: Neon and Confluent Basic no longer fit; see production.md |
 
 ## 8. To measure in later phases
 
 - Outbox event sizes and Neon egress with the full design (Phase 2).
-- Actual on-shift driver count and ping volume from the supply model (Phase 2, after the ADR).
+- Online and busy driver counts and ping volume from the real replayer, against ADR-0003's simulation
+  (967 online, 510 busy on average) (Phase 2).
 - Bronze Delta size for a day of pings (Phase 2).
 - Daily job run time (Phase 4).
