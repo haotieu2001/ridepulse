@@ -224,6 +224,24 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   secret before 2027-01-26; Confluent trial credit ends about 2026-11-27; write ADR-0001/0002.
 - Progress saved for the second laptop: all repos pushed; `docs/new-laptop.md` lists the sign-in
   URLs (AWS access portal, Databricks, Neon, Confluent, GitHub) and the setup steps.
+- Checked what is left running after the tests: no EC2, disks, IPs or NAT in AWS; Databricks
+  warehouse stopped, jobs and pipeline unscheduled; Neon scales to zero; Confluent Basic has no base
+  fee. Nothing to turn off; decide on Confluent before the trial ends.
+
+---
+
+## 2026-10-29 · Day 3: Phase 0 closed
+
+- Wrote the two ADRs the Phase 0 exit criterion asks for, from the measured results:
+  - `docs/adr/0001-platform-and-region.md`: Databricks Free Edition + Neon Free + Confluent Basic +
+    AWS, all in us-east-2; alternatives (another region, RDS, MSK/self-managed Kafka, paid
+    Databricks); revisit triggers (Neon egress over ~4 GB/month, Confluent credit end, quota hits).
+  - `docs/adr/0002-secrets-and-identities.md`: SSM SecureString as the one source of secrets,
+    entered with `read -rs`, copies derived by scripts; one identity per job (SSO, OIDC role,
+    `ridepulse-ci`, `ridepulse-manager`, `ridepulse-app`, `ridepulse-debezium`); SSH git remote.
+- Claims checked against the Terraform code (CI role name and trust, Debezium's 4 parameters).
+- No fallback was needed, so none was chosen; they stay documented in `docs/feasibility.md`.
+- Next: Phase 1, the design doc.
 
 ### S6 Apps: pass
 - Stdlib-only app `scripts/feasibility/s6_app` (`app.py` + `app.yaml`): `databricks apps create`,

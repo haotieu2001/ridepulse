@@ -17,6 +17,9 @@ a failed test means switching to its fallback and recording why in an ADR.
 | S10 quota | A ~20M-row month fits the daily quota | `make s10` | ✅ 2026-10-28: Jan 2025, 20,405,666 rows × 25 columns into bronze, counts match; read 34 s, write 22 s, whole serverless run 1.5 min | One month at a time, or a Manhattan + airports subset |
 
 Done when every row has a result, the fallbacks are chosen, and ADR-0001/0002 are written.
+**Phase 0 closed 2026-10-29:** all ten pass, no fallback needed (they stay documented), and the
+decisions are in [ADR-0001 · platform and region](adr/0001-platform-and-region.md) and
+[ADR-0002 · secrets and identities](adr/0002-secrets-and-identities.md).
 
 ## Setup already verified
 
