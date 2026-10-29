@@ -267,6 +267,22 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   each expectation's SQL from the YAML on the full month: all 15 reproduce exactly.
 - `pyproject.toml` + `uv.lock` (pytest, pyyaml); `.github/workflows/ci.yml` runs the 482 tests on
   every PR and push. setup-uv pinned to v10.3.0 by SHA: the newest (v10.3.3) was a day old.
+  First CI run (40901218775): 482 passed in 10 s.
+
+### Phase 1 step 2: requirements and SLAs
+- `docs/design/requirements.md`: two clocks (wall vs simulated, "day D closed" = watermark D+30 h),
+  5 consumers, 17 functional requirements, 8 SLAs + 1 SLO each with start/stop events and a
+  Phase 0 budget check, capacity table, 13 non-functional requirements, open questions.
+- Checking the plan's targets against Phase 0 measurements found three that didn't add up:
+  - Daily job every 30 min can't meet "gold <= 30 min after a day closes" (a day closing just
+    after a run waits 30 min + the run). Changed: gate every 15 min (it exits in seconds).
+  - Streaming at a 15-min schedule + ~1.5-min runs (S1, S9) gives ~17 min, over the 15-min alert
+    SLA. Changed: every 10 min, worst ~12 min.
+  - The plan's capacity math used 10x for 4 h/day (~50 simulated days/month) while capping Neon at
+    <= 40 days. Changed: demo windows <= 3 h/day at 10x (37.5 days).
+- Also: S8's 47.9 MB/simulated day covered trip updates only; the full design (outbox + driver
+  updates) is planned at ~95 MB/day, so Neon egress is re-measured in Phase 2.
+- C4 (support) is now a consumer of RidePulse's data products; the copilot is RideDesk's.
 
 ### S6 Apps: pass
 - Stdlib-only app `scripts/feasibility/s6_app` (`app.py` + `app.yaml`): `databricks apps create`,
