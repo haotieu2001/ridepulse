@@ -5,13 +5,19 @@ MONTH       ?= 2025-01
 TLC_FILE    := fhvhv_tripdata_$(MONTH).parquet
 TLC_URL     := https://d37ci6vzurychx.cloudfront.net/trip-data/$(TLC_FILE)
 BOOTSTRAP   := infra/terraform/bootstrap
+LANDING     := infra/terraform/landing
+LANDING_BUCKET ?= ridepulse-landing-dev-121403124761
+YEAR        ?= 2025
 
 export AWS_PROFILE
 
-.PHONY: help bootstrap-plan bootstrap-apply catalog deploy s10-upload s10-run s10
+.PHONY: help bootstrap-plan bootstrap-apply landing-plan landing-apply land-month land-zones land-noaa catalog deploy s10-upload s10-run s10
 
 help:
 	@echo "bootstrap-plan / bootstrap-apply  Terraform: state bucket, GitHub OIDC role, budget"
+	@echo "landing-plan / landing-apply      Terraform: the S3 landing bucket"
+	@echo "land-month MONTH=2025-01          land one HVFHV month in S3 (pinned to its ETag)"
+	@echo "land-zones / land-noaa YEAR=2025  land the zone files / one NOAA GHCN-Daily year"
 	@echo "catalog                           create the $(CATALOG) catalog (once)"
 	@echo "deploy                            deploy the Databricks bundle (dev)"
 	@echo "s10                               feasibility test S10: one TLC month into bronze"
@@ -22,6 +28,22 @@ bootstrap-plan:
 
 bootstrap-apply:
 	terraform -chdir=$(BOOTSTRAP) apply bootstrap.tfplan
+
+landing-plan:
+	terraform -chdir=$(LANDING) init -input=false
+	terraform -chdir=$(LANDING) plan -input=false -out=landing.tfplan
+
+landing-apply:
+	terraform -chdir=$(LANDING) apply landing.tfplan
+
+land-month:
+	uv run python -m services.tlc_downloader fhvhv $(MONTH) --bucket $(LANDING_BUCKET)
+
+land-zones:
+	uv run python -m services.tlc_downloader zones --bucket $(LANDING_BUCKET)
+
+land-noaa:
+	uv run python -m services.tlc_downloader noaa $(YEAR) --bucket $(LANDING_BUCKET)
 
 # Free Edition only has Default Storage, which the catalogs API can't target
 # (it wants a storage root), so create the catalog with SQL on the warehouse.

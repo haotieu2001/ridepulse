@@ -3,7 +3,9 @@ name = "ridepulse"
 version = "0.1.0"
 description = "RidePulse: ride-hailing data platform on real NYC TLC trips"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "boto3>=1.43.121",
+]
 
 [dependency-groups]
 dev = [
@@ -15,5 +17,6 @@ dev = [
 package = false
 
 [tool.pytest.ini_options]
-testpaths = ["contracts/tests"]
+testpaths = ["contracts/tests", "services"]
+pythonpath = ["."]
 addopts = "-q"

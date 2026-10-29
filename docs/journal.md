@@ -379,3 +379,23 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   re-measurements for sizing (#15).
 - Created by a small idempotent gh script (kept outside the repo: GitHub is the source of truth).
 - RideDesk plan merged into haotieukim-transfer main (PR #25, squash 34ba122), replacing ZoneCast.
+
+## Phase 2: sources + streaming
+
+### #1 TLC downloader and the landing bucket
+- New persistent Terraform stack `infra/terraform/landing`: `ridepulse-landing-dev-121403124761`
+  (SSE-S3, public access blocked, bucket-owner-enforced, aborts incomplete multipart uploads after
+  1 day, project/env/owner tags). `make landing-plan` / `landing-apply`: 5 resources added.
+- `services/tlc_downloader`: streams a source file into S3 with no local copy, under
+  `raw/<source>/<id>/etag=<etag>/<file>`, and writes `manifests/<source>/<id>/<file>.json` (URL,
+  ETag, Last-Modified, size, sha256, key, history). A re-published file lands next to the old one;
+  a rerun with the same ETag is a no-op (one HEAD). Make targets: `land-month`, `land-zones`,
+  `land-noaa`.
+- Landed: January 2025 HVFHV (491 MB in ~1 min; sha256 matches the local copy), both zone files,
+  NOAA GHCN-Daily 2025 (166 MB, sha256 matches an independent curl download). Reruns: unchanged.
+- Bug found end to end: NOAA's S3 bucket sent headers but no body to Python's urllib (0 bytes in
+  60 s) while curl got the file in 15 s. Cause: urllib always sends `Connection: close`; the same
+  request through http.client without it read 20 MB in 2.6 s. The downloader now uses http.client
+  (no such header, redirects handled) and re-downloads a dropped stream up to 3 times.
+- 8 tests against a real local HTTP server: ETag key + manifest, no-op rerun, re-published file,
+  403 bursts retried, change between HEAD and GET refused, short body refused, dropped stream retried.
