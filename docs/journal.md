@@ -241,7 +241,32 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
     `ridepulse-ci`, `ridepulse-manager`, `ridepulse-app`, `ridepulse-debezium`); SSH git remote.
 - Claims checked against the Terraform code (CI role name and trust, Debezium's 4 parameters).
 - No fallback was needed, so none was chosen; they stay documented in `docs/feasibility.md`.
-- Next: Phase 1, the design doc.
+
+### Phase 1 step 1: data contracts v1
+- Read the plan's silver column contract (§08) and the column guide; both say trip_key =
+  sha256 of licence, request, pickup, dropoff and both zones, + seq for leftover collisions.
+- Profiled the **full** January 2025 month (20,405,666 rows), not samples
+  (`contracts/validation/profile_tlc_month.sql`, `profile_details.sql`):
+  - 5-column key: 271 duplicates; 6-column key: **3**, which the samples had shown as 0.
+    `key_collisions.sql`: all 3 are pooled rides (shared_match = Y) with minute-rounded requests and
+    different fares: two riders in one car, so they get a "-2" suffix, never a merge.
+  - No fractional seconds, so whole-second serialisation is lossless.
+  - Money exact at 2 decimals, miles at <= 3 (Lyft 3, Uber 2) -> DECIMAL(10,2) / DECIMAL(8,3).
+    A first check said 4.76M rows had more decimals: a float artefact (12.29 * 100 =
+    1228.999...); redone with a tolerance -> 0.
+  - New edge cases: 4 dropoffs not after pickup, 9,958 trip_time gaps (median 1 s), a $5.50
+    congestion surcharge (6 rows), $3.00 CBD fee (5), 1,827 non-standard airport fees.
+    Pickup before request: Uber 0.788%, Lyft 1.561% (median 6 min early).
+- `contracts/trip_key.py`: the key, the collision suffix and the 5% sample rule, with the Spark SQL
+  expressions generated from the same field list.
+- Parity: `make_trip_key_fixture.py` ran the Spark expressions on 235 real rows (collisions, edge
+  cases, a deterministic random 200) into `contracts/tests/fixtures/trip_key_spark.tsv`; Python
+  matches Spark on every row (476 tests).
+- `contracts/tlc_trips.yaml` v1.0.0: 45 columns with source, type, nullability and rules;
+  15 expectations (fail / flag / warn) with Jan 2025 baselines. `check_expectations.py` re-runs
+  each expectation's SQL from the YAML on the full month: all 15 reproduce exactly.
+- `pyproject.toml` + `uv.lock` (pytest, pyyaml); `.github/workflows/ci.yml` runs the 482 tests on
+  every PR and push. setup-uv pinned to v10.3.0 by SHA: the newest (v10.3.3) was a day old.
 
 ### S6 Apps: pass
 - Stdlib-only app `scripts/feasibility/s6_app` (`app.py` + `app.yaml`): `databricks apps create`,

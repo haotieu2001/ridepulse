@@ -1,0 +1,29 @@
+name: ci
+
+# Fast, offline checks on every pull request and push to main: the data contracts and their
+# Python = Spark key parity tests. No secrets. Grows into the plan's full CI (lint, Testcontainers
+# CDC test, replay-twice test, terraform validate) in phase 2.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Pinned to a commit SHA, and to a release at least two weeks old (v10.3.3 was a day old).
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - name: Tests
+        run: uv run pytest

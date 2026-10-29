@@ -1,0 +1,19 @@
+[project]
+name = "ridepulse"
+version = "0.1.0"
+description = "RidePulse: ride-hailing data platform on real NYC TLC trips"
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3",
+  "pyyaml>=6.0",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["contracts/tests"]
+addopts = "-q"
