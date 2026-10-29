@@ -1,12 +1,6 @@
--- Apply V001 to a throwaway schema and prove the guards the replayer relies on. Every check is an
--- ASSERT, so the first failure stops the run (psql ON_ERROR_STOP). Cleans up after itself.
--- Run from the repo root: scripts/feasibility/neon.sh db/tests/test_dispatch.sql
-\set ON_ERROR_STOP on
-DROP PUBLICATION IF EXISTS ridepulse_cdc;
-DROP SCHEMA IF EXISTS v001_test CASCADE;
-CREATE SCHEMA v001_test;
-SET search_path TO v001_test;
-\ir ../migrations/V001__dispatch.sql
+-- The guards the replayer relies on (V001). Every check is an ASSERT, so the first failure stops
+-- the run. db/tests/test_migrations.py runs this in a throwaway database after applying every
+-- migration with db/migrate.py, with search_path set to the migrated schema.
 
 -- seed: two zones, one driver with a profile, one fee rule
 INSERT INTO zones VALUES (132, 'Queens', 'JFK Airport', 'Airports'), (230, 'Manhattan', 'Times Sq/Theatre District', 'Yellow Zone');
@@ -104,10 +98,10 @@ BEGIN
   ASSERT (SELECT updated_at FROM driver_profiles WHERE driver_id = 'D0001') > before_ts, 'trigger sets updated_at';
 END $$;
 
--- 7. Debezium's publication carries the four tables and not trips
+-- 7. Debezium's publication carries the outbox, driver and replay tables, and not trips
 DO $$ BEGIN
   ASSERT (SELECT array_agg(tablename::text ORDER BY tablename) FROM pg_publication_tables WHERE pubname = 'ridepulse_cdc')
-         = ARRAY['driver_profiles', 'drivers', 'outbox', 'replay_state'], 'publication tables';
+         = ARRAY['driver_profiles', 'drivers', 'outbox', 'replay_runs', 'replay_state'], 'publication tables';
 END $$;
 
 -- 8. the planted hard delete removes a profile only; a driver with trip history can't be deleted
@@ -124,5 +118,3 @@ DO $$ BEGIN
 END $$;
 
 \echo 'all dispatch schema checks passed'
-DROP PUBLICATION ridepulse_cdc;
-DROP SCHEMA v001_test CASCADE;

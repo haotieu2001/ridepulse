@@ -1,8 +1,8 @@
 name: ci
 
-# Fast, offline checks on every pull request and push to main: the data contracts and their
-# Python = Spark key parity tests. No secrets. Grows into the plan's full CI (lint, Testcontainers
-# CDC test, replay-twice test, terraform validate) in phase 2.
+# Fast checks on every pull request and push to main, with no secrets: the data contracts and their
+# Python = Spark key parity tests, the downloader, and every dispatch migration applied by the real
+# runner to a throwaway Postgres (db/tests). Grows into the plan's full CI in phase 2 (#14).
 on:
   pull_request:
   push:
@@ -19,6 +19,21 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Same major version as Neon (18); pinned by digest to a release at least two weeks old.
+    services:
+      postgres:
+        image: postgres:18.4@sha256:a02db8cac496f15b094798a38254f14d6e00741f709360e5e00bb6668ea31636
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 2s --health-timeout 5s --health-retries 15
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: postgres
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

@@ -17,6 +17,6 @@ dev = [
 package = false
 
 [tool.pytest.ini_options]
-testpaths = ["contracts/tests", "services"]
+testpaths = ["contracts/tests", "services", "db"]
 pythonpath = ["."]
 addopts = "-q"

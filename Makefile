@@ -11,13 +11,15 @@ YEAR        ?= 2025
 
 export AWS_PROFILE
 
-.PHONY: help bootstrap-plan bootstrap-apply landing-plan landing-apply land-month land-zones land-noaa catalog deploy s10-upload s10-run s10
+.PHONY: help bootstrap-plan bootstrap-apply landing-plan landing-apply land-month land-zones land-noaa db-status db-migrate db-test catalog deploy s10-upload s10-run s10
 
 help:
 	@echo "bootstrap-plan / bootstrap-apply  Terraform: state bucket, GitHub OIDC role, budget"
 	@echo "landing-plan / landing-apply      Terraform: the S3 landing bucket"
 	@echo "land-month MONTH=2025-01          land one HVFHV month in S3 (pinned to its ETag)"
 	@echo "land-zones / land-noaa YEAR=2025  land the zone files / one NOAA GHCN-Daily year"
+	@echo "db-status / db-migrate            dispatch migrations on the dev Neon database"
+	@echo "db-test                           migrations + SQL tests in throwaway Neon databases"
 	@echo "catalog                           create the $(CATALOG) catalog (once)"
 	@echo "deploy                            deploy the Databricks bundle (dev)"
 	@echo "s10                               feasibility test S10: one TLC month into bronze"
@@ -44,6 +46,15 @@ land-zones:
 
 land-noaa:
 	uv run python -m services.tlc_downloader noaa $(YEAR) --bucket $(LANDING_BUCKET)
+
+db-status:
+	scripts/db.sh uv run python db/migrate.py --schema dispatch --status
+
+db-migrate:
+	scripts/db.sh uv run python db/migrate.py --schema dispatch
+
+db-test:
+	scripts/db.sh uv run pytest db
 
 # Free Edition only has Default Storage, which the catalogs API can't target
 # (it wants a storage root), so create the catalog with SQL on the warehouse.

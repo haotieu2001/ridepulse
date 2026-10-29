@@ -5,7 +5,8 @@
 - Two models on purpose: a **normalized, write-optimised dispatch schema** in Postgres (what a ride
   app's backend would own) and a **star schema** in gold (what analysts and Genie query).
 - The dispatch schema is real code: [`db/migrations/V001__dispatch.sql`](../../db/migrations/V001__dispatch.sql),
-  proven by [`db/tests/test_dispatch.sql`](../../db/tests/test_dispatch.sql) on Neon (all checks pass).
+  and V002 (`replay_runs`), applied by `db/migrate.py` and proven by the SQL tests in `db/tests/`
+  (run in CI against Postgres 18 and on Neon with `make db-test`).
 
 ## 1. Dispatch database (Neon Postgres)
 
@@ -79,6 +80,12 @@ erDiagram
         timestamp watermark "only moves forward"
         decimal speed
     }
+    replay_runs {
+        bigint run_id PK
+        timestamp started_from "day boundary, unique"
+        timestamp ended_at "set when a later run jumps ahead"
+        decimal speed
+    }
 ```
 
 ### Rules the schema enforces (each one is tested)
@@ -94,7 +101,8 @@ erDiagram
 | The watermark never goes back | `advance_watermark()` with `greatest()` | the daily gate can't reopen a closed day |
 | `updated_at` is the database's | `BEFORE UPDATE` triggers overwrite any value the writer sends | path C's cursor sees every edit |
 | History keeps its driver | `trips.driver_id` restricts deletes; a leaving driver goes `offline` | the planted hard delete targets a **profile**, not a driver |
-| Debezium reads 4 tables, never `trips` | explicit publication `ridepulse_cdc` | Neon egress (sizing §4) |
+| Debezium reads 5 tables, never `trips` | explicit publication `ridepulse_cdc` | Neon egress (sizing §4) |
+| A replay starts or jumps only forward, at a day boundary | `start_replay()` (V002); `replayed_days` view | the gate and completeness skip days the stream never saw (ADR-0004 §8) |
 
 The test found one design contradiction before any code depended on it: deleting a driver was
 first set to blank the driver on past trips, which the "assigned needs a driver" rule then rejected.
@@ -238,4 +246,5 @@ correctly on Free Edition.
 | `driver_profiles` | Debezium CDC (path B) **and** Lakeflow Connect (path C) | `dim_driver` from path B; path C only for the ADR-0005 comparison |
 | `zones`, `fare_rules` | Lakeflow Connect (path C) | `dim_zone`; fee rates for the fees reconciliation |
 | `replay_state` | Debezium CDC | the daily gate (requirements §2) |
+| `replay_runs` | Debezium CDC | which days the gate and completeness consider (ADR-0004 §8) |
 | `trips` | **not streamed** | the official TLC file is the source of `fct_trips` |

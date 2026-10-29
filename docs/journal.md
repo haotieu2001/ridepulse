@@ -399,3 +399,24 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   (no such header, redirects handled) and re-downloads a dropped stream up to 3 times.
 - 8 tests against a real local HTTP server: ETag key + manifest, no-op rerun, re-published file,
   403 bursts retried, change between HEAD and GET refused, short body refused, dropped stream retried.
+
+### #4 Migrations runner, V002 replay runs, schema tests in CI
+- `db/migrate.py`: applies `db/migrations/V###__name.sql` in order, each in one transaction with its
+  row in `<schema>.schema_migrations` (sha256); refuses an applied file that changed; `--status`.
+  psql-based, schema set through search_path. `scripts/db.sh` runs any command with Neon's PG*
+  variables from SSM. Make: `db-status`, `db-migrate`, `db-test`.
+- V002 (ADR-0004 §8): `replay_runs` (one row per start or forward jump, day boundaries only,
+  `ended_at` set by a jump), `start_replay(from, speed)` (refuses going back and mid-day starts;
+  NULL resumes), `replayed_days` view (a run's first day is warm-up: up to 48 min of a day's
+  requests fall the evening before; D counts once coverage reaches D + 30 h), published to Debezium.
+- Tests: each SQL file runs in its own throwaway database after the real runner applied every
+  migration (`db/tests/test_migrations.py`), plus runner idempotency and edit refusal. The old
+  test dropped `ridepulse_cdc` at the start, which would have dropped the real publication: removed.
+  3/3 pass on Neon (96 s; database creation is slow there); CI runs them on a postgres:18.4
+  service container (digest-pinned, two-week rule).
+- The issue asked for a throwaway Neon branch; a separate database is enough (publications are
+  per database) and needs no Neon API key, and CI uses a container so it needs no secret.
+- Dev Neon: the Phase 0 leftovers in `dispatch` (S8's 2,009 trips, S9's 5 profiles) were renamed to
+  schema `feasibility_s8_s9` (kept, reversible) to free the name; then V001 + V002 applied. Debezium's
+  topic names (`cdc.dispatch.*`) depend on the schema being `dispatch`. The S8/S9 scripts now need
+  that schema name if ever rerun.
