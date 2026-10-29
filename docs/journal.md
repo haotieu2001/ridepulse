@@ -351,3 +351,19 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   ~$1.9 per month, Neon egress ~82 MB/simulated day (3.3 GB for 40 days).
 - Plan numbering note: the plan listed ADR-0004 as storage formats; it moves to a later number.
 - Fixed two em dashes left in requirements.md.
+
+### Phase 1 step 6: C4 and production.md skeleton
+- `docs/design/c4.md`: level 1 context (consumers C1-C3, RideDesk as an outside system reading
+  silver/gold, TLC, NOAA, GitHub), level 2 containers grouped by stage (sources on AWS + Neon,
+  Confluent, Databricks, alerting) with a table of runtime, ownership and cost driver, level 3 for
+  the replayer tick (sequence, per ADR-0003/0004) and the lakehouse.
+- Every diagram rendered locally with mermaid-cli and looked at before committing; the first
+  layouts (email loop, crossing SSM edges, an oversized decision diamond) were redrawn. Headless
+  Chrome needed libnss3/libnspr4/libasound2: no sudo, so the .debs were unpacked into a temp dir and
+  used via LD_LIBRARY_PATH.
+- `docs/production.md` skeleton: Free vs paid per concern with the ADR (or phase) that owns each
+  difference, scale at 100%, the "keep the switch cheap" rules with current status, plan cost
+  estimates, the Pro sprint, and what later phases fill in. Updated the plan's stale rows (CI already
+  uses a service principal + OIDC; the copilot moved to RideDesk).
+- Open points recorded: the alert notifier's Kafka trigger needs Secrets Manager (vs SSM as the single
+  source, ADR-0002), decide in Phase 3; the prep job's host and memory, measure in Phase 2.
