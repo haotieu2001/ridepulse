@@ -367,3 +367,15 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   uses a service principal + OIDC; the copilot moved to RideDesk).
 - Open points recorded: the alert notifier's Kafka trigger needs Secrets Manager (vs SSM as the single
   source, ADR-0002), decide in Phase 3; the prep job's host and memory, measure in Phase 2.
+
+### Phase 1 step 7: backlog (Phase 1 done)
+- GitHub backlog on haotieu2001/ridepulse: 51 issues (#1-#51), 6 milestones with their "done when"
+  criteria (Phase 2: 15, Phase 3: 10, Phase 4: 10, Phase 7: 5, Phase 8: 2, Stretch: 6), 3 ops
+  reminders without a milestone (Confluent credit ~2026-11-27, CI secret rotation by 2027-01-26,
+  t4g trial end 2026-12-31), and 14 labels (area:*, measure, stretch).
+- Phases 5 (RAG) and 6 (support copilot) have no issues here: they moved to RideDesk (project 2).
+- Phase 1 follow-ups went into the issues: V002 replayed days (#4), supply parity with the
+  simulator (#7), the alert-trigger vs SSM decision (#22), the DST month check (#35), Phase 2
+  re-measurements for sizing (#15).
+- Created by a small idempotent gh script (kept outside the repo: GitHub is the source of truth).
+- RideDesk plan merged into haotieukim-transfer main (PR #25, squash 34ba122), replacing ZoneCast.
