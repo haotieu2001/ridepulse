@@ -284,6 +284,22 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   updates) is planned at ~95 MB/day, so Neon egress is re-measured in Phase 2.
 - C4 (support) is now a consumer of RidePulse's data products; the copilot is RideDesk's.
 
+### Phase 1 step 3: sizing
+- Measured on the January 2025 file with the contract's own sample rule
+  (`docs/design/sizing/measure_sample.py`, `delta_size.sql`):
+  - Delta size of a month: 534 MB in 8 files (Parquet 491 MB); auto-clustered on request_datetime.
+  - Sample = 1,020,410 / 20,405,666 = 5.0005%, so the hash rule is unbiased.
+  - Trips per simulated day: median 33,070, min 26,525 (Jan 2), max 39,648 (Sat Jan 25).
+  - Trips in progress at once: avg 414, p95 711, max 906 (Fri Jan 31 18:09). The plan estimated
+    a peak of 800; the ~1,200 driver pool leaves ~25% idle at the worst minute.
+  - Requests per 15 min citywide: avg 342, p99 629, max 928.
+- `docs/design/sizing.md`: per-topic events/bytes/partitions/retention, Neon tables, lakehouse
+  tables, compute per demo day, sensitivities. Pings dominate Kafka (~34 GB/month, ~$3.4 after the
+  trial); halving the ping rate halves it.
+- Correction while checking: S8 published `trips` directly, but the full design publishes only
+  the outbox, drivers, profiles and replay_state. Using S8's WAL/JSON ratio (0.46), Neon egress
+  is estimated at ~75 MB/simulated day (plan: ~95), ~3.0-3.8 GB for 40 days.
+
 ### S6 Apps: pass
 - Stdlib-only app `scripts/feasibility/s6_app` (`app.py` + `app.yaml`): `databricks apps create`,
   `workspace import-dir`, `apps deploy` -> "App started successfully".

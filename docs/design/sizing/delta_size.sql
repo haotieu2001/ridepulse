@@ -1,0 +1,1 @@
+DESCRIBE DETAIL ridepulse_dev.bronze.tlc_fhvhv_s10
