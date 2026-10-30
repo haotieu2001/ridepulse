@@ -14,6 +14,9 @@ rm debezium.tar.gz
 useradd --system --home-dir /opt/debezium-server --shell /sbin/nologin debezium
 # Debezium Server 3.x reads config/application.properties (Quarkus layout), not conf/.
 mkdir -p /opt/debezium-server/data /opt/debezium-server/config
+# The Outbox Event Router isn't on the default classpath in 3.7: it ships in lib_opt, which run.sh loads
+# whole only for scripting or Chronicle Queue. Without it the connector dies while the service stays active.
+cp /opt/debezium-server/lib_opt/debezium-connect-plugins-*.jar /opt/debezium-server/lib/
 chown -R debezium:debezium /opt/debezium-server
 
 # --- config: the environment's settings, plus secrets from SSM at every start, in a file only debezium reads --

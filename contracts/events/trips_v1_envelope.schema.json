@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "ridepulse/events/trips_v1_envelope.schema.json",
   "title": "trips.v1 value",
-  "description": "What the Outbox Event Router sends: the Kafka key is the trip_key, and these fields come from outbox columns via table.fields.additional.placement (id:envelope:event_id, type:envelope:event_type, occurred_at:envelope:occurred_at), so they cost no extra WAL. Checked against real messages in #11.",
+  "description": "What the Outbox Event Router sends: the Kafka key is the trip_key, and these fields come from outbox columns via table.fields.additional.placement (id:envelope:event_id, type:envelope:event_type, occurred_at:envelope:occurred_at), so they cost no extra WAL. The key is JSON-quoted (\"abc\"): parse it as JSON. Held to real messages in contracts/tests.",
   "type": "object",
   "additionalProperties": false,
   "required": [

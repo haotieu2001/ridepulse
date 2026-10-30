@@ -1,6 +1,5 @@
-"""The event contracts against what producers really send. Trip events come from the real tick's plan over a
-crafted month. The CDC sample and the trips.v1 envelope are hand-built until #11 captures real Debezium
-messages; pings get a real producer in #8."""
+"""The event contracts against what producers really send: trip events from the real tick's plan over a crafted
+month, and Debezium's own messages, captured from a real run on 2026-10-30 (fixtures/debezium_samples.json)."""
 import io
 import json
 import pathlib
@@ -68,6 +67,27 @@ def test_null_cbd_fee_stays_null():
 ])
 def test_payload_schemas_reject_what_they_should(kind, bad):
     assert list(validator(kind).iter_errors(bad))
+
+
+REAL = json.loads((FIXTURES / "debezium_samples.json").read_text())
+
+
+def test_the_captured_samples_cover_every_event_and_published_table():
+    assert {k for k in REAL if k.startswith("trips.v1/")} == {f"trips.v1/{t}" for t in EVENT_TYPES}
+    assert {k.split("/")[0] for k in REAL if k.startswith("cdc.")} == {
+        "cdc.dispatch.drivers", "cdc.dispatch.driver_profiles", "cdc.dispatch.replay_state", "cdc.dispatch.replay_runs"}
+
+
+@pytest.mark.parametrize("name", sorted(REAL))
+def test_real_debezium_messages_validate(name):
+    value = REAL[name]["value"]
+    if name.startswith("trips.v1/"):
+        validator("trips_v1_envelope").validate(value)
+        validator(value["event_type"]).validate(json.loads(value["payload"]))
+        # Debezium's key converter quotes the string: consumers must parse the key as JSON.
+        assert json.loads(REAL[name]["key"]) and REAL[name]["key"].startswith('"')
+    else:
+        validator("cdc_envelope").validate(value)
 
 
 def envelope(kind="TripStarted"):
