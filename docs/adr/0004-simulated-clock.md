@@ -17,7 +17,7 @@ Measured on the January 2025 5% sample (1,020,410 trips, `docs/design/clock/meas
 |---|---|
 | How far after its pickup day does a trip's last event land? | at most **3 h 03 min** (the plan measured 5.5 h on Aug 2026) |
 | How far before? | the earliest request is 48 min before the pickup day starts; 3,258 trips are requested the day before |
-| Are the 4 lifecycle timestamps in order? | not always: **pickup before request in 10,143 trips (1.0%)**, arrival before request in 9,298, arrival after pickup in 475; dropoff before pickup in 0 (the file's 4 such rows are not in the sample) |
+| Are the 4 lifecycle timestamps in order? | not always: **pickup before request in 10,143 trips (1.0%)**, arrival before request in 9,298, arrival after pickup in 475; dropoff before pickup in 0 (in the whole file too: the contract's 4 `dropoff_after_pickup` failures have dropoff = pickup, which V001 allows) |
 | Events per replay tick (one tick = one wall minute) | 1x: max 246 · **10x: p50 976, p99 1,675, max 2,131** · 60x: max 11,961 |
 
 ## Decision

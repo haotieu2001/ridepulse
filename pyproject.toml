@@ -5,6 +5,7 @@ description = "RidePulse: ride-hailing data platform on real NYC TLC trips"
 requires-python = ">=3.12"
 dependencies = [
     "boto3>=1.43.121",
+    "pyarrow==26.0.0",
 ]
 
 [dependency-groups]

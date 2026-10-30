@@ -47,3 +47,25 @@ resource "aws_s3_bucket_lifecycle_configuration" "landing" {
     }
   }
 }
+
+# The prep job runs on GitHub Actions as the CI role (bootstrap stack), which is read-only apart from
+# Terraform state. It may write its own outputs and nothing else: never raw/ or the source manifests.
+data "aws_iam_role" "github_ci" {
+  name = "ridepulse-github-ci"
+}
+
+data "aws_iam_policy_document" "prep_outputs" {
+  statement {
+    actions = ["s3:PutObject"]
+    resources = [
+      "${aws_s3_bucket.landing.arn}/derived/replay/*",
+      "${aws_s3_bucket.landing.arn}/manifests/replay/*",
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "github_ci_prep_outputs" {
+  name   = "landing-prep-outputs"
+  role   = data.aws_iam_role.github_ci.id
+  policy = data.aws_iam_policy_document.prep_outputs.json
+}
