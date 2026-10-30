@@ -15,7 +15,8 @@ replayer can apply tick by tick.
    A month's slices start up to an hour before the month (early requests) and end after it (late
    dropoffs), so an hour at a month boundary has a slice in each of the two months' prefixes.
    Lines in a slice are ordered by (due_at, lifecycle step, trip_key).
-5. Writes the supply inputs next to the slices: heat_map.json and staffing.json (services/prep/supply.py).
+5. Writes the supply inputs next to the slices: heat_map.json, staffing.json and sign_on_zones.json
+   (services/prep/supply.py).
 6. Writes quarantine.jsonl.gz and _manifest.json (counts, every slice with its event count and
    sha256), then points manifests/replay/<month>/prep.json at it. The manifest is written last: a
    prefix without one is an unfinished run. An hour with no events has no slice file; the manifest
@@ -45,9 +46,9 @@ import pyarrow.parquet as pq
 
 from contracts.trip_key import KEY_FIELDS, SAMPLE_MODULUS, SEPARATOR
 
-from .supply import DEFAULT_TARGET_UTILISATION, heat_map, staffing
+from .supply import DEFAULT_TARGET_UTILISATION, heat_map, sign_on_zones, staffing
 
-FORMAT_VERSION = 2      # bump when the outputs' layout or content change (2: supply inputs)
+FORMAT_VERSION = 3      # bump when the outputs' layout or content change (3: sign-on zones)
 ASSIGN_DELAY = timedelta(seconds=30)
 PROVIDERS = ("HV0002", "HV0003", "HV0004", "HV0005")
 EVENT_TYPES = ("TripRequested", "DriverAssigned", "TripStarted", "TripCompleted")
@@ -354,7 +355,7 @@ def prep(month: str, store: Store, *, source_file: pathlib.Path | None = None, f
     assert events_total == 4 * kept.num_rows, (events_total, kept.num_rows)
 
     staffed = staffing(kept, schedule, target_utilisation)
-    for name, value in (("heat_map", heat_map(kept)),
+    for name, value in (("heat_map", heat_map(kept)), ("sign_on_zones", sign_on_zones(kept, schedule)),
                         ("staffing", {"target_utilisation": target_utilisation, "hours": staffed})):
         store.put_bytes(f"{prefix}/{name}.json", json.dumps(value, separators=(",", ":")).encode(), "application/json")
 

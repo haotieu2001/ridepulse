@@ -1,11 +1,11 @@
 """Supply-model measurements for ADR-0003: replay the January 2025 5% sample through a synthetic
 driver pool, the way the replayer will, and measure what each pool / shift model does.
 
-Dispatch, as the plan specifies: at assigned_at (request + 30 s, capped at arrival) the nearest idle
-driver takes the trip, searching the pickup zone and its neighbours first (the surge area) and the
-nearest zone with an idle driver otherwise ("far"). Nearest = zone centroid distance; ties go to the
-driver idle longest. The driver is busy until dropoff and then idles in the dropoff zone. Waits,
-fares and pay are the real TLC values; supply changes only who drives and how many are idle.
+Dispatch: at assigned_at (request + 30 s, capped at arrival, never before the request) the driver idle
+longest in the nearest zone with anyone idle takes the trip (nearest = zone centroid distance, ties in
+a zone by lowest driver id). A driver found in the surge area counts as "near", further away as "far". The
+driver is busy until dropoff and then idles in the dropoff zone. Waits, fares and pay are the real TLC
+values; supply changes only who drives and how many are idle.
 
 Shift models:
   always_on  a fixed pool, every driver online all month
@@ -17,6 +17,11 @@ Either model can add repositioning: every 10 simulated minutes, drivers idle >= 
 the zone within 3 mi with the most expected requests per idle driver (see Sim._rebalance).
 Results and the chosen model: docs/adr/0003-supply-model.md.
 
+This is the independent reference for services/replayer/supply.py, so it follows the same rules a retried
+tick must: no random state (sign-on zones are a hash of driver and time), and inside one simulated second
+assignments in trip_key order, then dropoffs in trip_key order, then the boundary. Only sign_on_zone() is
+shared between the two.
+
 Run from the repo root (needs data/fhvhv_tripdata_2025-01.parquet and ref/zone_*.csv):
   uv run --with pyarrow==21.0.0 python docs/design/supply/simulate_supply.py
 """
@@ -27,7 +32,6 @@ import hashlib
 import heapq
 import math
 import pathlib
-import random
 import sys
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -39,10 +43,13 @@ import pyarrow.parquet as pq
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
 from contracts.trip_key import KEY_FIELDS, SAMPLE_MODULUS, SEPARATOR, base_trip_key  # noqa: E402
+from services.replayer.supply import sign_on_zone  # noqa: E402
+from services.seed.seed import driver_id  # noqa: E402
 
 SOURCE = ROOT / "data/fhvhv_tripdata_2025-01.parquet"
 SAMPLE = ROOT / "data/sample_2025-01.parquet"
 MONTH_START = datetime(2025, 1, 1)
+FIRST_HOUR = datetime(2024, 12, 31, 23)   # the month's first requests fall before it starts
 MONTH_END = datetime(2025, 2, 1)
 ASSIGN_DELAY = timedelta(seconds=30)
 WINDOW = timedelta(minutes=15)
@@ -91,8 +98,8 @@ def load_trips() -> list[tuple]:
         assign = max(r["request_datetime"], min(r["request_datetime"] + ASSIGN_DELAY, arrive, r["pickup_datetime"]))
         drop = max(assign, r["pickup_datetime"], r["dropoff_datetime"])
         trips.append((assign, r["request_datetime"], drop, r["PULocationID"],
-                      r["DOLocationID"], float(r["driver_pay"] or 0), r["pickup_datetime"]))
-    trips.sort()
+                      r["DOLocationID"], float(r["driver_pay"] or 0), r["pickup_datetime"], base_trip_key(r)))
+    trips.sort(key=lambda t: (t[0], t[7]))
     return trips
 
 
@@ -116,14 +123,15 @@ def load_zones():
 # --- the simulation -------------------------------------------------------------------------------
 
 class Sim:
-    def __init__(self, trips, zones, model, pool=0, utilisation=0.0, reposition=False, seed=7):
+    def __init__(self, trips, zones, model, pool=0, utilisation=0.0, reposition=False, start=FIRST_HOUR):
         self.trips, (self.pos, self.area, self.order) = trips, zones
+        self.start = start
+        self.assignments = {}                  # trip_key -> driver number
         self.model, self.utilisation, self.reposition = model, utilisation, reposition
         self.nearby = {z: [o for o in self.order[z][1:]
                            if math.dist(self.pos[z], self.pos[o]) <= REPOSITION_RADIUS_MI * 5280]
                        for z in self.pos}
         self.forecast = self._forecast()
-        self.rng = random.Random(seed)
         self.idle = defaultdict(dict)          # zone -> {driver: idle_since}, insertion = idle order
         self.where = {}                        # idle driver -> zone
         self.online_since, self.rested_since = {}, {}
@@ -136,14 +144,15 @@ class Sim:
         self.pickup_weights = self._pickup_weights()
         if model == "always_on":
             for _ in range(pool):
-                self._sign_on(MONTH_START, self._random_zone(0))
+                driver = self._new_driver()
+                self._sign_on(start, self._random_zone(0, driver, start), driver)
 
     def _pickup_weights(self):
         w = defaultdict(lambda: defaultdict(int))
         for t in self.trips:
             if t[3] in self.pos:
                 w[t[0].hour][t[3]] += 1
-        return {h: (list(c), list(c.values())) for h, c in w.items()}
+        return w
 
     def _forecast(self):
         """Expected requests per zone per 15 min, by hour of week: the month's average, which the prep
@@ -176,14 +185,15 @@ class Sim:
                 self.stats["repositions"] += 1
                 self.stats["reposition_miles"] += math.dist(self.pos[z], self.pos[best]) / 5280
 
-    def _random_zone(self, hour):
-        zones, weights = self.pickup_weights[hour]
-        return self.rng.choices(zones, weights)[0]
+    def _random_zone(self, hour, driver, now):
+        return sign_on_zone(self.pickup_weights[hour], driver_id(driver), now)
+
+    def _new_driver(self):
+        driver, self.n_drivers = self.n_drivers, self.n_drivers + 1
+        return driver
 
     # driver lifecycle
-    def _sign_on(self, now, zone, driver=None):
-        if driver is None:
-            driver, self.n_drivers = self.n_drivers, self.n_drivers + 1
+    def _sign_on(self, now, zone, driver):
         self.online_since[driver] = now
         self.rested_since.pop(driver, None)
         self._make_idle(driver, zone, now)
@@ -221,8 +231,8 @@ class Sim:
                 self._sign_off(d, now)
         rested = sorted((s, d) for d, s in self.rested_since.items() if now - s >= MIN_REST)
         for i in range(max(0, target - self._online())):
-            driver = rested[i][1] if i < len(rested) else None
-            self._sign_on(now, self._random_zone(now.hour), driver)
+            driver = rested[i][1] if i < len(rested) else self._new_driver()
+            self._sign_on(now, self._random_zone(now.hour, driver, now), driver)
 
     def _targets(self):
         """Peak drivers busy (assigned to dropoff) per simulated hour, / target utilisation."""
@@ -251,15 +261,16 @@ class Sim:
                     best = z
                     break
         else:   # pickup and dropoff both unknown: the driver idle longest anywhere
-            cands = [(next(iter(d.values())), z) for z, d in self.idle.items() if d]
-            best = min(cands)[1] if cands else None
+            cands = [(s, d, z) for z, ds in self.idle.items() for d, s in ds.items()]
+            best = min(cands)[2] if cands else None
         if best is None:
             self.stats["no_idle_anywhere"] += 1
             if self.model == "shaped":
-                self._sign_on(now, origin or self._random_zone(now.hour))
+                driver = self._new_driver()
+                self._sign_on(now, origin or self._random_zone(now.hour, driver, now), driver)
                 return self._dispatch(now, pu, do)
             return None
-        driver = next(iter(self.idle[best]))
+        driver = min((s, d) for d, s in self.idle[best].items())[1]
         self._take(driver)
         near = origin is None or best in self.area[origin]
         self.stats["near" if near else "far"] += 1
@@ -269,15 +280,15 @@ class Sim:
 
     def run(self):
         targets = self._targets() if self.model == "shaped" else {}
-        dropoffs = []                          # (time, seq, driver, zone, pay)
-        hour = MONTH_START
-        window = MONTH_START
-        rebalance = MONTH_START if self.reposition else datetime.max
+        dropoffs = []                          # (time, trip_key, driver, zone, pay)
+        hour = self.start
+        window = self.start
+        rebalance = self.start if self.reposition else datetime.max
         req_counts = defaultdict(int)          # zone -> requests in the current window
         busy_s = online_s = 0.0
         hour_busy, hour_online = defaultdict(float), defaultdict(float)
         total_pay = on_trip_s = 0.0
-        last = MONTH_START
+        last = self.start
 
         def advance(to):
             nonlocal last, busy_s, online_s
@@ -301,11 +312,13 @@ class Sim:
                     self.stats["areas_alert"] += ratio > ALERT_RATIO
             req_counts.clear()
 
-        for seq, (assign, request, drop, pu, do, pay, pickup) in enumerate(self.trips):
-            while True:   # everything due before this assignment, in time order
+        for assign, request, drop, pu, do, pay, pickup, key in self.trips:
+            if request <= self.start:   # as in a replay: its request fell before the replay began
+                continue
+            while True:   # everything due before this second, in time order; dropoffs before a boundary
                 nxt = min(dropoffs[0][0] if dropoffs else datetime.max,
                           hour if self.model == "shaped" else datetime.max, window + WINDOW, rebalance)
-                if nxt > assign:
+                if nxt >= assign:
                     break
                 advance(nxt)
                 if dropoffs and dropoffs[0][0] == nxt:
@@ -333,10 +346,11 @@ class Sim:
             driver = self._dispatch(assign, pu, do)
             if driver is None:
                 continue
+            self.assignments[key] = driver
             self.busy += 1
             on_trip_s += max((drop - pickup).total_seconds(), 0)   # TLC's utilisation numerator
-            end_zone = do if do in self.pos else self._search_from(pu, do) or self._random_zone(0)
-            heapq.heappush(dropoffs, (drop, seq, driver, end_zone, pay))
+            end_zone = do if do in self.pos else self._search_from(pu, do) or self._random_zone(0, driver, drop)
+            heapq.heappush(dropoffs, (drop, key, driver, end_zone, pay))
 
         hours_in = [h for h in hour_busy if MONTH_START <= h < MONTH_END and hour_online[h]]
         hour_util = sorted(hour_busy[h] / hour_online[h] for h in hours_in)

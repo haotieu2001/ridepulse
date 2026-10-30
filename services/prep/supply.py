@@ -4,13 +4,17 @@ to the slices, so the replayer stays a stateless per-minute Lambda:
   heat_map.json  expected requests per zone per 15 min, by hour of week (0 = Monday 00:00)
   staffing.json  per simulated hour, the peak drivers busy and the online target
                  ceil(peak busy / target utilisation)
+  sign_on_zones.json  per hour of day, how many trips were assigned in each zone with geometry: where a
+                 driver signing on starts, drawn with a hash of driver and time
 
 A driver is busy from DriverAssigned to TripCompleted as they replay (the ADR-0004 schedule). The
 reference is docs/design/supply/simulate_supply.py; services/prep/tests/test_supply.py holds them equal.
 """
 from __future__ import annotations
 
+import csv
 import math
+import pathlib
 from collections import Counter, defaultdict
 from datetime import datetime
 from typing import Iterator
@@ -19,6 +23,7 @@ import pyarrow as pa
 
 DEFAULT_TARGET_UTILISATION = 0.6
 BATCH_ROWS = 50_000
+ZONES_WITH_GEOMETRY = pathlib.Path(__file__).resolve().parents[2] / "ref/zone_centroids.csv"
 COLUMNS = ["request_datetime", "on_scene_datetime", "pickup_datetime", "dropoff_datetime", "PULocationID"]
 
 
@@ -41,6 +46,20 @@ def heat_map(t: pa.Table) -> dict[str, dict[str, float]]:
     out: dict[str, dict[str, float]] = {}
     for (how, zone), c in sorted(counts.items()):
         out.setdefault(str(how), {})[str(zone)] = c / (4 * len(dates[how]))
+    return out
+
+
+def sign_on_zones(t: pa.Table, schedule) -> dict[str, dict[str, int]]:
+    """{hour of day: {zone: trips assigned}}, over the month's trips, by the hour they are assigned."""
+    with open(ZONES_WITH_GEOMETRY) as f:
+        known = {int(r["zone_id"]) for r in csv.DictReader(f)}
+    counts: Counter = Counter()
+    for r in _rows(t):
+        if r["PULocationID"] in known:
+            counts[(schedule(r)[1].hour, r["PULocationID"])] += 1
+    out: dict[str, dict[str, int]] = {}
+    for (hour, zone), c in sorted(counts.items()):
+        out.setdefault(str(hour), {})[str(zone)] = c
     return out
 
 
