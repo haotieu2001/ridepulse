@@ -563,3 +563,21 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   A second plan shows no changes. That check left one test ping (`trip_key` starting `check-`) in
   `driver.locations.v1`, partition 0, offset 0, which expires with the topic's 1-day retention.
 - Compaction settings were accepted by Basic, but cleaning itself isn't observed yet.
+
+### #8 Replayer pings
+- `services/replayer/pings.py`: one Avro ping per busy driver every 15 simulated seconds (`--ping-every`) on a grid
+  aligned to the day, so a trip gets the same pings at any speed. Position is the centroid of the zone the driver
+  is heading to (pickup, then dropoff) plus up to about 200 m of jitter hashed from the ping's id. No path
+  interpolation, as the issue specifies. `drivers.zone_id` now follows a busy driver for this.
+- The tick sends last and commits only after every acknowledgement. A failed produce rolls back; a failed commit
+  re-produces identical pings, which silver drops by id (ADR-0004 §10).
+- Encoded with fastavro and Confluent's 5-byte framing, with the schema id read from the registry and refused if it
+  differs from `contracts/`; lighter for the Lambda than the registry client. Clean pings only: the plan's injected
+  trouble (outages, duplicates, late and malformed pings) comes later.
+- All of January offline with pings on: 0 trips with a different driver than the simulator. 2.92M pings per
+  simulated day on average (sizing: 2.9M), max 3.53M; 107 B a value (sizing: about 100 B); 20,646 a tick median,
+  54,732 max at 10x.
+- Real Kafka and a throwaway Neon database, 36 ticks at 10x through New Year's night: 1,265,063 pings sent, broker
+  offsets advanced by exactly that, and reading them back gave the same ids, none lost or repeated. Slowest
+  tick 14.2 s (median 10.9 s) with sending at most 2.1 s, from a laptop also running the month comparison, so
+  not a clean timing; #15 measures from Lambda. Those test pings expire with the topic's 1-day retention.
