@@ -5,13 +5,14 @@ description = "RidePulse: ride-hailing data platform on real NYC TLC trips"
 requires-python = ">=3.12"
 dependencies = [
     "boto3>=1.43.121",
+    "confluent-kafka==2.16.0",
+    "fastavro==1.13.1",
     "psycopg[binary]==3.3.6",
     "pyarrow==26.0.0",
 ]
 
 [dependency-groups]
 dev = [
-  "fastavro==1.13.1",
   "jsonschema==4.26.0",
   "pytest>=8.3",
   "pyyaml>=6.0",

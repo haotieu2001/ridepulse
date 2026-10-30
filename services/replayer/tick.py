@@ -5,12 +5,13 @@ event due in (watermark, watermark + speed], all in one Postgres transaction.
     SELECT watermark, speed FROM replay_state FOR UPDATE      -- overlapping runs wait here
     read the slices the window touches, dispatch in memory
     guarded transitions + outbox events + changed drivers (pipelined: a peak tick has 2,131 events)
+    produce the window's pings and wait for every acknowledgement
     DELETE FROM outbox                                        -- the WAL keeps the inserts
     advance_watermark(); purge trips older than 48 simulated hours
     COMMIT
 
 So the watermark means "everything at or before this time is committed": a failure before COMMIT leaves
-nothing behind, and the retried tick does the same work. The clock is never computed from the wall clock.
+nothing behind in Postgres, and the retried tick does the same work and re-produces the same pings. The clock is never computed from the wall clock.
 
 Dispatch, shifts and repositioning are services/replayer/supply.py (ADR-0003). Boundaries run in time
 order among the events, and driver changes are written once per tick, as each driver's final state.
@@ -29,6 +30,7 @@ import psycopg
 from services.prep.prep import EVENT_TYPES, Store, pointer_key
 from services.seed.seed import driver_row, profile_row
 
+from .pings import DEFAULT_EVERY_S, ping_times
 from .supply import COLUMNS, Geography, Supply, boundaries
 
 STEP = {name: i for i, name in enumerate(EVENT_TYPES)}
@@ -186,20 +188,24 @@ class TickResult:
     new_drivers: int
     purged: int
     drivers_changed: int
+    pings: int
 
 
-def _plan(events: list[dict], known: dict[str, tuple[str, int, int]], supply: Supply,
-          owned: list[datetime]) -> tuple[list[tuple[str, dict]], int]:
+def _plan(events: list[dict], known: dict[str, tuple[str, int, int]], supply: Supply, owned: list[datetime],
+          grid: list[datetime] | None = None) -> tuple[list[tuple[str, dict]], int]:
     """Walk the window in order: which transitions apply, with the supply model's choices, and the
     boundaries between them. Events of a trip that isn't in the expected state are skipped: a trip cancelled
     by a forward jump leaves later events behind, and they must not take a driver."""
     planned, skipped = [], 0
     pending = list(owned)
+    to_ping = list(grid or [])
     for e in events:
         key, kind, payload = e["trip_key"], e["type"], dict(e["payload"])
         due = datetime.fromisoformat(e["due_at"])
         while pending and pending[0] < due:
             supply.boundary(pending.pop(0))
+        while to_ping and to_ping[0] < due:
+            supply.ping(to_ping.pop(0))
         status, pickup, dropoff = known.get(key, (None, None, None))
         if status != REQUIRES[kind]:
             skipped += 1
@@ -209,7 +215,7 @@ def _plan(events: list[dict], known: dict[str, tuple[str, int, int]], supply: Su
         elif kind == "DriverAssigned":
             payload["driver_id"] = supply.assign(key, pickup, dropoff, due)
         elif kind == "TripStarted":
-            payload["driver_id"] = supply.started(key, due)
+            payload["driver_id"] = supply.started(key, dropoff, due)
         else:
             payload["driver_id"] = supply.completed(key, pickup, dropoff, due)
         known[key] = (AFTER[kind], pickup, dropoff)
@@ -218,11 +224,15 @@ def _plan(events: list[dict], known: dict[str, tuple[str, int, int]], supply: Su
                                "occurred_at": e["occurred_at"], "payload": json.dumps(payload, sort_keys=True)}))
     for b in pending:
         supply.boundary(b)
+    for t in to_ping:
+        supply.ping(t)
     return planned, skipped
 
 
-def tick(conn: psycopg.Connection, store: Store, *, geography: Geography | None = None, before_commit=None) -> TickResult:
-    """One tick. `conn` must be in autocommit mode with search_path on the dispatch schema."""
+def tick(conn: psycopg.Connection, store: Store, *, sink=None, ping_every: int = DEFAULT_EVERY_S,
+         geography: Geography | None = None, before_commit=None) -> TickResult:
+    """One tick. `conn` must be in autocommit mode with search_path on the dispatch schema. `sink` receives the
+    window's pings and must raise unless all are delivered; with no sink, no pings are computed."""
     with conn.transaction(), conn.cursor() as cur:
         cur.execute("SELECT watermark, speed FROM replay_state WHERE id = 1 FOR UPDATE")
         row = cur.fetchone()
@@ -239,7 +249,8 @@ def tick(conn: psycopg.Connection, store: Store, *, geography: Geography | None 
         known = {k: (s, p, d) for k, s, p, d in cur.fetchall()}
         cur.execute(f"SELECT {COLUMNS} FROM drivers")
         supply.load(cur.fetchall())
-        planned, skipped = _plan(events, known, supply, boundaries(watermark, until))
+        grid = ping_times(watermark, until, ping_every) if sink else None
+        planned, skipped = _plan(events, known, supply, boundaries(watermark, until), grid)
 
         with conn.pipeline():   # one round trip per batch: New Year's night adds hundreds of drivers in a tick
             for n in supply.new:
@@ -263,9 +274,11 @@ def tick(conn: psycopg.Connection, store: Store, *, geography: Geography | None 
         cur.execute("SELECT advance_watermark(%s::timestamp)", (until,))
         cur.execute("DELETE FROM trips WHERE status = 'completed' AND requested_at < %s::timestamp", (until - HOT_WINDOW,))
         purged = cur.rowcount
+        if sink:
+            sink.send(supply.pings)   # last, so a failure above sends nothing; a failure here rolls back the tick
         if before_commit:
             before_commit()
-    return TickResult(watermark, until, applied, skipped, len(supply.new), purged, len(changed))
+    return TickResult(watermark, until, applied, skipped, len(supply.new), purged, len(changed), len(supply.pings))
 
 
 def start(conn: psycopg.Connection, from_ts: datetime | None, speed: float) -> int:

@@ -70,7 +70,7 @@ def test_a_driver_idles_in_the_dropoff_zone_or_the_pickup_if_it_has_no_geometry(
     s.load([idle_row(0, 148, T), idle_row(1, 148, T)])
     s.assign("a", 148, 4, T)
     s.assign("b", 148, 265, T)
-    s.started("a", T)
+    s.started("a", 4, T)
     assert s.completed("a", 148, 4, T + timedelta(minutes=9)) == driver_id(0)
     assert s.drivers[driver_id(0)].zone_id == 4 and s.drivers[driver_id(0)].status == "idle"
     s.completed("b", 148, 265, T + timedelta(minutes=9))
@@ -94,7 +94,7 @@ def test_a_shift_ends_at_ten_hours_and_a_busy_driver_finishes_the_trip_first():
     s.boundary(T)
     assert s.drivers[driver_id(0)].leaving is True and s.drivers[driver_id(0)].status == "en_route"
     assert s.drivers[driver_id(1)].status == "offline"
-    s.started("a", T)
+    s.started("a", 4, T)
     s.completed("a", 148, 4, T + timedelta(minutes=5))
     assert s.drivers[driver_id(0)].status == "offline" and s.drivers[driver_id(0)].leaving is False
 

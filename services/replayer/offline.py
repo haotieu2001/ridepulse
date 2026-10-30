@@ -8,11 +8,13 @@ from datetime import datetime, timedelta
 
 from services.prep.prep import Store
 
+from .pings import ping_times
 from .supply import Geography, boundaries
 from .tick import AFTER, Slices, _hour, _plan, load_supply
 
 
-def replay(store: Store, start: datetime, until: datetime, speed: int = 10) -> dict:
+def replay(store: Store, start: datetime, until: datetime, speed: int = 10, ping_every: int | None = None,
+           on_pings=None) -> dict:
     geography = Geography.load()
     rows, known, assignments = [], {}, {}
     moves = emergency = pool = applied = 0
@@ -24,7 +26,10 @@ def replay(store: Store, start: datetime, until: datetime, speed: int = 10) -> d
         events = slices.due(watermark, end)
         supply = load_supply(store, slices, _hour(watermark), geography)
         supply.load(rows)
-        planned, _ = _plan(events, known, supply, boundaries(watermark, end))
+        grid = ping_times(watermark, end, ping_every) if ping_every else None
+        planned, _ = _plan(events, known, supply, boundaries(watermark, end), grid)
+        if on_pings:
+            on_pings(watermark, supply.pings)
         for kind, params in planned:
             if kind == "DriverAssigned":
                 assignments[params["trip_key"]] = params["driver_id"]

@@ -20,6 +20,8 @@ from datetime import datetime, timedelta
 
 from services.seed.seed import driver_id
 
+from .pings import Ping, jitter
+
 REF = pathlib.Path(__file__).resolve().parents[2] / "ref"
 MIN_SHIFT, MAX_SHIFT, MIN_REST = timedelta(hours=4), timedelta(hours=10), timedelta(hours=8)
 BOUNDARY = timedelta(minutes=10)       # repositioning runs on this grid; hour starts are on it too
@@ -43,21 +45,23 @@ def sign_on_zone(weights: dict[int, int], driver: str, at: datetime) -> int:
 class Geography:
     order: dict[int, list[int]]      # zone -> every zone with geometry, nearest first (itself first)
     nearby: dict[int, list[int]]     # zone -> other zones within the repositioning radius, nearest first
+    latlon: dict[int, tuple[float, float]]
 
     @staticmethod
     def load(path: pathlib.Path = REF / "zone_centroids.csv") -> "Geography":
         with open(path) as f:
-            pos = {int(r["zone_id"]): (int(r["x_ft"]), int(r["y_ft"])) for r in csv.DictReader(f)}
+            rows = list(csv.DictReader(f))
+        pos = {int(r["zone_id"]): (int(r["x_ft"]), int(r["y_ft"])) for r in rows}
         order = {z: sorted(pos, key=lambda o: math.dist(pos[z], pos[o])) for z in pos}
         nearby = {z: [o for o in order[z][1:] if math.dist(pos[z], pos[o]) <= REPOSITION_RADIUS_MI * 5280] for z in pos}
-        return Geography(order, nearby)
+        return Geography(order, nearby, {int(r["zone_id"]): (float(r["lat"]), float(r["lon"])) for r in rows})
 
 
 @dataclass(frozen=True)
 class Driver:
     driver_id: str
     status: str                       # offline, idle, en_route, on_trip
-    zone_id: int | None
+    zone_id: int | None               # idle: where it waits; busy: where it is heading, which its pings report
     current_trip_key: str | None
     status_changed_at: datetime       # idle: idle since (a move keeps it); offline: resting since
     online_since: datetime | None
@@ -78,6 +82,7 @@ class Supply:
         self.pool = 0
         self.new: list[int] = []
         self.moves = self.emergency = 0
+        self.pings: list[Ping] = []
 
     def load(self, rows) -> None:
         for r in rows:
@@ -141,13 +146,16 @@ class Supply:
             self._sign_on(driver, origin or sign_on_zone(self._weights_at(at.hour), driver, at), at)
         d = self.drivers[driver]
         del self.idle[d.zone_id][driver]
-        self.drivers[driver] = replace(d, status="en_route", current_trip_key=trip_key, status_changed_at=at)
+        heading = origin if origin is not None else d.zone_id
+        self.drivers[driver] = replace(d, status="en_route", zone_id=heading, current_trip_key=trip_key, status_changed_at=at)
         self.on_trip[trip_key] = driver
         return driver
 
-    def started(self, trip_key: str, at: datetime) -> str:
+    def started(self, trip_key: str, dropoff: int, at: datetime) -> str:
         driver = self.on_trip[trip_key]
-        self.drivers[driver] = replace(self.drivers[driver], status="on_trip", status_changed_at=at)
+        d = self.drivers[driver]
+        heading = dropoff if dropoff in self.geo.order else d.zone_id
+        self.drivers[driver] = replace(d, status="on_trip", zone_id=heading, status_changed_at=at)
         return driver
 
     def completed(self, trip_key: str, pickup: int, dropoff: int, at: datetime) -> str:
@@ -162,6 +170,14 @@ class Supply:
         self.drivers[driver] = replace(d, status="idle", zone_id=zone, current_trip_key=None, status_changed_at=at)
         self.idle[zone][driver] = at
         return driver
+
+    def ping(self, at: datetime) -> None:
+        """One ping for every busy driver, in driver order: the state after that second's events."""
+        for driver in sorted(self.on_trip.values()):
+            d = self.drivers[driver]
+            lat, lon = self.geo.latlon[d.zone_id]
+            dlat, dlon = jitter(driver, at)
+            self.pings.append(Ping(driver, at, d.current_trip_key, d.status, d.zone_id, lat + dlat, lon + dlon))
 
     # --- boundaries -----------------------------------------------------------------------------
 
