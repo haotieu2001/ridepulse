@@ -581,3 +581,24 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   offsets advanced by exactly that, and reading them back gave the same ids, none lost or repeated. Slowest
   tick 14.2 s (median 10.9 s) with sending at most 2.1 s, from a laptop also running the month comparison, so
   not a clean timing; #15 measures from Lambda. Those test pings expire with the topic's 1-day retention.
+
+### #11 Debezium module
+- `infra/terraform/debezium`: settings per environment in `env/<env>.properties`, secrets from SSM at each start. V001's
+  publication (never auto-created), the Outbox Event Router on the outbox only through a topic predicate, plain CDC for
+  the rest, 60 s heartbeat, `snapshot.mode=when_needed`, offsets in the compacted `debezium.offsets` topic, which
+  outlives the instance. `make debezium-up`, `make debezium-down` (stop, wait for an inactive slot, drop it, then
+  destroy; it refuses to destroy if the slot stays active).
+- The first real run found two bugs: the router jar is outside the default classpath in 3.7 (it ships in `lib_opt`), and
+  `table.op.invalid.behavior` has no `debug` value. Both killed the connector thread while systemd kept showing
+  `active`, so `Restart=on-failure` never fires. Health must be judged by heartbeats or the slot being active (#12).
+- Real run on `dispatch`: the replay started at 2024-12-31 and now stands at 2025-01-01 02:10. It only moves forward, so
+  earlier days are backfills. 25,302 of 25,302 applied trip events reached `trips.v1`, 0 repeated ids and 0 schema errors
+  in 52,790 messages, so #9's envelope holds, including `occurred_at` as microseconds. Real messages are now test fixtures.
+- Restart mid-replay: resumed from the stored offset, snapshot skipped, no gap. Teardown and a fresh instance from
+  committed code: the slot was gone, so it re-read the published tables (2,320 drivers, 2,320 profiles, as `op=r`), and
+  later events arrived with no gap. A consumer rebuilding state must accept `r` rows after each demo window.
+- For #13: keys are JSON (`"abc"` quoted on `trips.v1`, objects on CDC), `before` is null on updates, timestamps are
+  microseconds, dates are days since epoch, `updated_at` is an ISO string.
+- Unresolved, for #15: Neon's WAL grew about 30 MB over 160 simulated minutes at New Year's peak, roughly 120 MB per
+  simulated day if that peak is about 2.2x the average, against the 82 MB estimate and about 125 MB available (5 GB
+  over 40 days). It's an upper bound: WAL includes the unpublished `trips` table, which isn't sent. Measure real egress.
