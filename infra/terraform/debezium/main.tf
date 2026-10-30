@@ -1,6 +1,13 @@
 # Debezium Server on a small EC2: reads Neon's write-ahead log (pgoutput) and publishes change
 # events to Confluent Cloud. No SSH and no inbound ports: reach it with Session Manager.
-# Secrets are read from SSM by the instance at every service start, never baked in here.
+# Secrets are read from SSM by the instance at every service start, never baked in here. What it does is
+# env/<env>.properties. Ephemeral: make debezium-up, make debezium-down (which drops the slot first).
+
+variable "env" {
+  description = "Environment: selects env/<env>.properties and the SSM paths."
+  type        = string
+  default     = "dev"
+}
 
 locals {
   debezium_version = "3.7.0.Final"
@@ -50,10 +57,10 @@ data "aws_iam_policy_document" "read_params" {
   statement {
     actions = ["ssm:GetParameter"]
     resources = [
-      "arn:aws:ssm:us-east-2:${local.account_id}:parameter/ridepulse/dev/neon/url",
-      "arn:aws:ssm:us-east-2:${local.account_id}:parameter/ridepulse/confluent/dev/bootstrap_servers",
-      "arn:aws:ssm:us-east-2:${local.account_id}:parameter/ridepulse/confluent/dev/kafka_api_key",
-      "arn:aws:ssm:us-east-2:${local.account_id}:parameter/ridepulse/confluent/dev/kafka_api_secret",
+      "arn:aws:ssm:us-east-2:${local.account_id}:parameter/ridepulse/${var.env}/neon/url",
+      "arn:aws:ssm:us-east-2:${local.account_id}:parameter/ridepulse/confluent/${var.env}/bootstrap_servers",
+      "arn:aws:ssm:us-east-2:${local.account_id}:parameter/ridepulse/confluent/${var.env}/kafka_api_key",
+      "arn:aws:ssm:us-east-2:${local.account_id}:parameter/ridepulse/confluent/${var.env}/kafka_api_secret",
     ]
   }
 }
@@ -96,6 +103,8 @@ resource "aws_instance" "debezium" {
   user_data = templatefile("${path.module}/user_data.sh.tftpl", {
     debezium_url    = local.debezium_url
     debezium_sha512 = local.debezium_sha512
+    env             = var.env
+    env_properties  = file("${path.module}/env/${var.env}.properties")
   })
 
   metadata_options {

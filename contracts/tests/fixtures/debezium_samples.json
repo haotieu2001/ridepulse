@@ -1,0 +1,298 @@
+{
+  "cdc.dispatch.driver_profiles/c": {
+    "key": "{\"driver_id\":\"drv-000000\"}",
+    "value": {
+      "after": {
+        "base_license": "S77600",
+        "driver_id": "drv-000000",
+        "full_name": "Taylor Thorn",
+        "joined_on": 19771,
+        "rating": "4.74",
+        "updated_at": "2026-10-30T17:53:36.130336Z",
+        "vehicle_type": "sedan"
+      },
+      "before": null,
+      "op": "c",
+      "source": {
+        "connector": "postgresql",
+        "db": "neondb",
+        "lsn": 527988104,
+        "name": "cdc",
+        "origin": null,
+        "origin_lsn": null,
+        "schema": "dispatch",
+        "sequence": "[\"527987552\",\"527988104\"]",
+        "snapshot": "false",
+        "table": "driver_profiles",
+        "ts_ms": 1793382826532,
+        "ts_ns": 1793382826532001000,
+        "ts_us": 1793382826532001,
+        "txId": 16421,
+        "version": "3.7.0.Final",
+        "xmin": null
+      },
+      "transaction": null,
+      "ts_ms": 1793382826896,
+      "ts_ns": 1793382826896952036,
+      "ts_us": 1793382826896952
+    }
+  },
+  "cdc.dispatch.drivers/c": {
+    "key": "{\"driver_id\":\"drv-000000\"}",
+    "value": {
+      "after": {
+        "current_trip_key": null,
+        "driver_id": "drv-000000",
+        "leaving": false,
+        "online_since": null,
+        "status": "offline",
+        "status_changed_at": 1735686600000000,
+        "updated_at": "2026-10-30T17:53:36.130336Z",
+        "zone_id": null
+      },
+      "before": null,
+      "op": "c",
+      "source": {
+        "connector": "postgresql",
+        "db": "neondb",
+        "lsn": 527987672,
+        "name": "cdc",
+        "origin": null,
+        "origin_lsn": null,
+        "schema": "dispatch",
+        "sequence": "[\"527987552\",\"527987672\"]",
+        "snapshot": "false",
+        "table": "drivers",
+        "ts_ms": 1793382826532,
+        "ts_ns": 1793382826532001000,
+        "ts_us": 1793382826532001,
+        "txId": 16421,
+        "version": "3.7.0.Final",
+        "xmin": null
+      },
+      "transaction": null,
+      "ts_ms": 1793382826888,
+      "ts_ns": 1793382826888234693,
+      "ts_us": 1793382826888234
+    }
+  },
+  "cdc.dispatch.drivers/u": {
+    "key": "{\"driver_id\":\"drv-000000\"}",
+    "value": {
+      "after": {
+        "current_trip_key": null,
+        "driver_id": "drv-000000",
+        "leaving": false,
+        "online_since": 1735686000000000,
+        "status": "idle",
+        "status_changed_at": 1735686000000000,
+        "updated_at": "2026-10-30T17:53:36.130336Z",
+        "zone_id": 256
+      },
+      "before": null,
+      "op": "u",
+      "source": {
+        "connector": "postgresql",
+        "db": "neondb",
+        "lsn": 528035248,
+        "name": "cdc",
+        "origin": null,
+        "origin_lsn": null,
+        "schema": "dispatch",
+        "sequence": "[\"527987552\",\"528035248\"]",
+        "snapshot": "false",
+        "table": "drivers",
+        "ts_ms": 1793382826532,
+        "ts_ns": 1793382826532001000,
+        "ts_us": 1793382826532001,
+        "txId": 16421,
+        "version": "3.7.0.Final",
+        "xmin": null
+      },
+      "transaction": null,
+      "ts_ms": 1793382827001,
+      "ts_ns": 1793382827001171044,
+      "ts_us": 1793382827001171
+    }
+  },
+  "cdc.dispatch.replay_runs/c": {
+    "key": "{\"run_id\":1}",
+    "value": {
+      "after": {
+        "ended_at": null,
+        "run_id": 1,
+        "speed": "60.00",
+        "started_at": "2026-10-30T17:50:36.178197Z",
+        "started_from": 1735603200000000,
+        "updated_at": "2026-10-30T17:50:36.178197Z"
+      },
+      "before": null,
+      "op": "c",
+      "source": {
+        "connector": "postgresql",
+        "db": "neondb",
+        "lsn": 527974072,
+        "name": "cdc",
+        "origin": null,
+        "origin_lsn": null,
+        "schema": "dispatch",
+        "sequence": "[null,\"527974072\"]",
+        "snapshot": "false",
+        "table": "replay_runs",
+        "ts_ms": 1793382637009,
+        "ts_ns": 1793382637009217000,
+        "ts_us": 1793382637009217,
+        "txId": 16392,
+        "version": "3.7.0.Final",
+        "xmin": null
+      },
+      "transaction": null,
+      "ts_ms": 1793382637487,
+      "ts_ns": 1793382637487783777,
+      "ts_us": 1793382637487783
+    }
+  },
+  "cdc.dispatch.replay_runs/u": {
+    "key": "{\"run_id\":1}",
+    "value": {
+      "after": {
+        "ended_at": null,
+        "run_id": 1,
+        "speed": "10.00",
+        "started_at": "2026-10-30T17:50:36.178197Z",
+        "started_from": 1735603200000000,
+        "updated_at": "2026-10-30T17:53:31.442638Z"
+      },
+      "before": null,
+      "op": "u",
+      "source": {
+        "connector": "postgresql",
+        "db": "neondb",
+        "lsn": 527987384,
+        "name": "cdc",
+        "origin": null,
+        "origin_lsn": null,
+        "schema": "dispatch",
+        "sequence": "[\"527986632\",\"527987384\"]",
+        "snapshot": "false",
+        "table": "replay_runs",
+        "ts_ms": 1793382812248,
+        "ts_ns": 1793382812248751000,
+        "ts_us": 1793382812248751,
+        "txId": 16420,
+        "version": "3.7.0.Final",
+        "xmin": null
+      },
+      "transaction": null,
+      "ts_ms": 1793382812707,
+      "ts_ns": 1793382812707427036,
+      "ts_us": 1793382812707427
+    }
+  },
+  "cdc.dispatch.replay_state/c": {
+    "key": "{\"id\":1}",
+    "value": {
+      "after": {
+        "id": 1,
+        "speed": "10.00",
+        "updated_at": "2026-10-30T17:50:36.178197Z",
+        "watermark": 1735603200000000
+      },
+      "before": null,
+      "op": "c",
+      "source": {
+        "connector": "postgresql",
+        "db": "neondb",
+        "lsn": 527974688,
+        "name": "cdc",
+        "origin": null,
+        "origin_lsn": null,
+        "schema": "dispatch",
+        "sequence": "[null,\"527974688\"]",
+        "snapshot": "false",
+        "table": "replay_state",
+        "ts_ms": 1793382637009,
+        "ts_ns": 1793382637009217000,
+        "ts_us": 1793382637009217,
+        "txId": 16392,
+        "version": "3.7.0.Final",
+        "xmin": null
+      },
+      "transaction": null,
+      "ts_ms": 1793382637500,
+      "ts_ns": 1793382637500092664,
+      "ts_us": 1793382637500092
+    }
+  },
+  "cdc.dispatch.replay_state/u": {
+    "key": "{\"id\":1}",
+    "value": {
+      "after": {
+        "id": 1,
+        "speed": "60.00",
+        "updated_at": "2026-10-30T17:50:36.178197Z",
+        "watermark": 1735603200000000
+      },
+      "before": null,
+      "op": "u",
+      "source": {
+        "connector": "postgresql",
+        "db": "neondb",
+        "lsn": 527975048,
+        "name": "cdc",
+        "origin": null,
+        "origin_lsn": null,
+        "schema": "dispatch",
+        "sequence": "[null,\"527975048\"]",
+        "snapshot": "false",
+        "table": "replay_state",
+        "ts_ms": 1793382637009,
+        "ts_ns": 1793382637009217000,
+        "ts_us": 1793382637009217,
+        "txId": 16392,
+        "version": "3.7.0.Final",
+        "xmin": null
+      },
+      "transaction": null,
+      "ts_ms": 1793382637501,
+      "ts_ns": 1793382637501088525,
+      "ts_us": 1793382637501088
+    }
+  },
+  "trips.v1/DriverAssigned": {
+    "key": "\"c8656e7c4ea5e13c8278183fc79e45da40f0f13c60fdcc5eb7a34cc6d6b0f1eb\"",
+    "value": {
+      "event_id": "3fe30f10-2db6-51e7-94e6-b39c2cf5949c",
+      "event_type": "DriverAssigned",
+      "occurred_at": 1735689068000000,
+      "payload": "{\"driver_id\": \"drv-000073\"}"
+    }
+  },
+  "trips.v1/TripCompleted": {
+    "key": "\"25f763e81f499387dafd8ddf3add18f1ff4bd67cfca9a1fe9e09a661394ca659\"",
+    "value": {
+      "event_id": "47b4b6c9-a61f-52b2-a3bb-cc34a2132daf",
+      "event_type": "TripCompleted",
+      "occurred_at": 1735690077000000,
+      "payload": "{\"bcf\": \"0.27\", \"tips\": \"0.00\", \"tolls\": \"0.00\", \"cbd_fee\": \"0.00\", \"base_fare\": \"11.56\", \"driver_id\": \"drv-000070\", \"sales_tax\": \"0.86\", \"wav_match\": false, \"driver_pay\": \"8.30\", \"trip_miles\": \"0.520\", \"airport_fee\": \"0.00\", \"shared_match\": false, \"dropped_off_at\": \"2025-01-01T00:07:57\", \"congestion_surcharge\": \"0.00\", \"reported_trip_time_s\": 216}"
+    }
+  },
+  "trips.v1/TripRequested": {
+    "key": "\"c8656e7c4ea5e13c8278183fc79e45da40f0f13c60fdcc5eb7a34cc6d6b0f1eb\"",
+    "value": {
+      "event_id": "bec67a57-a201-5ede-83a2-95fbd5e97641",
+      "event_type": "TripRequested",
+      "occurred_at": 1735689038000000,
+      "payload": "{\"wav_request\": false, \"requested_at\": \"2024-12-31T23:50:38\", \"access_a_ride\": false, \"provider_code\": \"HV0003\", \"pickup_zone_id\": 247, \"shared_request\": true, \"dropoff_zone_id\": 254, \"dispatching_base_num\": \"B03404\", \"originating_base_num\": \"B03404\"}"
+    }
+  },
+  "trips.v1/TripStarted": {
+    "key": "\"543b4f6cbd15cb797afaed87d10d5ee2dd023453910e0b6c69c1f92152baba70\"",
+    "value": {
+      "event_id": "06986c71-cc1d-5497-abfb-801675173961",
+      "event_type": "TripStarted",
+      "occurred_at": 1735689600000000,
+      "payload": "{\"driver_id\": \"drv-000071\", \"picked_up_at\": \"2025-01-01T00:00:00\", \"driver_arrived_at\": null}"
+    }
+  }
+}

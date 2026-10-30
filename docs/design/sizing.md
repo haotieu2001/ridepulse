@@ -48,6 +48,7 @@ throughput (every topic is far below a single partition's capacity).
 | `cdc.dispatch.replay_state` | Debezium table CDC | constant | E ≈ 1,440 (one watermark per simulated minute) | E ≈ 400 B | ≈ 0.6 MB | 1 | compact |
 | `cdc.dispatch.replay_runs` | Debezium table CDC | run_id | E < 10 (one per start or jump) | E ≈ 400 B | < 0.1 MB | 1 | compact |
 | `__debezium-heartbeat.cdc` | Debezium | server name | E 1 per heartbeat | E ≈ 100 B | ≈ 0.1 MB | 1 | 1 d |
+| `debezium.offsets` | Debezium's offset store | connector | E 1 per flush | E ≈ 200 B | < 1 MB | 1 | compact |
 | `driver.locations.v1` | Replayer (Avro) | driver_id | M 510 busy drivers on average (ADR-0003: busy drivers only) x 1 ping / 15 s ≈ 2.9M | E ≈ 100 B Avro incl. headers | E ≈ 290 MB | 6 | 1 d |
 | `ops.alerts.v1` | Databricks | area_id | E < 1,000 | E ≈ 500 B | < 1 MB | 1 | 7 d |
 | `*.dlq` | Databricks | source key | E 0.5% of pings (injected malformed) ≈ 15k | E ≈ 200 B | ≈ 3 MB | 1 | 14 d |

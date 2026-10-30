@@ -14,62 +14,61 @@ rm debezium.tar.gz
 useradd --system --home-dir /opt/debezium-server --shell /sbin/nologin debezium
 # Debezium Server 3.x reads config/application.properties (Quarkus layout), not conf/.
 mkdir -p /opt/debezium-server/data /opt/debezium-server/config
+# The Outbox Event Router isn't on the default classpath in 3.7: it ships in lib_opt, which run.sh loads
+# whole only for scripting or Chronicle Queue. Without it the connector dies while the service stays active.
+cp /opt/debezium-server/lib_opt/debezium-connect-plugins-*.jar /opt/debezium-server/lib/
 chown -R debezium:debezium /opt/debezium-server
 
-# --- config renderer: secrets come from SSM at every start, into a file only debezium can read --
+# --- config: the environment's settings, plus secrets from SSM at every start, in a file only debezium reads --
+cat > /opt/debezium-server/env.properties <<'ENVFILE'
+${env_properties}
+ENVFILE
+
 cat > /opt/debezium-server/render-config.sh <<'RENDER'
 #!/bin/bash
 set -euo pipefail
 p() { aws ssm get-parameter --region us-east-2 --name "$1" --with-decryption --query Parameter.Value --output text; }
-NEON_URL="$(p /ridepulse/dev/neon/url)"
-BOOTSTRAP="$(p /ridepulse/confluent/dev/bootstrap_servers)"
-KAFKA_KEY="$(p /ridepulse/confluent/dev/kafka_api_key)"
-KAFKA_SECRET="$(p /ridepulse/confluent/dev/kafka_api_secret)"
+NEON_URL="$(p /ridepulse/${env}/neon/url)"
+BOOTSTRAP="$(p /ridepulse/confluent/${env}/bootstrap_servers)"
+KAFKA_KEY="$(p /ridepulse/confluent/${env}/kafka_api_key)"
+KAFKA_SECRET="$(p /ridepulse/confluent/${env}/kafka_api_secret)"
 umask 077
 NEON_URL="$NEON_URL" BOOTSTRAP="$BOOTSTRAP" KAFKA_KEY="$KAFKA_KEY" KAFKA_SECRET="$KAFKA_SECRET" python3 - <<'PY' > /opt/debezium-server/config/application.properties
 import os, urllib.parse as u
 p = u.urlparse(os.environ["NEON_URL"])
 host = p.hostname.replace("-pooler.", ".")  # logical replication needs Neon's direct endpoint
+jaas = ('org.apache.kafka.common.security.plain.PlainLoginModule required '
+        f'username="{os.environ["KAFKA_KEY"]}" password="{os.environ["KAFKA_SECRET"]}";')
+print(open("/opt/debezium-server/env.properties").read())
 props = {
-    "debezium.source.connector.class": "io.debezium.connector.postgresql.PostgresConnector",
-    "debezium.source.offset.storage.file.filename": "/opt/debezium-server/data/offsets.dat",
-    "debezium.source.offset.flush.interval.ms": "0",
     "debezium.source.database.hostname": host,
     "debezium.source.database.port": str(p.port or 5432),
     "debezium.source.database.user": p.username,
     "debezium.source.database.password": u.unquote(p.password),
     "debezium.source.database.dbname": p.path.lstrip("/"),
     "debezium.source.database.sslmode": "require",
-    "debezium.source.topic.prefix": "cdc",
-    "debezium.source.plugin.name": "pgoutput",
-    "debezium.source.slot.name": "debezium_s8",
-    "debezium.source.publication.name": "dbz_s8",
-    "debezium.source.publication.autocreate.mode": "filtered",
-    "debezium.source.table.include.list": "dispatch.trips",
-    "debezium.source.snapshot.mode": "no_data",
-    # NUMERIC as exact strings ("49.53"), not base64 binary decimals ("E1k="): money stays
-    # exact and Spark casts it with a plain CAST(... AS DECIMAL(8,2)).
-    "debezium.source.decimal.handling.mode": "string",
-    "debezium.sink.type": "kafka",
     "debezium.sink.kafka.producer.bootstrap.servers": os.environ["BOOTSTRAP"],
     "debezium.sink.kafka.producer.security.protocol": "SASL_SSL",
     "debezium.sink.kafka.producer.sasl.mechanism": "PLAIN",
-    "debezium.sink.kafka.producer.sasl.jaas.config":
-        'org.apache.kafka.common.security.plain.PlainLoginModule required '
-        f'username="{os.environ["KAFKA_KEY"]}" password="{os.environ["KAFKA_SECRET"]}";',
-    "debezium.sink.kafka.producer.key.serializer": "org.apache.kafka.common.serialization.StringSerializer",
-    "debezium.sink.kafka.producer.value.serializer": "org.apache.kafka.common.serialization.StringSerializer",
-    "debezium.format.value": "json",
-    "debezium.format.value.schemas.enable": "false",
-    "debezium.format.key": "json",
-    "debezium.format.key.schemas.enable": "false",
+    "debezium.sink.kafka.producer.sasl.jaas.config": jaas,
+    # The offset store is its own Kafka client.
+    "debezium.source.bootstrap.servers": os.environ["BOOTSTRAP"],
+    "debezium.source.security.protocol": "SASL_SSL",
+    "debezium.source.sasl.mechanism": "PLAIN",
+    "debezium.source.sasl.jaas.config": jaas,
+    "debezium.source.producer.security.protocol": "SASL_SSL",
+    "debezium.source.producer.sasl.mechanism": "PLAIN",
+    "debezium.source.producer.sasl.jaas.config": jaas,
+    "debezium.source.consumer.security.protocol": "SASL_SSL",
+    "debezium.source.consumer.sasl.mechanism": "PLAIN",
+    "debezium.source.consumer.sasl.jaas.config": jaas,
 }
 for k, v in props.items():
     print(f"{k}={v}")
 PY
 RENDER
 chmod 750 /opt/debezium-server/render-config.sh
-chown debezium:debezium /opt/debezium-server/render-config.sh
+chown debezium:debezium /opt/debezium-server/render-config.sh /opt/debezium-server/env.properties
 
 cat > /etc/systemd/system/debezium.service <<'UNIT'
 [Unit]

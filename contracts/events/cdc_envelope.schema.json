@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "ridepulse/events/cdc_envelope.schema.json",
   "title": "Debezium change event",
-  "description": "A cdc.dispatch.* value with decimal.handling.mode=string and schemas disabled. A delete also sends a null value (tombstone), which isn't this schema. Checked against real messages in #11.",
+  "description": "A cdc.dispatch.* value with decimal.handling.mode=string and schemas disabled. A delete also sends a null value (tombstone), which isn't this schema. With the default replica identity, `before` is null on updates and only the key on deletes. Keys are JSON objects. Held to real messages in contracts/tests.",
   "type": "object",
   "required": [
     "op",
