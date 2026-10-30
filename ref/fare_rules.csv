@@ -1,0 +1,7 @@
+fee,amount,unit,valid_from,valid_to
+bcf,0.0275,share_of_base_fare,2025-01-01,
+sales_tax,0.08875,share_of_base_fare,2025-01-01,
+congestion_surcharge,2.75,usd,2025-01-01,
+cbd_fee,1.50,usd,2025-01-05,
+airport_fee,2.50,usd,2025-01-01,2026-03-15
+airport_fee,3.50,usd,2026-03-15,
