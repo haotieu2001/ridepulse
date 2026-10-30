@@ -43,7 +43,7 @@ Phase 7.
 |---|---|---|---|
 | Trips per day | ≈ 33k (5% sample), max 39.6k | ≈ 661k, max ≈ 790k | |
 | Lifecycle events per day | ≈ 132k, max 159k | ≈ 2.6M, max 3.2M | 4 per trip |
-| Drivers busy at the peak | 1,393 (synthetic) | ≈ 28k | from ADR-0003's simulation, x 20 |
+| Drivers busy at the peak | 1,392 (synthetic) | ≈ 28k | from ADR-0003's simulation, x 20 |
 | Pings | ≈ 2.9M/simulated day, busy drivers every 15 s | real apps: ~80k active drivers every 4 s ≈ 20k/s at peak, 100-300 GB/day raw | plan estimate |
 | Dispatch database | < 100 MB | tens of GB hot; WAL and CDC throughput become the constraint | |
 | Kafka | ≈ 470 MB/simulated day | ≈ 100-300 GB/day, pings dominate | partitions per topic to be sized |

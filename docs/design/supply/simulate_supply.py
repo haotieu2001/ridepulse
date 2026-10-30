@@ -85,9 +85,12 @@ def load_trips() -> list[tuple]:
     t = extract_sample()
     trips = []
     for r in t.to_pylist():
+        # The ADR-0004 schedule, as the replayer applies it: nothing happens before the request, and
+        # a trip ends no earlier than it started (same as services/prep/prep.py's schedule()).
         arrive = r["on_scene_datetime"] or r["pickup_datetime"]
-        assign = min(r["request_datetime"] + ASSIGN_DELAY, arrive, r["pickup_datetime"])
-        trips.append((assign, r["request_datetime"], r["dropoff_datetime"], r["PULocationID"],
+        assign = max(r["request_datetime"], min(r["request_datetime"] + ASSIGN_DELAY, arrive, r["pickup_datetime"]))
+        drop = max(assign, r["pickup_datetime"], r["dropoff_datetime"])
+        trips.append((assign, r["request_datetime"], drop, r["PULocationID"],
                       r["DOLocationID"], float(r["driver_pay"] or 0), r["pickup_datetime"]))
     trips.sort()
     return trips

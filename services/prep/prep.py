@@ -15,7 +15,8 @@ replayer can apply tick by tick.
    A month's slices start up to an hour before the month (early requests) and end after it (late
    dropoffs), so an hour at a month boundary has a slice in each of the two months' prefixes.
    Lines in a slice are ordered by (due_at, lifecycle step, trip_key).
-5. Writes quarantine.jsonl.gz and _manifest.json (counts, every slice with its event count and
+5. Writes the supply inputs next to the slices: heat_map.json and staffing.json (services/prep/supply.py).
+6. Writes quarantine.jsonl.gz and _manifest.json (counts, every slice with its event count and
    sha256), then points manifests/replay/<month>/prep.json at it. The manifest is written last: a
    prefix without one is an unfinished run. An hour with no events has no slice file; the manifest
    is the list of slices.
@@ -44,7 +45,9 @@ import pyarrow.parquet as pq
 
 from contracts.trip_key import KEY_FIELDS, SAMPLE_MODULUS, SEPARATOR
 
-FORMAT_VERSION = 1      # bump when the slice layout or the event lines change
+from .supply import DEFAULT_TARGET_UTILISATION, heat_map, staffing
+
+FORMAT_VERSION = 2      # bump when the outputs' layout or content change (2: supply inputs)
 ASSIGN_DELAY = timedelta(seconds=30)
 PROVIDERS = ("HV0002", "HV0003", "HV0004", "HV0005")
 EVENT_TYPES = ("TripRequested", "DriverAssigned", "TripStarted", "TripCompleted")
@@ -300,6 +303,7 @@ def _peak_rss_mb() -> int:
 
 
 def prep(month: str, store: Store, *, source_file: pathlib.Path | None = None, force: bool = False,
+         target_utilisation: float = DEFAULT_TARGET_UTILISATION,
          now: datetime | None = None, log=print) -> tuple[str, dict]:
     """Prepare one month. Returns ("unchanged" | "prepared", the run's manifest)."""
     started = time.monotonic()
@@ -311,6 +315,7 @@ def prep(month: str, store: Store, *, source_file: pathlib.Path | None = None, f
     pointer = store.get_json(pointer_key(month))
     if (not force and pointer and pointer["current"]["source_etag"] == current["etag"]
             and pointer["current"]["format_version"] == FORMAT_VERSION
+            and pointer["current"].get("target_utilisation") == target_utilisation
             and store.get_json(f"{prefix}/_manifest.json")):
         return "unchanged", store.get_json(f"{prefix}/_manifest.json")
 
@@ -341,6 +346,11 @@ def prep(month: str, store: Store, *, source_file: pathlib.Path | None = None, f
         hours_max = max(hours_max, len(lines))
     assert events_total == 4 * kept.num_rows, (events_total, kept.num_rows)
 
+    staffed = staffing(kept, schedule, target_utilisation)
+    for name, value in (("heat_map", heat_map(kept)),
+                        ("staffing", {"target_utilisation": target_utilisation, "hours": staffed})):
+        store.put_bytes(f"{prefix}/{name}.json", json.dumps(value, separators=(",", ":")).encode(), "application/json")
+
     q_body = _gzip([json.dumps(q, separators=(",", ":"), sort_keys=True) for q in quarantined]) if quarantined else b""
     store.put_bytes(f"{prefix}/quarantine.jsonl.gz", q_body, "application/gzip")
 
@@ -354,6 +364,9 @@ def prep(month: str, store: Store, *, source_file: pathlib.Path | None = None, f
         "quarantined": {"all": by_reason("all"), "sample": by_reason("sample")},
         "trips": kept.num_rows, "events": events_total, "reordered": _out_of_order(kept),
         "slices": slices, "max_events_per_slice": hours_max,
+        "supply": {"target_utilisation": target_utilisation,
+                   "max_peak_busy": max((h["peak_busy"] for h in staffed.values()), default=0),
+                   "max_online_target": max((h["online_target"] for h in staffed.values()), default=0)},
         "first_due": slices[0]["hour"] if slices else None, "last_due": slices[-1]["hour"] if slices else None,
         "prepared_at": (now or datetime.now(timezone.utc)).isoformat(timespec="seconds"),
         "run_seconds": round(time.monotonic() - started, 1), "peak_rss_mb": _peak_rss_mb(),
@@ -361,7 +374,7 @@ def prep(month: str, store: Store, *, source_file: pathlib.Path | None = None, f
     # Run facts (prepared_at, run time, memory) live only in the manifests, never in the slices.
     store.put_bytes(f"{prefix}/_manifest.json", json.dumps(manifest, indent=2).encode(), "application/json")
     current_ptr = {"source_etag": current["etag"], "format_version": FORMAT_VERSION, "prefix": prefix,
-                   "prepared_at": manifest["prepared_at"]}
+                   "target_utilisation": target_utilisation, "prepared_at": manifest["prepared_at"]}
     history = (pointer or {}).get("history", [])
     if pointer and pointer["current"]["prefix"] != prefix:
         history = [pointer["current"], *history]

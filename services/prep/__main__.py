@@ -6,6 +6,7 @@ import sys
 
 from . import prep as job
 from .prep import DirStore, S3Store, prep
+from .supply import DEFAULT_TARGET_UTILISATION
 
 
 class LocalOutputs:
@@ -33,13 +34,16 @@ def main() -> int:
     p.add_argument("--out-dir", type=pathlib.Path,
                    help="write outputs under this directory instead of the bucket (a dry run)")
     p.add_argument("--force", action="store_true", help="rebuild even if this version is already prepared")
+    p.add_argument("--target-utilisation", type=float, default=DEFAULT_TARGET_UTILISATION,
+                   help="supply.target_utilisation (ADR-0003): busy drivers / online drivers at the hour's peak")
     a = p.parse_args()
     if not a.bucket:
         p.error("--bucket or LANDING_BUCKET is required")
     store = S3Store(a.bucket)
     if a.out_dir:
         store = LocalOutputs(store, DirStore(a.out_dir))
-    status, m = prep(a.month, store, source_file=a.source_file, force=a.force)
+    status, m = prep(a.month, store, source_file=a.source_file, force=a.force,
+                     target_utilisation=a.target_utilisation)
     summary = {k: v for k, v in m.items() if k != "slices"}
     print(f"{status}: {len(m['slices'])} slices\n{json.dumps(summary, indent=2)}")
     return 0

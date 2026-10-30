@@ -458,3 +458,19 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   content as the laptop dry run, but no gzip file is byte-identical: the header's OS byte differs
   (`03` on the runner's Python 3.12, `ff` on the laptop's 3.13). The "byte-identical" result above holds
   only on one Python version; replay reads content, so nothing depends on it.
+
+### #3 Prep job: heat map and hourly staffing targets
+- `services/prep/supply.py` writes `heat_map.json` (requests per zone per 15 min, by hour of week) and
+  `staffing.json` (per hour: peak busy, `ceil(peak / target_utilisation)`) next to the slices. The
+  utilisation is a CLI and workflow input, default 0.6; changing it rebuilds, the same value is a no-op.
+- Compared with `simulate_supply.py` on January 2025: all 40,388 heat map cells identical; online targets
+  differed in 554 of 747 hours (median 5 drivers, max 27). Cause: the simulator started a pre-arranged
+  trip's busy time at its raw timestamps, before its request, which the replayer can't do. The simulator
+  now uses the ADR-0004 schedule; after that 0 of 747 hours differ. A test holds the two equal.
+- Rerun on that schedule, ADR-0003's figures moved slightly and its decision stands: pool 3,069 (was
+  3,086), 962 online on average, 2,320 at the peak, peak busy 1,392, 97.75% near (97.8%), surge 15.7% and
+  alerts 3.5% (15.4%, 3.4%), 47 emergency sign-ons (48). ADR-0003, sizing.md and production.md are updated.
+- Known limit, kept: peak busy is read right after each change in an hour, so drivers carried into an
+  hour count only until its first change. Counting them changes 9 of 747 targets, by at most 5 drivers.
+- Open for #7: ADR-0003 draws a sign-on zone from that hour's pickups, weighted. Those weights are not
+  written yet; the heat map could serve, or prep can add them, and parity with the simulator decides.
