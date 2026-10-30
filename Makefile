@@ -11,7 +11,7 @@ YEAR        ?= 2025
 
 export AWS_PROFILE
 
-.PHONY: help bootstrap-plan bootstrap-apply landing-plan landing-apply land-month land-zones land-noaa prep db-status db-migrate db-test catalog deploy s10-upload s10-run s10
+.PHONY: help bootstrap-plan bootstrap-apply landing-plan landing-apply land-month land-zones land-noaa prep db-status db-migrate db-test db-seed catalog deploy s10-upload s10-run s10
 
 help:
 	@echo "bootstrap-plan / bootstrap-apply  Terraform: state bucket, GitHub OIDC role, budget"
@@ -21,6 +21,7 @@ help:
 	@echo "prep MONTH=2025-01 [OUT_DIR=dir]  prep job: contract, sample, event-time slices"
 	@echo "db-status / db-migrate            dispatch migrations on the dev Neon database"
 	@echo "db-test                           migrations + SQL tests in throwaway Neon databases"
+	@echo "db-seed [DRIVERS=N]               zones and fare rules on the dev Neon database"
 	@echo "catalog                           create the $(CATALOG) catalog (once)"
 	@echo "deploy                            deploy the Databricks bundle (dev)"
 	@echo "s10                               feasibility test S10: one TLC month into bronze"
@@ -62,7 +63,11 @@ db-migrate:
 	scripts/db.sh uv run python db/migrate.py --schema dispatch
 
 db-test:
-	scripts/db.sh uv run pytest db
+	scripts/db.sh uv run pytest db services/seed
+
+# Zones and fare rules; DRIVERS=N also adds the first N synthetic drivers (the replayer grows the pool).
+db-seed:
+	scripts/db.sh uv run python -m services.seed --bucket $(LANDING_BUCKET) --drivers $(or $(DRIVERS),0)
 
 # Free Edition only has Default Storage, which the catalogs API can't target
 # (it wants a storage root), so create the catalog with SQL on the warehouse.

@@ -474,3 +474,20 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   hour count only until its first change. Counting them changes 9 of 747 targets, by at most 5 drivers.
 - Open for #7: ADR-0003 draws a sign-on zone from that hour's pickups, weighted. Those weights are not
   written yet; the heat map could serve, or prep can add them, and parity with the simulator decides.
+- Actions run 41076710415 for #3: 4 min 5 s, 1.48 GB peak; both files in S3 are byte-identical to the dry
+  run compared with the simulator.
+
+### #5 Seed reference and synthetic driver data
+- `services/seed` (`make db-seed`): zones from the landed TLC lookup (must hold 1-265 once each), fee rates
+  from `ref/fare_rules.csv`, sourced in the new `docs/DATA_SOURCES.md`. A row is written only if new or
+  different, so a rerun moves no `updated_at` (path C's cursor) and doesn't rewrite a row.
+- Drivers are not seeded by default. The simulator starts with an empty pool and adds the next driver when
+  nobody is rested, so pre-seeded drivers would change who gets each trip and break #7's parity test.
+  `driver_row()` / `profile_row()` are pure functions of the driver number and seed, for the replayer to
+  call; `DRIVERS=N` adds the first N. Reruns never overwrite a driver or an edited profile.
+- Bug found by looking at the real seed: `fare_rules.amount` was `numeric(10,4)`, which silently rounded
+  sales tax from 0.08875 to 0.0888. V003 widens it to `numeric(12,6)`; a test checks every rate exactly.
+- Sourcing limits, in DATA_SOURCES.md: the CBD fee, sales tax and the 2026 airport fee have primary
+  sources; BCF has none (2.75% is measured); the surcharge has a secondary one. BCF drops to about 2.24% by
+  August 2026 on an unknown date, so its row is good for January 2025 only.
+- Dev Neon: V003 applied and seeded, 265 zones, 6 fare rules, 0 drivers; a second run changed nothing.
