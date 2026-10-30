@@ -449,3 +449,7 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   row-group size, a re-published month in a new prefix, a wrong local file refused.
 - CI role gets PutObject on `derived/replay/*` and `manifests/replay/*` only (landing stack). pyarrow
   26.0.0 is now a project dependency (released 2026-10-09).
+- First Actions run failed at login: "Not authorized to perform sts:AssumeRoleWithWebIdentity". This
+  repo's OIDC tokens use immutable subjects (`repo:haotieu2001@62063165/ridepulse@1436061952:...`), and
+  the role trusted only the name form. No CI job had assumed the role before, so it stayed hidden since
+  Phase 0. The trust policy now uses the immutable form (bootstrap stack).
