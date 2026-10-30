@@ -22,6 +22,7 @@ import json
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from decimal import Decimal
 
 import psycopg
 
@@ -40,6 +41,24 @@ OUTBOX_NAMESPACE = uuid.UUID("7f1f2c3e-52b1-5c0e-9a55-6f1d0c7a1b10")
 
 class NotPrepared(RuntimeError):
     """The window needs a month the prep job hasn't prepared: stop the clock rather than skip events."""
+
+
+MONEY = {"base_fare", "tolls", "bcf", "sales_tax", "congestion_surcharge", "airport_fee", "cbd_fee", "tips", "driver_pay"}
+
+
+def exact_payload(payload: dict) -> dict:
+    """Money and miles as exact strings (NFR-3), as Debezium sends NUMERIC on the CDC path. Slices hold
+    the TLC's values as JSON numbers; a value finer than the contract stops the tick instead of rounding."""
+    out = dict(payload)
+    for field, value in payload.items():
+        scale = 2 if field in MONEY else 3 if field == "trip_miles" else None
+        if scale is None or value is None:
+            continue
+        text = f"{Decimal(repr(value)):.{scale}f}"
+        if Decimal(text) != Decimal(repr(value)):
+            raise ValueError(f"{field} = {value} has more than {scale} decimals (contracts/tlc_trips.yaml)")
+        out[field] = text
+    return out
 
 
 def event_id(trip_key: str, kind: str) -> str:
@@ -194,6 +213,7 @@ def _plan(events: list[dict], known: dict[str, tuple[str, int, int]], supply: Su
         else:
             payload["driver_id"] = supply.completed(key, pickup, dropoff, due)
         known[key] = (AFTER[kind], pickup, dropoff)
+        payload = exact_payload(payload)
         planned.append((kind, {**payload, "trip_key": key, "due_at": e["due_at"], "id": event_id(key, kind), "type": kind,
                                "occurred_at": e["occurred_at"], "payload": json.dumps(payload, sort_keys=True)}))
     for b in pending:

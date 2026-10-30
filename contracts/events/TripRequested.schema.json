@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ridepulse/events/TripRequested.schema.json",
+  "title": "TripRequested",
+  "description": "A rider asked for a trip. Ids, zones and flags; no fare yet.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "access_a_ride",
+    "dispatching_base_num",
+    "dropoff_zone_id",
+    "originating_base_num",
+    "pickup_zone_id",
+    "provider_code",
+    "requested_at",
+    "shared_request",
+    "wav_request"
+  ],
+  "properties": {
+    "provider_code": {
+      "enum": [
+        "HV0002",
+        "HV0003",
+        "HV0004",
+        "HV0005"
+      ]
+    },
+    "dispatching_base_num": {
+      "type": "string"
+    },
+    "originating_base_num": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Lyft leaves it empty"
+    },
+    "pickup_zone_id": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 265
+    },
+    "dropoff_zone_id": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 265
+    },
+    "requested_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}$",
+      "description": "Simulated time, no offset: the TLC's New York wall clock"
+    },
+    "shared_request": {
+      "type": "boolean"
+    },
+    "access_a_ride": {
+      "type": "boolean"
+    },
+    "wav_request": {
+      "type": "boolean"
+    }
+  }
+}
