@@ -74,6 +74,7 @@ def slice_name(hour: datetime) -> str:
 
 class Store(Protocol):
     def get_json(self, key: str) -> dict | None: ...
+    def get_bytes(self, key: str) -> bytes: ...
     def put_bytes(self, key: str, body: bytes, content_type: str) -> None: ...
     def download(self, key: str, path: pathlib.Path) -> None: ...
 
@@ -90,6 +91,9 @@ class S3Store:
         except self.s3.exceptions.NoSuchKey:
             return None
 
+    def get_bytes(self, key):
+        return self.s3.get_object(Bucket=self.bucket, Key=key)["Body"].read()
+
     def put_bytes(self, key, body, content_type):
         self.s3.put_object(Bucket=self.bucket, Key=key, Body=body, ContentType=content_type)
 
@@ -105,6 +109,9 @@ class DirStore:
     def get_json(self, key):
         p = self.root / key
         return json.loads(p.read_bytes()) if p.exists() else None
+
+    def get_bytes(self, key):
+        return (self.root / key).read_bytes()
 
     def put_bytes(self, key, body, content_type):
         p = self.root / key

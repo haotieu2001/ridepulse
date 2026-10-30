@@ -70,7 +70,8 @@ Measured on the January 2025 5% sample (1,020,410 trips, `docs/design/clock/meas
    re-running a past day is a **backfill** from the TLC file and the recorded bronze, which every
    writer supports (FR-15). Jumping forward is allowed only to a day boundary, and the replayer
    records which simulated days it replayed so the gate and completeness reconciliation ignore
-   skipped days (gold for skipped days still comes from the TLC file).
+   skipped days (gold for skipped days still comes from the TLC file). A jump cancels trips still
+   open and takes their drivers offline: their later events are skipped, so nothing would finish them.
 
 9. **Every record carries both clocks.** `occurred_at` (simulated, NTZ like the TLC data) is in each
    payload; the commit time (wall, `source.ts_ms`) comes from Debezium; pings carry a simulated

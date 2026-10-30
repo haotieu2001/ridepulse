@@ -491,3 +491,26 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   sources; BCF has none (2.75% is measured); the surcharge has a secondary one. BCF drops to about 2.24% by
   August 2026 on an unknown date, so its row is good for January 2025 only.
 - Dev Neon: V003 applied and seeded, 265 zones, 6 fare rules, 0 drivers; a second run changed nothing.
+
+### #6 Replayer tick
+- `services/replayer` (`python -m services.replayer start|tick`): one transaction per tick as in ADR-0004:
+  lock `replay_state`, read the slices the window touches, dispatch in memory, guarded transitions with
+  outbox events, empty the outbox, `advance_watermark`, purge completed trips older than 48 simulated hours.
+- Not here yet: the EventBridge schedule and Lambda packaging, which belong with #12. Dispatch is a
+  placeholder, `LowestFreeDriver`, which #7 replaces (the tick only uses load, assign, release).
+- Clock rule at month edges: a window needs at least one prepared month among the hour's month and its
+  two neighbours, otherwise the tick stops (`NotPrepared`) and the clock stays. With only January prepared
+  the clock can run to the end of February, which is what lets January's last day close; if February is
+  prepared later, its early events for hours already passed are missed. Prepare months in order.
+- A forward jump cancels open trips and takes their drivers offline. ADR-0004 allowed jumps but nothing
+  handled them: those drivers would have stayed busy for ever, and later events of those trips are skipped.
+- Real data: the real S3 slices in a throwaway Neon database, 36 ticks at 10x through New Year's night
+  (23:00 to 05:00), run from the laptop. 50,903 events applied, equal to an independent count from the
+  slices, 0 skipped, outbox empty, driver state consistent. The pool ended at 1,392 drivers, equal to the
+  prep job's independently computed peak busy. Largest tick 2,121 events (ADR-0004: at most 2,131).
+- Bug found by that run: one tick took 241 s (median 5.7 s), far over its minute. New drivers were inserted
+  one round trip at a time, and that night adds hundreds per tick. They now go through the pipeline: slowest
+  tick 7.9 s, median 5.6 s. Lambda sits in Neon's region, so its round trips should be shorter; #15 measures it.
+- Tests on a throwaway Postgres with the real runner, seed and prep job: a whole month, window edges, retry
+  after a failure before commit (same final state as a clean run), two overlapping runs (consecutive
+  windows, each event once), the pre-arranged trip, refused starts, resume, jumps, purge, pool growth.
