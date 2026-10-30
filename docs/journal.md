@@ -549,3 +549,17 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   how it encodes `occurred_at` is an expectation. #11 captures real messages and tests them. The ping schema gets a
   real producer in #8, and its `local-timestamp-millis` must be read as TIMESTAMP_NTZ by `from_avro` in #13 (S2
   tested `timestamp-millis`). Registering the schema with BACKWARD is #10.
+
+### #10 Confluent topics, ACLs and the ping schema
+- `infra/terraform/confluent` (`make confluent-plan`, `confluent-apply`): 11 topics from sizing.md, including
+  `cdc.dispatch.replay_runs` and Debezium's heartbeat topic, which sizing had missed. Three DLQs: trips, CDC, pings.
+- `ridepulse-app`'s 6 wildcard ACLs became 46 named ones: each topic, plus the group prefixes `ridepulse-` and
+  `spark-kafka-source-`. #13 must use one of them. Phase 0's `s8_consume.py` no longer can (group `s8-check-`).
+- `driver.locations.v1-value` is registered from `contracts/` with BACKWARD; producers don't auto-register. Trip
+  and CDC events are plain JSON with no schema id on the wire, so their contract stays in tests, not the registry.
+- Checked on the real cluster with the app's own keys: partitions as sized, the registered schema equals the
+  repo's (version 1, id 100002), a ping produced idempotently and decoded back through the registry, a topic
+  outside the list refused, a group outside the prefixes refused, a breaking schema edit reported incompatible.
+  A second plan shows no changes. That check left one test ping (`trip_key` starting `check-`) in
+  `driver.locations.v1`, partition 0, offset 0, which expires with the topic's 1-day retention.
+- Compaction settings were accepted by Basic, but cleaning itself isn't observed yet.

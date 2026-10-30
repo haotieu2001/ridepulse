@@ -93,16 +93,22 @@ resource "confluent_service_account" "app" {
 }
 
 # Basic clusters reject resource-level roles ("Basic Clusters can not use resource roles"),
-# so topic and group access is granted with Kafka ACLs, created through the manager's key.
+# so topic and group access is granted with Kafka ACLs, created through the manager's key. Named topics
+# only: a new topic gets access by being added to local.topics. Consumer groups by prefix: Spark's default
+# group ids start with spark-kafka-source-, and anything else must start with ridepulse-.
 locals {
-  app_acls = {
-    topic_read         = { resource_type = "TOPIC", resource_name = "*", operation = "READ" }
-    topic_write        = { resource_type = "TOPIC", resource_name = "*", operation = "WRITE" }
-    topic_describe     = { resource_type = "TOPIC", resource_name = "*", operation = "DESCRIBE" }
-    group_read         = { resource_type = "GROUP", resource_name = "*", operation = "READ" }
-    cluster_idempotent = { resource_type = "CLUSTER", resource_name = "kafka-cluster", operation = "IDEMPOTENT_WRITE" }
-    cluster_describe   = { resource_type = "CLUSTER", resource_name = "kafka-cluster", operation = "DESCRIBE" }
-  }
+  app_topics = concat(keys(local.topics), ["feasibility.smoke.v1", "feasibility.avro.v1", "cdc.dispatch.trips"])
+  app_acls = merge(
+    { for pair in setproduct(local.app_topics, ["READ", "WRITE", "DESCRIBE"]) :
+      "topic/${pair[0]}/${pair[1]}" => { resource_type = "TOPIC", resource_name = pair[0], pattern_type = "LITERAL", operation = pair[1] }
+    },
+    {
+      "group/ridepulse-"          = { resource_type = "GROUP", resource_name = "ridepulse-", pattern_type = "PREFIXED", operation = "READ" }
+      "group/spark-kafka-source-" = { resource_type = "GROUP", resource_name = "spark-kafka-source-", pattern_type = "PREFIXED", operation = "READ" }
+      "cluster/idempotent"        = { resource_type = "CLUSTER", resource_name = "kafka-cluster", pattern_type = "LITERAL", operation = "IDEMPOTENT_WRITE" }
+      "cluster/describe"          = { resource_type = "CLUSTER", resource_name = "kafka-cluster", pattern_type = "LITERAL", operation = "DESCRIBE" }
+    },
+  )
 }
 
 resource "confluent_kafka_acl" "app" {
@@ -113,7 +119,7 @@ resource "confluent_kafka_acl" "app" {
   }
   resource_type = each.value.resource_type
   resource_name = each.value.resource_name
-  pattern_type  = "LITERAL"
+  pattern_type  = each.value.pattern_type
   principal     = "User:${confluent_service_account.app.id}"
   host          = "*"
   operation     = each.value.operation
@@ -166,6 +172,41 @@ resource "confluent_api_key" "app_schema_registry" {
 }
 
 # --- topics -----------------------------------------------------------------------------------
+# The RidePulse topics, from docs/design/sizing.md. The three feasibility.* / cdc.dispatch.trips topics below
+# are Phase 0's, kept so those tests can be re-run.
+locals {
+  day_ms = 86400000
+  topics = {
+    "trips.v1"                     = { partitions = 3, config = { "retention.ms" = 7 * local.day_ms } }
+    "cdc.dispatch.drivers"         = { partitions = 3, config = { "cleanup.policy" = "compact,delete", "retention.ms" = 7 * local.day_ms } }
+    "cdc.dispatch.driver_profiles" = { partitions = 1, config = { "retention.ms" = 7 * local.day_ms } }
+    "cdc.dispatch.replay_state"    = { partitions = 1, config = { "cleanup.policy" = "compact" } }
+    "cdc.dispatch.replay_runs"     = { partitions = 1, config = { "cleanup.policy" = "compact" } }
+    "driver.locations.v1"          = { partitions = 6, config = { "retention.ms" = local.day_ms } }
+    "ops.alerts.v1"                = { partitions = 1, config = { "retention.ms" = 7 * local.day_ms } }
+    "trips.v1.dlq"                 = { partitions = 1, config = { "retention.ms" = 14 * local.day_ms } }
+    "cdc.dispatch.dlq"             = { partitions = 1, config = { "retention.ms" = 14 * local.day_ms } }
+    "driver.locations.v1.dlq"      = { partitions = 1, config = { "retention.ms" = 14 * local.day_ms } }
+    "__debezium-heartbeat.cdc"     = { partitions = 1, config = { "retention.ms" = local.day_ms } }
+  }
+}
+
+resource "confluent_kafka_topic" "app" {
+  for_each = local.topics
+
+  kafka_cluster {
+    id = confluent_kafka_cluster.this.id
+  }
+  topic_name       = each.key
+  partitions_count = each.value.partitions
+  rest_endpoint    = confluent_kafka_cluster.this.rest_endpoint
+  credentials {
+    key    = confluent_api_key.manager_kafka.id
+    secret = confluent_api_key.manager_kafka.secret
+  }
+  config = { for k, v in each.value.config : k => tostring(v) }
+}
+
 resource "confluent_kafka_topic" "smoke" {
   kafka_cluster {
     id = confluent_kafka_cluster.this.id
@@ -213,6 +254,60 @@ resource "confluent_kafka_topic" "cdc_trips" {
   }
   config = {
     "retention.ms" = "86400000"
+  }
+}
+
+# --- schemas: registered here, from contracts/, so producers never auto-register -----------------
+# Only the Avro pings. Trip and CDC events are plain JSON with no schema id on the wire, so a registered
+# schema would enforce nothing; contracts/tests/test_events.py holds them to contracts/events instead.
+resource "confluent_role_binding" "manager_subjects" {
+  principal   = "User:${confluent_service_account.manager.id}"
+  role_name   = "ResourceOwner"
+  crn_pattern = "${data.confluent_schema_registry_cluster.this.resource_name}/subject=*"
+}
+
+resource "confluent_api_key" "manager_schema_registry" {
+  display_name = "ridepulse-manager-sr"
+  owner {
+    id          = confluent_service_account.manager.id
+    api_version = confluent_service_account.manager.api_version
+    kind        = confluent_service_account.manager.kind
+  }
+  managed_resource {
+    id          = data.confluent_schema_registry_cluster.this.id
+    api_version = data.confluent_schema_registry_cluster.this.api_version
+    kind        = data.confluent_schema_registry_cluster.this.kind
+    environment {
+      id = confluent_environment.this.id
+    }
+  }
+  depends_on = [confluent_role_binding.manager_subjects]
+}
+
+resource "confluent_subject_config" "driver_locations" {
+  schema_registry_cluster {
+    id = data.confluent_schema_registry_cluster.this.id
+  }
+  rest_endpoint       = data.confluent_schema_registry_cluster.this.rest_endpoint
+  subject_name        = "driver.locations.v1-value"
+  compatibility_level = "BACKWARD"
+  credentials {
+    key    = confluent_api_key.manager_schema_registry.id
+    secret = confluent_api_key.manager_schema_registry.secret
+  }
+}
+
+resource "confluent_schema" "driver_locations" {
+  schema_registry_cluster {
+    id = data.confluent_schema_registry_cluster.this.id
+  }
+  rest_endpoint = data.confluent_schema_registry_cluster.this.rest_endpoint
+  subject_name  = confluent_subject_config.driver_locations.subject_name
+  format        = "AVRO"
+  schema        = file("${path.module}/../../../contracts/events/driver_location.avsc")
+  credentials {
+    key    = confluent_api_key.manager_schema_registry.id
+    secret = confluent_api_key.manager_schema_registry.secret
   }
 }
 

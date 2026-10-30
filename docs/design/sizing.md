@@ -46,6 +46,8 @@ throughput (every topic is far below a single partition's capacity).
 | `cdc.dispatch.drivers` | Debezium table CDC | driver_id | 3 status changes per trip ≈ 119k + M ≈ 12k repositioning moves + M ≈ 5.6k sign-ons/offs ≈ 137k (ADR-0003) | M ≈ 900 B (S8's row-change envelope) | E ≈ 123 MB | 3 | compact + 7 d |
 | `cdc.dispatch.driver_profiles` | Debezium table CDC | driver_id | E < 100 (profile edits) | M ≈ 900 B | ≈ 0.1 MB | 1 | 7 d |
 | `cdc.dispatch.replay_state` | Debezium table CDC | constant | E ≈ 1,440 (one watermark per simulated minute) | E ≈ 400 B | ≈ 0.6 MB | 1 | compact |
+| `cdc.dispatch.replay_runs` | Debezium table CDC | run_id | E < 10 (one per start or jump) | E ≈ 400 B | < 0.1 MB | 1 | compact |
+| `__debezium-heartbeat.cdc` | Debezium | server name | E 1 per heartbeat | E ≈ 100 B | ≈ 0.1 MB | 1 | 1 d |
 | `driver.locations.v1` | Replayer (Avro) | driver_id | M 510 busy drivers on average (ADR-0003: busy drivers only) x 1 ping / 15 s ≈ 2.9M | E ≈ 100 B Avro incl. headers | E ≈ 290 MB | 6 | 1 d |
 | `ops.alerts.v1` | Databricks | area_id | E < 1,000 | E ≈ 500 B | < 1 MB | 1 | 7 d |
 | `*.dlq` | Databricks | source key | E 0.5% of pings (injected malformed) ≈ 15k | E ≈ 200 B | ≈ 3 MB | 1 | 14 d |
