@@ -1,0 +1,48 @@
+{
+  "type": "record",
+  "name": "DriverLocation",
+  "namespace": "ridepulse.events",
+  "doc": "A synthetic ping from a busy driver (ADR-0003), straight to driver.locations.v1. The id of a ping is (driver_id, device_ts): a retried tick re-produces the same ids and silver drops them.",
+  "fields": [
+    {
+      "name": "driver_id",
+      "type": "string"
+    },
+    {
+      "name": "device_ts",
+      "type": {
+        "type": "long",
+        "logicalType": "local-timestamp-millis"
+      },
+      "doc": "Simulated time, no zone. The Kafka timestamp is the wall clock (ADR-0004)."
+    },
+    {
+      "name": "trip_key",
+      "type": "string"
+    },
+    {
+      "name": "status",
+      "type": {
+        "type": "enum",
+        "name": "DriverStatus",
+        "symbols": [
+          "en_route",
+          "on_trip"
+        ],
+        "default": "on_trip"
+      }
+    },
+    {
+      "name": "zone_id",
+      "type": "int"
+    },
+    {
+      "name": "lat",
+      "type": "double"
+    },
+    {
+      "name": "lon",
+      "type": "double"
+    }
+  ]
+}

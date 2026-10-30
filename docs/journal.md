@@ -535,3 +535,17 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   nobody online). The ADR's text is corrected where it disagreed with what was measured: dispatch goes by
   distance only (no surge-area-first step), and emergency sign-on adds a new driver rather than a rested one.
 - `prep` must run again before ticks can use this (format 3); a tick stops if `sign_on_zones.json` is missing.
+
+### #9 Event contracts
+- `contracts/events`: Avro for pings (`driver_location.avsc`), a JSON schema per trip event, the `trips.v1`
+  envelope, and the Debezium change envelope. `contracts/tests/test_events.py` holds the tick's real plan to them
+  on a crafted month and pins BACKWARD compatibility against a frozen v1 of the ping schema.
+- Money and miles in trip events are now exact strings (NFR-3), as Debezium already sends NUMERIC on the CDC
+  path; they were JSON numbers. A value finer than the contract stops the tick rather than rounding.
+- Event id, type and time stay in outbox columns, and the router moves them into an envelope around the
+  payload. Repeating them inside the payload would have added about 150 B an event, about 30% more Neon egress.
+- Real data: all 4,081,640 January events validate after the tick's conversion, and no value loses precision.
+- Not verified yet: the `trips.v1` envelope and CDC samples are hand-built, because Debezium can't run here, so
+  how it encodes `occurred_at` is an expectation. #11 captures real messages and tests them. The ping schema gets a
+  real producer in #8, and its `local-timestamp-millis` must be read as TIMESTAMP_NTZ by `from_avro` in #13 (S2
+  tested `timestamp-millis`). Registering the schema with BACKWARD is #10.

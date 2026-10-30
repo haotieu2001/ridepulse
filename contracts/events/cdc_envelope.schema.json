@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ridepulse/events/cdc_envelope.schema.json",
+  "title": "Debezium change event",
+  "description": "A cdc.dispatch.* value with decimal.handling.mode=string and schemas disabled. A delete also sends a null value (tombstone), which isn't this schema. Checked against real messages in #11.",
+  "type": "object",
+  "required": [
+    "op",
+    "source",
+    "ts_ms"
+  ],
+  "properties": {
+    "op": {
+      "enum": [
+        "c",
+        "u",
+        "d",
+        "r"
+      ]
+    },
+    "before": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "after": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "ts_ms": {
+      "type": "integer"
+    },
+    "source": {
+      "type": "object",
+      "required": [
+        "lsn",
+        "ts_ms",
+        "schema",
+        "table"
+      ],
+      "properties": {
+        "lsn": {
+          "type": "integer"
+        },
+        "ts_ms": {
+          "type": "integer",
+          "description": "Commit time: the wall clock"
+        },
+        "schema": {
+          "const": "dispatch"
+        },
+        "table": {
+          "enum": [
+            "drivers",
+            "driver_profiles",
+            "replay_state",
+            "replay_runs"
+          ]
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "op": {
+            "enum": [
+              "c",
+              "u",
+              "r"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "after": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "after"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "op": {
+            "const": "d"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "before": {
+            "type": "object"
+          },
+          "after": {
+            "type": "null"
+          }
+        },
+        "required": [
+          "before"
+        ]
+      }
+    }
+  ]
+}

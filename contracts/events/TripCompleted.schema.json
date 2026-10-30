@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ridepulse/events/TripCompleted.schema.json",
+  "title": "TripCompleted",
+  "description": "Dropoff: the only event with the fare breakdown, to keep Neon's egress down.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "airport_fee",
+    "base_fare",
+    "bcf",
+    "cbd_fee",
+    "congestion_surcharge",
+    "driver_id",
+    "driver_pay",
+    "dropped_off_at",
+    "reported_trip_time_s",
+    "sales_tax",
+    "shared_match",
+    "tips",
+    "tolls",
+    "trip_miles",
+    "wav_match"
+  ],
+  "properties": {
+    "driver_id": {
+      "type": "string",
+      "pattern": "^drv-\\d{6,}$"
+    },
+    "dropped_off_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}$",
+      "description": "Simulated time, no offset: the TLC's New York wall clock"
+    },
+    "trip_miles": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d{3}$",
+      "description": "Exact: cast to DECIMAL(8,3)"
+    },
+    "reported_trip_time_s": {
+      "type": "integer"
+    },
+    "base_fare": {
+      "type": "string",
+      "pattern": "^-?\\d+\\.\\d{2}$",
+      "description": "Exact: cast to DECIMAL(10,2), never to a float"
+    },
+    "tolls": {
+      "type": "string",
+      "pattern": "^-?\\d+\\.\\d{2}$",
+      "description": "Exact: cast to DECIMAL(10,2), never to a float"
+    },
+    "bcf": {
+      "type": "string",
+      "pattern": "^-?\\d+\\.\\d{2}$",
+      "description": "Exact: cast to DECIMAL(10,2), never to a float"
+    },
+    "sales_tax": {
+      "type": "string",
+      "pattern": "^-?\\d+\\.\\d{2}$",
+      "description": "Exact: cast to DECIMAL(10,2), never to a float"
+    },
+    "congestion_surcharge": {
+      "type": "string",
+      "pattern": "^-?\\d+\\.\\d{2}$",
+      "description": "Exact: cast to DECIMAL(10,2), never to a float"
+    },
+    "airport_fee": {
+      "type": "string",
+      "pattern": "^-?\\d+\\.\\d{2}$",
+      "description": "Exact: cast to DECIMAL(10,2), never to a float"
+    },
+    "cbd_fee": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^-?\\d+\\.\\d{2}$",
+      "description": "Exact: cast to DECIMAL(10,2), never to a float"
+    },
+    "tips": {
+      "type": "string",
+      "pattern": "^-?\\d+\\.\\d{2}$",
+      "description": "Exact: cast to DECIMAL(10,2), never to a float"
+    },
+    "driver_pay": {
+      "type": "string",
+      "pattern": "^-?\\d+\\.\\d{2}$",
+      "description": "Exact: cast to DECIMAL(10,2), never to a float"
+    },
+    "shared_match": {
+      "type": "boolean"
+    },
+    "wav_match": {
+      "type": "boolean"
+    }
+  }
+}

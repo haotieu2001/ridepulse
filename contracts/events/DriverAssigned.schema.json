@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ridepulse/events/DriverAssigned.schema.json",
+  "title": "DriverAssigned",
+  "description": "The supply model chose a driver (synthetic, ADR-0003).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "driver_id"
+  ],
+  "properties": {
+    "driver_id": {
+      "type": "string",
+      "pattern": "^drv-\\d{6,}$"
+    }
+  }
+}
