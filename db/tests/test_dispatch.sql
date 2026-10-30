@@ -4,7 +4,7 @@
 
 -- seed: two zones, one driver with a profile, one fee rule
 INSERT INTO zones VALUES (132, 'Queens', 'JFK Airport', 'Airports'), (230, 'Manhattan', 'Times Sq/Theatre District', 'Yellow Zone');
-INSERT INTO drivers (driver_id, status, zone_id, status_changed_at) VALUES ('D0001', 'idle', 230, '2025-01-06 07:55');
+INSERT INTO drivers (driver_id, status, zone_id, status_changed_at, online_since) VALUES ('D0001', 'idle', 230, '2025-01-06 07:55', '2025-01-06 07:00');
 INSERT INTO driver_profiles VALUES ('D0001', 'Synthetic Driver One', 'B03404', 'sedan', 4.9, '2024-03-01');
 INSERT INTO fare_rules (fee, amount, unit, valid_from) VALUES ('bcf', 0.0275, 'share_of_base_fare', '2024-01-01');
 

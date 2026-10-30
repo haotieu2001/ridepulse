@@ -514,3 +514,24 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
 - Tests on a throwaway Postgres with the real runner, seed and prep job: a whole month, window edges, retry
   after a failure before commit (same final state as a clean run), two overlapping runs (consecutive
   windows, each event once), the pre-arranged trip, refused starts, resume, jumps, purge, pool growth.
+
+### #7 Replayer supply: dispatch, shifts, repositioning
+- `services/replayer/supply.py` runs ADR-0003 inside the tick. State survives between ticks in
+  `dispatch.drivers` (V004 adds `online_since` and `leaving`), and each changed driver is written once per
+  tick, as its final state. So CDC sees a driver's state per tick, not every transition: a driver assigned and
+  picked up inside one tick shows one change. Trip events still carry every step.
+- Parity with the simulator required moving the simulator to what a stateless tick can do: sign-on zones by
+  a hash of driver and time (prep's new `sign_on_zones.json`, format 3) instead of seeded random state; idle
+  order by `(idle_since, driver_id)` instead of dict insertion; a fixed order inside a second; a start time
+  with an empty pool. Only `sign_on_zone()` is shared, so the two stay independent.
+- Result on all of January 2025 at 10x (`docs/design/supply/parity.py`, 6 min): 1,020,410 trips, 0 with a different
+  driver; pool 3,069 both; 366,025 moves both. The issue asked for one day. In CI, the same check runs on a
+  crafted month with sign-offs, moves, no-geometry zones and pre-arranged trips.
+- Real Postgres: a throwaway Neon database through New Year's night, 23 ticks at 60x then 36 at 10x: all 12,900 trips with a
+  driver match the simulator, so database round trips and a speed change alter nothing. Slowest 10x tick 4.1 s,
+  50,903 events applied.
+- ADR-0003's table is re-measured: the decision stands, 97.75% near, surge 15.9%, alerts 3.6%, and emergency
+  sign-ons go from 47 to 0, because a replay now staffs its first hour (they were an artefact of starting with
+  nobody online). The ADR's text is corrected where it disagreed with what was measured: dispatch goes by
+  distance only (no surge-area-first step), and emergency sign-on adds a new driver rather than a rested one.
+- `prep` must run again before ticks can use this (format 3); a tick stops if `sign_on_zones.json` is missing.

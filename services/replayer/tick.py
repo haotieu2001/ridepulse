@@ -4,7 +4,7 @@ event due in (watermark, watermark + speed], all in one Postgres transaction.
     BEGIN
     SELECT watermark, speed FROM replay_state FOR UPDATE      -- overlapping runs wait here
     read the slices the window touches, dispatch in memory
-    guarded transitions + outbox events (pipelined: a peak tick has 2,131 events)
+    guarded transitions + outbox events + changed drivers (pipelined: a peak tick has 2,131 events)
     DELETE FROM outbox                                        -- the WAL keeps the inserts
     advance_watermark(); purge trips older than 48 simulated hours
     COMMIT
@@ -12,13 +12,12 @@ event due in (watermark, watermark + speed], all in one Postgres transaction.
 So the watermark means "everything at or before this time is committed": a failure before COMMIT leaves
 nothing behind, and the retried tick does the same work. The clock is never computed from the wall clock.
 
-Dispatch is a placeholder until #7 (ADR-0003): LowestFreeDriver gives a trip the lowest-numbered free
-driver, wherever it is. The tick depends only on load / assign / release, so #7 replaces that one class.
+Dispatch, shifts and repositioning are services/replayer/supply.py (ADR-0003). Boundaries run in time
+order among the events, and driver changes are written once per tick, as each driver's final state.
 """
 from __future__ import annotations
 
 import gzip
-import heapq
 import json
 import uuid
 from dataclasses import dataclass
@@ -27,7 +26,9 @@ from datetime import datetime, timedelta
 import psycopg
 
 from services.prep.prep import EVENT_TYPES, Store, pointer_key
-from services.seed.seed import driver_id, driver_row, profile_row
+from services.seed.seed import driver_row, profile_row
+
+from .supply import COLUMNS, Geography, Supply, boundaries
 
 STEP = {name: i for i, name in enumerate(EVENT_TYPES)}
 # The status a trip must be in for each event to apply; TripRequested needs no row yet.
@@ -75,6 +76,11 @@ class Slices:
                 self.manifests[month] = {s["hour"]: s["key"] for s in manifest["slices"]}
         return self.manifests[month]
 
+    def prefix(self, month: str) -> str | None:
+        self._slice_keys(month)
+        pointer = self.store.get_json(pointer_key(month)) if self.manifests[month] is not None else None
+        return pointer["current"]["prefix"] if pointer else None
+
     def due(self, after: datetime, until: datetime) -> list[dict]:
         low, high = after.isoformat(timespec="seconds"), until.isoformat(timespec="seconds")
         events = []
@@ -96,39 +102,29 @@ class Slices:
         return events
 
 
-class LowestFreeDriver:
-    """The placeholder dispatcher: the lowest-numbered free driver takes the trip; if nobody is free, the
-    next driver joins the pool. Deterministic, which is all a retried tick needs."""
-    def __init__(self):
-        self.free: list[str] = []
-        self.on_trip: dict[str, str] = {}
-        self.pool = 0
-        self.new: list[int] = []
+def load_supply(store: Store, slices: Slices, hour: datetime, geography: Geography | None = None) -> Supply:
+    """The supply model with the prep job's inputs for this hour. The hour's own month supplies the heat map
+    and sign-on weights, or a prepared neighbour; targets add up, since a boundary hour's trips are split
+    between two months."""
+    previous, own, following = _months_around(hour)
+    prefixes = {m: slices.prefix(m) for m in (own, previous, following)}
+    prepared = [p for p in prefixes.values() if p]
+    if not prepared:
+        raise NotPrepared(f"no prepared month covers {hour}")
+    heat = {(int(z), int(how)): v for how, zones in store.get_json(f"{prepared[0]}/heat_map.json").items()
+            for z, v in zones.items()}
+    weights = {int(h): {int(z): c for z, c in zones.items()}
+               for h, zones in store.get_json(f"{prepared[0]}/sign_on_zones.json").items()}
+    hours = [store.get_json(f"{p}/staffing.json")["hours"] for p in prepared]
 
-    def load(self, cur: psycopg.Cursor) -> None:
-        cur.execute("SELECT driver_id, current_trip_key FROM drivers")
-        rows = cur.fetchall()
-        self.pool = len(rows)
-        self.free = [d for d, trip in rows if trip is None]
-        heapq.heapify(self.free)
-        self.on_trip = {trip: d for d, trip in rows if trip is not None}
-
-    def assign(self, trip_key: str, pickup_zone: int, at: datetime) -> str:
-        if self.free:
-            driver = heapq.heappop(self.free)
-        else:
-            self.new.append(self.pool)
-            driver = driver_id(self.pool)
-            self.pool += 1
-        self.on_trip[trip_key] = driver
-        return driver
-
-    def release(self, trip_key: str) -> None:
-        heapq.heappush(self.free, self.on_trip.pop(trip_key))
+    def online_target(at: datetime) -> int:
+        name = at.isoformat(timespec="seconds")
+        return sum(h[name]["online_target"] for h in hours if name in h)
+    return Supply(geography or Geography.load(), heat, weights, online_target)
 
 
-# --- the guarded transitions. Each is one statement: the trip moves, its driver moves and its event is
-# --- written only if the status guard matched, so an event can't exist without a state change.
+# --- the guarded transitions. Each is one statement: the trip moves and its event is written only if the
+# --- status guard matched, so an event can't exist without a state change.
 
 _OUTBOX = """INSERT INTO outbox (id, aggregateid, type, payload, occurred_at)
 SELECT %(id)s::uuid, trip_key, %(type)s, %(payload)s::jsonb, %(occurred_at)s::timestamp FROM t"""
@@ -142,20 +138,13 @@ SQL = {
 """ + _OUTBOX,
     "DriverAssigned": """WITH t AS (
   UPDATE trips SET status = 'assigned', driver_id = %(driver_id)s, assigned_at = %(due_at)s::timestamp
-  WHERE trip_key = %(trip_key)s AND status = 'requested' RETURNING trip_key, driver_id, pickup_zone_id
-), d AS (
-  UPDATE drivers SET status = 'en_route', zone_id = t.pickup_zone_id, current_trip_key = t.trip_key,
-                     status_changed_at = %(due_at)s::timestamp
-  FROM t WHERE drivers.driver_id = t.driver_id
+  WHERE trip_key = %(trip_key)s AND status = 'requested' RETURNING trip_key
 )
 """ + _OUTBOX,
     "TripStarted": """WITH t AS (
   UPDATE trips SET status = 'started', driver_arrived_at = %(driver_arrived_at)s::timestamp,
                    picked_up_at = %(picked_up_at)s::timestamp
-  WHERE trip_key = %(trip_key)s AND status = 'assigned' RETURNING trip_key, driver_id
-), d AS (
-  UPDATE drivers SET status = 'on_trip', status_changed_at = %(due_at)s::timestamp
-  FROM t WHERE drivers.driver_id = t.driver_id
+  WHERE trip_key = %(trip_key)s AND status = 'assigned' RETURNING trip_key
 )
 """ + _OUTBOX,
     "TripCompleted": """WITH t AS (
@@ -163,11 +152,7 @@ SQL = {
     base_fare = %(base_fare)s::numeric, tolls = %(tolls)s::numeric, bcf = %(bcf)s::numeric, sales_tax = %(sales_tax)s::numeric,
     congestion_surcharge = %(congestion_surcharge)s::numeric, airport_fee = %(airport_fee)s::numeric,
     cbd_fee = %(cbd_fee)s::numeric, tips = %(tips)s::numeric, driver_pay = %(driver_pay)s::numeric
-  WHERE trip_key = %(trip_key)s AND status = 'started' RETURNING trip_key, driver_id, dropoff_zone_id
-), d AS (
-  UPDATE drivers SET status = 'idle', zone_id = t.dropoff_zone_id, current_trip_key = NULL,
-                     status_changed_at = %(due_at)s::timestamp
-  FROM t WHERE drivers.driver_id = t.driver_id
+  WHERE trip_key = %(trip_key)s AND status = 'started' RETURNING trip_key
 )
 """ + _OUTBOX,
 }
@@ -181,38 +166,43 @@ class TickResult:
     skipped: int
     new_drivers: int
     purged: int
+    drivers_changed: int
 
 
-def _plan(events: list[dict], known: dict[str, tuple[str, int]], dispatcher) -> tuple[list[tuple[str, dict]], int]:
-    """Walk the events in order: which transitions apply, with the dispatcher's choices. Events of a trip
-    that isn't in the expected state are skipped: a trip cancelled by a forward jump (start_replay) leaves
-    later events behind, and they must not take a driver."""
+def _plan(events: list[dict], known: dict[str, tuple[str, int, int]], supply: Supply,
+          owned: list[datetime]) -> tuple[list[tuple[str, dict]], int]:
+    """Walk the window in order: which transitions apply, with the supply model's choices, and the
+    boundaries between them. Events of a trip that isn't in the expected state are skipped: a trip cancelled
+    by a forward jump leaves later events behind, and they must not take a driver."""
     planned, skipped = [], 0
+    pending = list(owned)
     for e in events:
         key, kind, payload = e["trip_key"], e["type"], dict(e["payload"])
-        status, zone = known.get(key, (None, None))
+        due = datetime.fromisoformat(e["due_at"])
+        while pending and pending[0] < due:
+            supply.boundary(pending.pop(0))
+        status, pickup, dropoff = known.get(key, (None, None, None))
         if status != REQUIRES[kind]:
             skipped += 1
             continue
-        due = datetime.fromisoformat(e["due_at"])
         if kind == "TripRequested":
-            zone = payload["pickup_zone_id"]
+            pickup, dropoff = payload["pickup_zone_id"], payload["dropoff_zone_id"]
         elif kind == "DriverAssigned":
-            payload["driver_id"] = dispatcher.assign(key, zone, due)
+            payload["driver_id"] = supply.assign(key, pickup, dropoff, due)
         elif kind == "TripStarted":
-            payload["driver_id"] = dispatcher.on_trip[key]
+            payload["driver_id"] = supply.started(key, due)
         else:
-            payload["driver_id"] = dispatcher.on_trip[key]
-            dispatcher.release(key)
-        known[key] = (AFTER[kind], zone)
+            payload["driver_id"] = supply.completed(key, pickup, dropoff, due)
+        known[key] = (AFTER[kind], pickup, dropoff)
         planned.append((kind, {**payload, "trip_key": key, "due_at": e["due_at"], "id": event_id(key, kind), "type": kind,
                                "occurred_at": e["occurred_at"], "payload": json.dumps(payload, sort_keys=True)}))
+    for b in pending:
+        supply.boundary(b)
     return planned, skipped
 
 
-def tick(conn: psycopg.Connection, store: Store, *, dispatcher=None, before_commit=None) -> TickResult:
+def tick(conn: psycopg.Connection, store: Store, *, geography: Geography | None = None, before_commit=None) -> TickResult:
     """One tick. `conn` must be in autocommit mode with search_path on the dispatch schema."""
-    dispatcher = dispatcher or LowestFreeDriver()
     with conn.transaction(), conn.cursor() as cur:
         cur.execute("SELECT watermark, speed FROM replay_state WHERE id = 1 FOR UPDATE")
         row = cur.fetchone()
@@ -220,16 +210,19 @@ def tick(conn: psycopg.Connection, store: Store, *, dispatcher=None, before_comm
             raise RuntimeError("no replay is running: start one at a day boundary first")
         watermark, speed = row
         until = watermark + timedelta(minutes=float(speed))
-        events = Slices(store).due(watermark, until)
+        slices = Slices(store)
+        events = slices.due(watermark, until)
+        supply = load_supply(store, slices, _hour(watermark), geography)
 
         keys = sorted({e["trip_key"] for e in events})
-        cur.execute("SELECT trip_key, status, pickup_zone_id FROM trips WHERE trip_key = ANY(%s)", (keys,))
-        known = {k: (s, z) for k, s, z in cur.fetchall()}
-        dispatcher.load(cur)
-        planned, skipped = _plan(events, known, dispatcher)
+        cur.execute("SELECT trip_key, status, pickup_zone_id, dropoff_zone_id FROM trips WHERE trip_key = ANY(%s)", (keys,))
+        known = {k: (s, p, d) for k, s, p, d in cur.fetchall()}
+        cur.execute(f"SELECT {COLUMNS} FROM drivers")
+        supply.load(cur.fetchall())
+        planned, skipped = _plan(events, known, supply, boundaries(watermark, until))
 
         with conn.pipeline():   # one round trip per batch: New Year's night adds hundreds of drivers in a tick
-            for n in dispatcher.new:
+            for n in supply.new:
                 cur.execute("INSERT INTO drivers (driver_id, status, status_changed_at) VALUES "
                             "(%(driver_id)s, %(status)s, %(status_changed_at)s) ON CONFLICT (driver_id) DO NOTHING",
                             driver_row(n, until))
@@ -238,6 +231,12 @@ def tick(conn: psycopg.Connection, store: Store, *, dispatcher=None, before_comm
                             "%(joined_on)s) ON CONFLICT (driver_id) DO NOTHING", profile_row(n))
             for kind, params in planned:
                 cur.execute(SQL[kind], params)
+            changed = supply.changed()
+            for d in changed:   # each driver's final state: trips above exist, and a released trip is gone from it
+                cur.execute("UPDATE drivers SET status = %(status)s, zone_id = %(zone_id)s::integer, "
+                            "current_trip_key = %(current_trip_key)s, status_changed_at = %(status_changed_at)s::timestamp, "
+                            "online_since = %(online_since)s::timestamp, leaving = %(leaving)s WHERE driver_id = %(driver_id)s",
+                            vars(d))
         cur.execute("WITH gone AS (DELETE FROM outbox RETURNING 1) SELECT count(*) FROM gone")
         applied = cur.fetchone()[0]
 
@@ -246,7 +245,7 @@ def tick(conn: psycopg.Connection, store: Store, *, dispatcher=None, before_comm
         purged = cur.rowcount
         if before_commit:
             before_commit()
-    return TickResult(watermark, until, applied, skipped, len(dispatcher.new), purged)
+    return TickResult(watermark, until, applied, skipped, len(supply.new), purged, len(changed))
 
 
 def start(conn: psycopg.Connection, from_ts: datetime | None, speed: float) -> int:
@@ -259,7 +258,7 @@ def start(conn: psycopg.Connection, from_ts: datetime | None, speed: float) -> i
         cur.execute("SELECT start_replay(%s::timestamp, %s::numeric)", (from_ts, speed))
         run = cur.fetchone()[0]
         if row is not None and from_ts is not None and from_ts != row[0]:
-            cur.execute("UPDATE drivers SET status = 'offline', current_trip_key = NULL, status_changed_at = %s::timestamp "
-                        "WHERE current_trip_key IS NOT NULL", (from_ts,))
+            cur.execute("UPDATE drivers SET status = 'offline', current_trip_key = NULL, online_since = NULL, leaving = false, "
+                        "status_changed_at = %s::timestamp WHERE current_trip_key IS NOT NULL", (from_ts,))
             cur.execute("DELETE FROM trips WHERE status <> 'completed'")
     return run

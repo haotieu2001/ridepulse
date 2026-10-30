@@ -16,7 +16,7 @@ from contracts.trip_key import trip_key
 from services.prep.prep import prep
 from services.prep.tests.test_prep import (LATE, LYFT_NO_ARRIVAL, MONTH, NORMAL, POOLED_2, PRE_ARRANGED, REPLAYED, ROWS,
                                            land)
-from services.replayer.tick import LowestFreeDriver, NotPrepared, Slices, _months_around, event_id, start, tick
+from services.replayer.tick import NotPrepared, Slices, _months_around, event_id, start, tick
 from services.seed.seed import seed_sql
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
@@ -35,14 +35,6 @@ def test_event_ids_are_deterministic_per_trip_and_type():
     assert event_id("k", "TripStarted") == event_id("k", "TripStarted")
     assert event_id("k", "TripStarted") != event_id("k", "TripCompleted")
     assert uuid.UUID(event_id("k", "TripStarted")).version == 5
-
-
-def test_lowest_free_driver_reuses_before_growing():
-    d = LowestFreeDriver()
-    assert d.assign("a", 1, None) == "drv-000000" and d.assign("b", 1, None) == "drv-000001"
-    d.release("a")
-    assert d.assign("c", 1, None) == "drv-000000"
-    assert d.new == [0, 1]
 
 
 def test_slices_merge_months_in_replay_order_and_respect_the_window(tmp_path):
@@ -123,8 +115,9 @@ def test_a_whole_month_replays_every_trip_once(conn, store):
     assert conn.execute("SELECT count(*) FROM outbox").fetchone()[0] == 0
     logged = conn.execute("SELECT type, count(*) FROM outbox_log GROUP BY 1").fetchall()
     assert dict(logged) == {"TripRequested": 7, "DriverAssigned": 7, "TripStarted": 7, "TripCompleted": 7}
-    # Every driver ends idle in the zone of their last dropoff.
-    assert conn.execute("SELECT count(*) FROM drivers WHERE status <> 'idle' OR current_trip_key IS NOT NULL").fetchone()[0] == 0
+    # Nobody is left on a trip, and the V004 shift columns agree with the status.
+    assert conn.execute("SELECT count(*) FROM drivers WHERE status IN ('en_route', 'on_trip') OR current_trip_key IS NOT NULL").fetchone()[0] == 0
+    assert conn.execute("SELECT count(*) FROM drivers WHERE (status = 'offline') <> (online_since IS NULL) OR leaving").fetchone()[0] == 0
     assert conn.execute("SELECT count(*) FROM drivers").fetchone()[0] == conn.execute("SELECT count(*) FROM driver_profiles").fetchone()[0]
 
 
@@ -241,7 +234,9 @@ def test_a_forward_jump_cancels_open_trips_and_frees_their_drivers(conn, store):
     start(conn, datetime(2025, 1, 7), 60)
     assert conn.execute("SELECT count(*) FROM trips WHERE status <> 'completed'").fetchone()[0] == 0
     assert conn.execute("SELECT count(*) FROM drivers WHERE current_trip_key IS NOT NULL").fetchone()[0] == 0
-    assert conn.execute("SELECT count(*) FROM drivers WHERE status = 'offline'").fetchone()[0] == 1
+    assert conn.execute("SELECT count(*) FROM drivers WHERE status IN ('en_route', 'on_trip')").fetchone()[0] == 0
+    assert conn.execute("SELECT count(*) FROM drivers WHERE status = 'offline' AND online_since IS NULL "
+                        "AND status_changed_at = '2025-01-07'").fetchone()[0] == 1
 
 
 @needs_postgres
@@ -271,12 +266,11 @@ def test_completed_trips_older_than_the_hot_window_are_purged(conn, store):
 
 
 @needs_postgres
-def test_new_drivers_get_a_profile_and_a_reused_pool_stays_small(conn, store):
+def test_new_drivers_get_a_profile(conn, store):
     start(conn, datetime(2025, 1, 6), 60)
-    trips_at_once = 2  # NORMAL and PRE_ARRANGED overlap; the rest of the day's trips reuse them
     for _ in range(24):
         tick(conn, store)
     n = conn.execute("SELECT count(*) FROM drivers").fetchone()[0]
-    assert 1 <= n <= trips_at_once + 1
+    assert n >= 1
     assert conn.execute("SELECT count(*) FROM driver_profiles").fetchone()[0] == n
     assert conn.execute("SELECT count(*) FROM drivers WHERE status_changed_at IS NULL").fetchone()[0] == 0

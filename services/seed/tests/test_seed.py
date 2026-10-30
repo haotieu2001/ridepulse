@@ -128,7 +128,7 @@ def test_drivers_grow_and_an_edited_profile_survives(database, tmp_path):
     zones.write_text(lookup())
     seed(database, zones, "--drivers", "3")
     run_psql("UPDATE driver_profiles SET full_name = 'Edited Name' WHERE driver_id = 'drv-000001'", database)
-    run_psql("UPDATE drivers SET status = 'idle', zone_id = 5 WHERE driver_id = 'drv-000002'", database)
+    run_psql("UPDATE drivers SET status = 'idle', zone_id = 5, online_since = '2025-01-06' WHERE driver_id = 'drv-000002'", database)
     seed(database, zones, "--drivers", "5")
     assert run_psql("SELECT count(*) FROM drivers", database) == "5"
     assert run_psql("SELECT count(*) FROM driver_profiles", database) == "5"

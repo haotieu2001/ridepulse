@@ -18,28 +18,28 @@ trip at the worst minute, which seemed to leave about 25% idle.
 This ADR tested that with a full month: every one of the 1,020,410 sampled January 2025 trips was
 dispatched through a simulated pool, the way the replayer will do it
 (`docs/design/supply/simulate_supply.py`, zone geometry from `ref/build_zone_geo.py`). Dispatch
-takes the nearest idle driver by zone-centroid distance, searching the surge area first. The driver
+takes the driver idle longest in the nearest zone with anyone idle, by zone-centroid distance. The driver
 is busy from assignment (request + 30 s, capped at arrival, never before the request) to dropoff,
 on the ADR-0004 schedule, as replayed.
 
 | Model | Pool | Online, avg / max | Trips with an idle driver in the surge area | No idle driver anywhere | R1 surge / alert, share of evaluated area-windows | Utilisation, TLC definition | Pay per online hour |
 |---|---|---|---|---|---|---|---|
-| Always on, 1,200 (the plan) | 1,200 | 1,200 | 65.5% | **557 trips** | 82.8% / 72.2% | 34.7% | $21.3 |
-| Always on, 2,000 | 2,000 | 2,000 | 68.5% | 0 | 78.6% / 67.6% | 20.8% | $12.8 |
-| Always on, 1,500 + repositioning | 1,500 | 1,500 | 81.5% | 0 | 60.6% / 43.3% | 27.8% | $17.0 |
-| Shaped shifts at 60%, no repositioning | 3,069 | 962 / 2,320 | 85.3% | 47 | 54.7% / 37.3% | 43.3% | $26.6 |
-| **Shaped shifts at 60% + repositioning** | **3,069** | **962 / 2,320** | **97.8%** | **47** | **15.7% / 3.5%** | **43.3%** | **$26.6** |
-| Shaped shifts at 70% + repositioning | 2,658 | 827 / 1,989 | 94.3% | 47 | 44.8% / 15.9% | 50.4% | $30.9 |
-| Shaped shifts at 80% + repositioning | 2,357 | 726 / 1,740 | 85.4% | 47 | 71.9% / 41.9% | 57.4% | $35.2 |
+| Always on, 1,200 (the plan) | 1,200 | 1,200 | 65.5% | **612 trips** | 82.9% / 72.3% | 34.6% | $21.2 |
+| Always on, 2,000 | 2,000 | 2,000 | 68.5% | 0 | 78.7% / 67.8% | 20.8% | $12.8 |
+| Always on, 1,500 + repositioning | 1,500 | 1,500 | 81.5% | 0 | 60.7% / 43.4% | 27.7% | $17.0 |
+| Shaped shifts at 60%, no repositioning | 3,069 | 962 / 2,320 | 85.2% | 0 | 54.9% / 37.7% | 43.3% | $26.6 |
+| **Shaped shifts at 60% + repositioning** | **3,069** | **962 / 2,320** | **97.8%** | **0** | **15.9% / 3.6%** | **43.3%** | **$26.6** |
+| Shaped shifts at 70% + repositioning | 2,655 | 827 / 1,989 | 94.2% | 0 | 45.2% / 16.0% | 50.4% | $30.9 |
+| Shaped shifts at 80% + repositioning | 2,357 | 726 / 1,740 | 85.4% | 0 | 72.0% / 42.3% | 57.4% | $35.2 |
 
 What the month showed:
 - **Peak supply need is 1,392 drivers, not 906.** Counting the drive to the pickup (the real waits),
-  the busiest moment is 01:11 on New Year's Day. A fixed pool of 1,200 runs out 557 times.
+  the busiest moment is 01:11 on New Year's Day. A fixed pool of 1,200 runs out 612 times.
 - **Pool size barely helps; position does.** Idle drivers pile up where trips end, which is not
   where trips start. Going from 1,200 to 2,000 always-on drivers moves "idle driver in the area"
   only from 66% to 69%, and R1 fires in about 80% of busy areas: it would be noise.
 - **Repositioning is the main lever**, and demand-shaped shifts are the second: together they
-  reach 97.8%, and surge becomes an exception (16% of busy area-windows, alerts in 3.5%).
+  reach 97.8%, and surge becomes an exception (16% of busy area-windows, alerts in 3.6%).
 - Real NYC drivers are busier: the TLC's utilisation rate (passenger time / time available) is 58%
   by rule and was 54.8% observed in 2023. At that utilisation (the 80% row) surge fires in 72% of
   busy windows and only 85.4% of trips find an idle driver nearby.
@@ -54,12 +54,12 @@ What the month showed:
      with a hash of `(driver_id, shift start)` as the random source.
    - sign off when over target: idle drivers online at least 4 h, longest-online first.
    - every shift ends after at most 10 h; a busy driver finishes the trip first.
-   - emergency sign-on: if a request finds no idle driver anywhere, a rested driver signs on at the
-     pickup zone (47 times in January, all in the New Year's night rush).
-2. **Dispatch.** The nearest idle driver by zone-centroid distance takes the trip, searching the
-   pickup zone and its neighbours first (`ref/zone_neighbours.csv`) and then outward. Ties go to the
-   driver idle longest, then the lowest `driver_id`. A trip picked up in zone 264/265 (no geometry)
-   searches from its dropoff zone.
+   - emergency sign-on: if a request finds no idle driver anywhere, a new driver signs on at the pickup
+     zone (not needed in January 2025, once the replay's first hour is staffed).
+2. **Dispatch.** The trip goes to the nearest zone with anyone idle, by zone-centroid distance from the
+   pickup, and there to the driver idle longest, then the lowest `driver_id`. A trip picked up in zone
+   264/265 (no geometry) searches from its dropoff zone, and with no geometry at either end takes the
+   driver idle longest anywhere. A driver in the surge area (`ref/zone_neighbours.csv`) counts as near.
 3. **Repositioning, every tick.** Every 10 simulated minutes (one replayer tick at 10x), each driver
    idle for 10 min or more, oldest first, moves to the zone within 3 miles with the most expected
    requests per idle driver, if it beats the driver's own zone by 1.5x. Expected requests are the
@@ -71,9 +71,11 @@ What the month showed:
 5. **Deterministic.** Given the same starting state and slice, dispatch, shifts and repositioning
    produce the same result: there is no unseeded randomness and no dependency on wall time. A
    retried tick then recomputes the same assignments and the same ping ids (ADR-0004).
-6. **The simulator is the reference.** `simulate_supply.py` stays in the repo; in Phase 2 the
-   replayer's supply logic is tested against it on a replayed day (same assignments) and its
-   monthly metrics (the table above) are re-measured per replayed month.
+6. **The simulator is the reference.** `simulate_supply.py` stays in the repo as an independent
+   implementation. `services/replayer/supply.py` gives every trip of January 2025 the same driver
+   (`docs/design/supply/parity.py`), so the table above is also the replayer's. Re-run it for a new month.
+   Inside one simulated second, assignments come first, then dropoffs, then the boundary, each in
+   `trip_key` order.
 
 ## Alternatives considered
 
