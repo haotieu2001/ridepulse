@@ -31,9 +31,9 @@ Reproduce the measurements with `docs/design/sizing/measure_sample.py` and `delt
 | Replay rate at 10x | ≈ 13.8k trips per real hour on average, peak hour ≈ 1.7x | M+E | 33,070 / 24 x 10; peak from the 08:00 rush hour of 2025-01-06 |
 
 **Driver pool.** At the worst minute 906 drivers are on a trip, but counting the drive to the pickup
-the peak need is **1,393 busy drivers** (01:11 on New Year's Day). A month-long dispatch simulation
+the peak need is **1,392 busy drivers** (01:11 on New Year's Day). A month-long dispatch simulation
 (ADR-0003) replaced the plan's fixed pool of about 1,200: demand-shaped shifts plus repositioning give
-a pool of **≈ 3,100** drivers, **967 online on average** (2,322 at the peak) and about **510 busy**.
+a pool of **≈ 3,100** drivers, **962 online on average** (2,320 at the peak) and about **510 busy**.
 
 ## 3. Kafka topics
 
@@ -115,6 +115,6 @@ is the main thing to watch in Phases 3-4 (requirements, open question 3).
 
 - Outbox event sizes and Neon egress with the full design (Phase 2).
 - Online and busy driver counts and ping volume from the real replayer, against ADR-0003's simulation
-  (967 online, 510 busy on average) (Phase 2).
+  (962 online, 510 busy on average) (Phase 2).
 - Bronze Delta size for a day of pings (Phase 2).
 - Daily job run time (Phase 4).

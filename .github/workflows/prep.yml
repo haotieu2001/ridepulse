@@ -14,6 +14,9 @@ on:
         description: "Rebuild even if this version is already prepared"
         type: boolean
         default: false
+      target_utilisation:
+        description: "supply.target_utilisation (ADR-0003)"
+        default: "0.6"
 
 permissions:
   contents: read
@@ -31,6 +34,7 @@ jobs:
       LANDING_BUCKET: ridepulse-landing-dev-121403124761
       MONTH: ${{ inputs.month }}
       FORCE: ${{ inputs.force && '--force' || '' }}
+      TARGET_UTILISATION: ${{ inputs.target_utilisation }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -42,4 +46,4 @@ jobs:
           role-to-assume: arn:aws:iam::121403124761:role/ridepulse-github-ci
           aws-region: us-east-2
       - name: Prep
-        run: /usr/bin/time -v uv run --frozen python -m services.prep "$MONTH" $FORCE
+        run: /usr/bin/time -v uv run --frozen python -m services.prep "$MONTH" --target-utilisation "$TARGET_UTILISATION" $FORCE
