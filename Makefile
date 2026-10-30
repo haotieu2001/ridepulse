@@ -7,17 +7,20 @@ TLC_URL     := https://d37ci6vzurychx.cloudfront.net/trip-data/$(TLC_FILE)
 BOOTSTRAP   := infra/terraform/bootstrap
 LANDING     := infra/terraform/landing
 CONFLUENT   := infra/terraform/confluent
+DEBEZIUM    := infra/terraform/debezium
 LANDING_BUCKET ?= ridepulse-landing-dev-121403124761
 YEAR        ?= 2025
 
 export AWS_PROFILE
 
-.PHONY: help bootstrap-plan bootstrap-apply landing-plan landing-apply confluent-plan confluent-apply land-month land-zones land-noaa prep db-status db-migrate db-test db-seed catalog deploy s10-upload s10-run s10
+.PHONY: help bootstrap-plan bootstrap-apply landing-plan landing-apply confluent-plan confluent-apply debezium-plan debezium-up debezium-down land-month land-zones land-noaa prep db-status db-migrate db-test db-seed catalog deploy s10-upload s10-run s10
 
 help:
 	@echo "bootstrap-plan / bootstrap-apply  Terraform: state bucket, GitHub OIDC role, budget"
 	@echo "landing-plan / landing-apply      Terraform: the S3 landing bucket"
 	@echo "confluent-plan / confluent-apply  Terraform: Confluent topics, ACLs and schemas"
+	@echo "debezium-plan / debezium-up       Terraform: the Debezium instance for a demo window"
+	@echo "debezium-down                     stop Debezium, drop its slot, destroy the instance"
 	@echo "land-month MONTH=2025-01          land one HVFHV month in S3 (pinned to its ETag)"
 	@echo "land-zones / land-noaa YEAR=2025  land the zone files / one NOAA GHCN-Daily year"
 	@echo "prep MONTH=2025-01 [OUT_DIR=dir]  prep job: contract, sample, event-time slices"
@@ -48,6 +51,16 @@ confluent-plan:
 
 confluent-apply:
 	terraform -chdir=$(CONFLUENT) apply confluent.tfplan
+
+debezium-plan:
+	terraform -chdir=$(DEBEZIUM) init -input=false
+	terraform -chdir=$(DEBEZIUM) plan -input=false -out=debezium.tfplan
+
+debezium-up:
+	terraform -chdir=$(DEBEZIUM) apply debezium.tfplan
+
+debezium-down:
+	scripts/debezium_down.sh
 
 land-month:
 	uv run python -m services.tlc_downloader fhvhv $(MONTH) --bucket $(LANDING_BUCKET)

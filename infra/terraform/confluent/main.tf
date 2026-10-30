@@ -188,6 +188,7 @@ locals {
     "cdc.dispatch.dlq"             = { partitions = 1, config = { "retention.ms" = 14 * local.day_ms } }
     "driver.locations.v1.dlq"      = { partitions = 1, config = { "retention.ms" = 14 * local.day_ms } }
     "__debezium-heartbeat.cdc"     = { partitions = 1, config = { "retention.ms" = local.day_ms } }
+    "debezium.offsets"             = { partitions = 1, config = { "cleanup.policy" = "compact" } }
   }
 }
 
