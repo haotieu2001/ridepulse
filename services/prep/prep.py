@@ -20,8 +20,9 @@ replayer can apply tick by tick.
    prefix without one is an unfinished run. An hour with no events has no slice file; the manifest
    is the list of slices.
 
-Outputs are byte-for-byte deterministic (gzip without a timestamp), so a rerun rewrites identical
-objects. A rerun for an unchanged source ETag and format is a no-op unless forced.
+Slice content is deterministic on any machine, and the gzip bytes too on one Python version (no
+timestamp, but the header's OS byte differs between 3.12 and 3.13, and it is covered by the
+manifest's sha256). A rerun for an unchanged source ETag and format is a no-op unless forced.
 """
 from __future__ import annotations
 

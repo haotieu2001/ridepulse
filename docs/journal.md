@@ -453,3 +453,8 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   repo's OIDC tokens use immutable subjects (`repo:haotieu2001@62063165/ridepulse@1436061952:...`), and
   the role trusted only the name form. No CI job had assumed the role before, so it stayed hidden since
   Phase 0. The trust policy now uses the immutable form (bootstrap stack).
+- Actions run 41073738582 on January 2025: 4 min 3 s, 1.51 GB peak RSS, same counts as the dry run, 747
+  slices (200 MB) in S3, keys match the manifest, 3 slices re-hashed. All 747 decompress to the same
+  content as the laptop dry run, but no gzip file is byte-identical: the header's OS byte differs
+  (`03` on the runner's Python 3.12, `ff` on the laptop's 3.13). The "byte-identical" result above holds
+  only on one Python version; replay reads content, so nothing depends on it.
