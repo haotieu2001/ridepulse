@@ -5,9 +5,9 @@ variable "region" {
 }
 
 variable "github_repo" {
-  description = "owner/name of the repo allowed to assume the CI role."
+  description = "The repo allowed to assume the CI role, as its OIDC subject names it. This repo has immutable subjects (owner@id/name@id), so a renamed or re-created repo can't match; see gh api repos/OWNER/REPO/actions/oidc/customization/sub."
   type        = string
-  default     = "haotieu2001/ridepulse"
+  default     = "haotieu2001@62063165/ridepulse@1436061952"
 }
 
 variable "alert_email" {
