@@ -11,7 +11,8 @@ event due in (watermark, watermark + speed], all in one Postgres transaction.
     COMMIT
 
 So the watermark means "everything at or before this time is committed": a failure before COMMIT leaves
-nothing behind in Postgres, and the retried tick does the same work and re-produces the same pings. The clock is never computed from the wall clock.
+nothing behind in Postgres, and the retried tick does the same work and re-produces the same pings. The clock
+is never computed from the wall clock.
 
 Dispatch, shifts and repositioning are services/replayer/supply.py (ADR-0003). Boundaries run in time
 order among the events, and driver changes are written once per tick, as each driver's final state.

@@ -48,7 +48,7 @@ class Geography:
     latlon: dict[int, tuple[float, float]]
 
     @staticmethod
-    def load(path: pathlib.Path = REF / "zone_centroids.csv") -> "Geography":
+    def load(path: pathlib.Path = REF / "zone_centroids.csv") -> Geography:
         with open(path) as f:
             rows = list(csv.DictReader(f))
         pos = {int(r["zone_id"]): (int(r["x_ft"]), int(r["y_ft"])) for r in rows}

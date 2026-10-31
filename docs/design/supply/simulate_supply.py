@@ -302,7 +302,7 @@ class Sim:
                 last = to
 
         def close_window(end):
-            for z, area in self.area.items():
+            for area in self.area.values():
                 req = sum(req_counts.get(a, 0) for a in area)
                 if req >= SURGE_MIN_REQUESTS:
                     idle = sum(len(self.idle[a]) for a in area)

@@ -51,7 +51,7 @@ def run(sql):
     out = subprocess.run([str(ROOT / "scripts/feasibility/sql.sh"), f.name],
                          check=True, capture_output=True, text=True).stdout.splitlines()
     rows = [line for line in out if " | " in line]
-    return dict(zip(rows[0].split(" | "), rows[1].split(" | ")))
+    return dict(zip(rows[0].split(" | "), rows[1].split(" | "), strict=True))
 
 
 if __name__ == "__main__":

@@ -132,7 +132,7 @@ def test_a_ping_round_trips_through_avro():
 
 @pytest.mark.parametrize("bad", [{"status": "idle"}, {"zone_id": None}, {"lat": None}])
 def test_a_bad_ping_is_refused(bad):
-    with pytest.raises(Exception):
+    with pytest.raises((ValueError, TypeError)):   # fastavro: ValueError for an unknown enum symbol, TypeError for a null
         write_ping(ping_schema(), {**GOOD_PING, **bad})
 
 

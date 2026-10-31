@@ -1,13 +1,14 @@
 """The downloader against a real local HTTP server (ETag, Content-Length, 403 bursts) and an
 in-memory store. The S3 store itself is exercised by the end-to-end run in the README."""
 import hashlib
+import http.client
 import io
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from services.tlc_downloader.download import Source, land, sources
+from services.tlc_downloader.download import ShortBody, Source, land, sources
 
 
 class MemoryStore:
@@ -137,7 +138,7 @@ def test_a_change_between_head_and_get_is_refused(origin):
 def test_a_short_body_is_refused_after_retries(origin):
     origin.length = len(origin.body) + 10
     store = MemoryStore()
-    with pytest.raises(Exception):
+    with pytest.raises((ShortBody, http.client.IncompleteRead)):
         land(src(origin), store, pause_s=0)
     assert origin.requests.count("GET") == 3 and store.get_json(src(origin).manifest_key) is None
 

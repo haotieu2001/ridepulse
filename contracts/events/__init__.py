@@ -16,7 +16,7 @@ EVENT_TYPES = ("TripRequested", "DriverAssigned", "TripStarted", "TripCompleted"
 
 
 def validator(name: str):
-    from jsonschema import Draft202012Validator, FormatChecker   # tests only: the replayer Lambda doesn't ship it
+    from jsonschema import Draft202012Validator, FormatChecker  # tests only: the replayer Lambda doesn't ship it
     schema = json.loads((HERE / f"{name}.schema.json").read_text())
     return Draft202012Validator(schema, format_checker=FormatChecker())
 

@@ -10,7 +10,12 @@ from collections import defaultdict
 import pytest
 
 from contracts.trip_key import (
-    KEY_FIELDS, SPARK_BASE_TRIP_KEY_SQL, base_trip_key, in_sample, spark_in_sample_sql, trip_key,
+    KEY_FIELDS,
+    SPARK_BASE_TRIP_KEY_SQL,
+    base_trip_key,
+    in_sample,
+    spark_in_sample_sql,
+    trip_key,
 )
 
 FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "trip_key_spark.tsv"
