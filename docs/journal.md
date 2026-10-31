@@ -622,3 +622,26 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   topic with the right offset and error, and bronze counts didn't move. They stay in the real topics until retention.
 - Not done: staging. The CI service principal can't read the `ridepulse` secret scope, so its pipeline would deploy but
   fail to run; granting READ waits for a decision.
+
+### #12 Demo windows
+- `infra/terraform/replayer`: the replayer Lambda (arm64, Python 3.13, a 15.7 MB zip from `scripts/build_lambdas.sh`,
+  byte-identical between builds), its every-minute schedule (disabled; only a window enables it), and a window Lambda
+  with daily open and close schedules from `config/window.json`, off by default. `make up`, `make down`,
+  `make window-status`, `make replay DATE= SPEED=`, `make bronze`.
+- Open starts Debezium, then enables the replayer; close disables the replayer, then stops Debezium. The instance is
+  stopped between windows instead of destroyed (about $1.3/month of disk), and the slot stays, so the next window
+  resumes without a snapshot. `make debezium-down` remains for long pauses. ADR-0001 updated.
+- The tick has two guards that raise `Waiting` and change nothing: Debezium's slot must be active (the health check #11
+  asked for: systemd's `active` proved nothing), and V005's budget of 1,800 simulated minutes per UTC day must not be
+  spent (requirements §9), so neither a manual run nor 60x gets around it.
+- The replayer needed pyarrow (163 MB) only for small helpers: those moved to `services/prep/store.py`, and
+  `contracts.events` loads jsonschema only when validating. A test fails if the handler imports either again.
+- No reserved concurrency: this account's limit is 10, the minimum AWS keeps unreserved. Overlapping ticks are already
+  serialised by `replay_state`'s lock (#6).
+- Bronze keeps its own Databricks schedule for the window hours; a test keeps it in step with `config/window.json`.
+- Real window (2026-10-31, 04:27 to 04:32 UTC): 5 ticks from Lambda, 02:10 to 03:00 simulated, 9,356 events and 240,530
+  pings, 1.6-1.7 s a tick warm (cold 2.8 s + 0.6 s init), 194 MB of the 1,769 MB given (sized for one vCPU; #15 can
+  try less). Budget 50 minutes used. Close: schedule disabled, instance stopped, slot inactive and kept.
+- Then bronze: 34,658 trip events (25,302 + 9,356, all distinct ids) and 1,505,594 pings (1,265,064 + 240,530). Every
+  new ping's id was already there: #8's throwaway-database test replayed the same night, and the real run reproduced its
+  pings to the second, the determinism ADR-0004 relies on. Silver drops them as repeats.
