@@ -745,3 +745,16 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
 - The watermark has its own topic, so one update can read a tick's watermark ahead of that tick's last trip events (one
   tick, 10 simulated minutes); D + 30 h keeps about 3 h of margin over January's latest event, so a closed day can't be
   missing events because of it.
+
+### #19 Surge areas and rule config
+- `databricks/src/ref/ref.py`, in the streaming pipeline: `ref.zones` (the 265 TLC zones with borough, name, centroid
+  and `is_airport`), `ref.zone_neighbours`, `ref.surge_areas` (each zone plus its neighbours, FR-10) and `ref.ops_rules`
+  (every threshold, one row per rule and parameter, from `ops_rules.yml`).
+- `ref/taxi_zone_lookup.csv` committed: byte-identical to the lookup the downloader landed (same sha256), needed for the
+  borough (R4). The pipeline uses copies of `ref/`; a test keeps them identical, the neighbours symmetric and known, and
+  the thresholds the requirements fix (R1 15 min, 10 requests, 1.5 and 3; R2 15 min; R4 3 min; late 2 min and 0.5%).
+- R3 (airport queue) and R4's area threshold have no number in the plan: the config proposes R3 at 4 idle drivers per
+  request (a queue) or 1.5 requests per idle driver (a shortage) with at least 5 requests, and R4 at half of a borough's
+  drivers on a trip silent, with at least 5 on a trip. Marked `status: proposed`, to calibrate in #25.
+- Real data: 265 zones (2 without a centroid: 264 and 265), 1,302 neighbour rows, 1,567 surge-area rows (265 + 1,302), the
+  largest area 13 zones, 18 thresholds; the airports are Newark, JFK and LaGuardia.
