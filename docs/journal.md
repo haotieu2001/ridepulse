@@ -711,3 +711,20 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   replay_state and 4 replay_runs changes); pings 1,958,624 of 1,958,625, the one quarantined being #10's check ping
   (`trip_key is not a contract key`), with no special case. Completed trips' fares sum to 411,147.35, equal to bronze's
   raw strings, and no fare or dropoff time differs. Flag rates are small (2 zero fares and 6 zero-mile trips in 12,807).
+
+### #17 Silver de-duplication
+- `silver.trip_events_live`: the trip event stream, each `event_id` (UUIDv5 of trip_key and type) once within 2
+  simulated hours (`dropDuplicatesWithinWatermark`), for the rules. `silver.trip_events` is now an AUTO CDC (MERGE)
+  target keyed on `event_id`, so gold and batch readers see each event exactly once even if a copy arrives days later.
+  CDC changes are deduplicated on (pk, LSN); pings on (driver, device time).
+- The window is generous on purpose: late pings are data the rules must see (#20, #21), and a copy later than 2
+  simulated hours (12 wall minutes at 10x) is a replay of history, which the stream may drop and the MERGE covers.
+- A watermark needs TIMESTAMP and the simulated clock is TIMESTAMP_NTZ, so it runs on a TIMESTAMP copy (UTC session,
+  same value) that is dropped; tables keep the zone-less clock. A table that changes type, and a new table another
+  reads, need a full refresh of those silver tables (never bronze: pings older than a day are gone from Kafka). The CLI
+  takes the selection only in the JSON body (`full_refresh_selection`).
+- Real data: after the refresh, silver held 52,643 trip events (all distinct) and 1,308,002 pings, down from 1,958,624
+  (the reproduced pings of #8, #12 and #15 are gone), exactly as computed beforehand from distinct keys. CDC unchanged.
+- Redelivery test (`scripts/drills/redeliver.py`): the last 2,009 `trips.v1` messages (S8's count), 1,000 driver changes
+  and 10 watermark changes re-sent byte for byte to their partitions. Bronze grew by exactly 2,009 and 1,010; every silver
+  table stayed the same, and nothing new was quarantined. The copies stay in Kafka until retention.
