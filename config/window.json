@@ -1,0 +1,7 @@
+{
+  "_comment": "Demo windows (#12, requirements §9). Read by infra/terraform/replayer; databricks/resources/bronze.yml must agree (contracts/tests/test_window_config.py).",
+  "start_utc_hour": 12,
+  "hours": 3,
+  "daily": false,
+  "budget_simulated_min_per_day": 1800
+}

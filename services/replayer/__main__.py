@@ -5,7 +5,7 @@ from datetime import datetime
 
 import psycopg
 
-from services.prep.prep import S3Store
+from services.prep.store import S3Store
 
 from . import tick as job
 from .pings import DEFAULT_EVERY_S, Encoder, KafkaSink, registered_schema_id

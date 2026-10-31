@@ -27,7 +27,7 @@ from decimal import Decimal
 
 import psycopg
 
-from services.prep.prep import EVENT_TYPES, Store, pointer_key
+from services.prep.store import EVENT_TYPES, Store, pointer_key
 from services.seed.seed import driver_row, profile_row
 
 from .pings import DEFAULT_EVERY_S, ping_times
@@ -229,16 +229,43 @@ def _plan(events: list[dict], known: dict[str, tuple[str, int, int]], supply: Su
     return planned, skipped
 
 
+class Waiting(RuntimeError):
+    """The tick did nothing, on purpose: retry next minute. Not a failure."""
+
+
+class CdcNotReady(Waiting):
+    pass
+
+
+class BudgetSpent(Waiting):
+    pass
+
+
 def tick(conn: psycopg.Connection, store: Store, *, sink=None, ping_every: int = DEFAULT_EVERY_S,
-         geography: Geography | None = None, before_commit=None) -> TickResult:
+         geography: Geography | None = None, require_slot: str | None = None, budget_minutes: float | None = None,
+         before_commit=None) -> TickResult:
     """One tick. `conn` must be in autocommit mode with search_path on the dispatch schema. `sink` receives the
-    window's pings and must raise unless all are delivered; with no sink, no pings are computed."""
+    window's pings and must raise unless all are delivered; with no sink, no pings are computed.
+
+    Two guards, checked before any work, raise Waiting and change nothing:
+    - require_slot: Debezium's replication slot must be active. Ticking while CDC isn't reading would only pile up
+      WAL, and with no slot at all the trip events would be lost. systemd's `active` doesn't prove this (#11).
+    - budget_minutes: simulated minutes allowed per wall-clock day (V005); the day's ticks stop once it's spent.
+    """
     with conn.transaction(), conn.cursor() as cur:
-        cur.execute("SELECT watermark, speed FROM replay_state WHERE id = 1 FOR UPDATE")
+        cur.execute("SELECT watermark, speed, CASE WHEN budget_day = current_date THEN budget_used_min ELSE 0 END "
+                    "FROM replay_state WHERE id = 1 FOR UPDATE")
         row = cur.fetchone()
         if row is None:
             raise RuntimeError("no replay is running: start one at a day boundary first")
-        watermark, speed = row
+        watermark, speed, used = row
+        if require_slot:
+            cur.execute("SELECT active FROM pg_replication_slots WHERE slot_name = %s", (require_slot,))
+            slot = cur.fetchone()
+            if not slot or not slot[0]:
+                raise CdcNotReady(f"replication slot {require_slot} is {'not active' if slot else 'missing'}")
+        if budget_minutes is not None and used + speed > budget_minutes:
+            raise BudgetSpent(f"today's replay budget is spent: {used} of {budget_minutes} simulated minutes")
         until = watermark + timedelta(minutes=float(speed))
         slices = Slices(store)
         events = slices.due(watermark, until)
@@ -271,6 +298,7 @@ def tick(conn: psycopg.Connection, store: Store, *, sink=None, ping_every: int =
         cur.execute("WITH gone AS (DELETE FROM outbox RETURNING 1) SELECT count(*) FROM gone")
         applied = cur.fetchone()[0]
 
+        cur.execute("UPDATE replay_state SET budget_used_min = %s + %s, budget_day = current_date WHERE id = 1", (used, speed))
         cur.execute("SELECT advance_watermark(%s::timestamp)", (until,))
         cur.execute("DELETE FROM trips WHERE status = 'completed' AND requested_at < %s::timestamp", (until - HOT_WINDOW,))
         purged = cur.rowcount

@@ -11,13 +11,12 @@ from __future__ import annotations
 import json
 import pathlib
 
-from jsonschema import Draft202012Validator, FormatChecker
-
 HERE = pathlib.Path(__file__).parent
 EVENT_TYPES = ("TripRequested", "DriverAssigned", "TripStarted", "TripCompleted")
 
 
-def validator(name: str) -> Draft202012Validator:
+def validator(name: str):
+    from jsonschema import Draft202012Validator, FormatChecker   # tests only: the replayer Lambda doesn't ship it
     schema = json.loads((HERE / f"{name}.schema.json").read_text())
     return Draft202012Validator(schema, format_checker=FormatChecker())
 
