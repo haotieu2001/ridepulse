@@ -1,0 +1,35 @@
+# Kafka -> bronze (#13). A triggered pipeline: each run reads what arrived since the last one and stops, so
+# the job below makes it "availableNow every 10 minutes". The schedule starts paused: demo windows (#12)
+# unpause it, so nothing reads Kafka or spends quota outside them.
+resources:
+  pipelines:
+    bronze_ingest:
+      name: bronze
+      catalog: ${var.catalog}
+      schema: ${resources.schemas.bronze.name}
+      serverless: true
+      continuous: false
+      channel: CURRENT
+      libraries:
+        - file:
+            path: ../src/bronze/pipeline.py
+      configuration:
+        ridepulse.kafka.bootstrap: ${var.kafka_bootstrap}
+        ridepulse.secret_scope: ridepulse
+        ridepulse.ping_schema_path: ${workspace.file_path}/src/bronze/driver_location.avsc
+        ridepulse.ping_schema_ids: "100002"
+        # Debezium's TIMESTAMP microseconds are read as UTC, so the simulated clock keeps its wall value.
+        spark.sql.session.timeZone: UTC
+
+  jobs:
+    bronze_every_10_min:
+      name: bronze_every_10_min
+      schedule:
+        quartz_cron_expression: "0 0/10 * * * ?"
+        timezone_id: UTC
+        pause_status: PAUSED
+      max_concurrent_runs: 1
+      tasks:
+        - task_key: bronze
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.bronze_ingest.id}
