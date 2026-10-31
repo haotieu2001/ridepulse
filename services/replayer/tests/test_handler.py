@@ -21,5 +21,6 @@ def test_the_build_copies_every_module_the_handler_imports():
     script = open("scripts/build_lambdas.sh").read()
     for module in ("services/replayer/handler.py", "services/replayer/tick.py", "services/replayer/supply.py",
                    "services/replayer/pings.py", "services/prep/store.py", "services/seed/seed.py",
-                   "contracts/events/__init__.py", "contracts/events/driver_location.avsc", "ref/zone_centroids.csv"):
+                   "contracts/events/__init__.py", "contracts/events/driver_location.avsc", "ref/zone_centroids.csv",
+                   "ref/zone_neighbours.csv", "ref/taxi_zone_lookup.csv", "services/replayer/incidents.py"):
         assert module in script, module

@@ -87,16 +87,18 @@ class KafkaSink:
                                  "compression.type": "lz4"})
         self.producer, self.encoder = producer, encoder
 
-    def send(self, pings: list[Ping]) -> None:
+    def send(self, pings: list[Ping], raw: list[tuple[str, bytes]] = ()) -> None:
+        """`raw`: (key, bytes) sent as they are, for injected malformed messages (#21)."""
         errors = []
 
         def delivered(err, _msg):
             if err is not None:
                 errors.append(err)
-        for p in pings:
+        messages = [(p.driver_id, self.encoder.encode(p)) for p in pings] + list(raw)
+        for key, value in messages:
             while True:
                 try:
-                    self.producer.produce(TOPIC, key=p.driver_id, value=self.encoder.encode(p), on_delivery=delivered)
+                    self.producer.produce(TOPIC, key=key, value=value, on_delivery=delivered)
                     break
                 except BufferError:      # the local queue is full: let deliveries drain it
                     self.producer.poll(0.1)

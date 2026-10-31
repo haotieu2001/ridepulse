@@ -758,3 +758,25 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   drivers on a trip silent, with at least 5 on a trip. Marked `status: proposed`, to calibrate in #25.
 - Real data: 265 zones (2 without a centroid: 264 and 265), 1,302 neighbour rows, 1,567 surge-area rows (265 + 1,302), the
   largest area 13 zones, 18 thresholds; the airports are Newark, JFK and LaGuardia.
+
+### #21 Incident injection
+- `dispatch.incidents` (V006): one row per incident with its simulated window and parameters; it's the ground truth for
+  the rules' precision and recall (#25). `make`-free for now: `python -m services.replayer incident <kind> --at ...
+  --minutes ... --params '{...}'`. Each tick applies the incidents its window overlaps and logs what it did (`injected`).
+- `services/replayer/incidents.py`, deterministic (a hash of incident, driver and time; no clock, no random state), so a
+  retried tick injects the same:
+  - stadium: each real trip requested in the zone's surge area during the window gets `factor - 1` copies with keys
+    hashed from the original, running the whole lifecycle, so they take real drivers. Copies carry `incident_id` on the
+    trip row (V006) and in the TripRequested payload (a new optional field in the contract; silver has the column), so
+    reconciliation and #25 can tell them apart. Whether a later event is copied follows from the trip's request time and
+    pickup zone, read from its row.
+  - ping_outage drops the pings of drivers heading into the borough; duplicate_pings sends a share twice; malformed_pings
+    sends a share as bytes without the wire format's magic byte (for the DLQ); tunnel_pings holds a share in
+    `late_pings`, inside the tick's transaction, and a later tick releases them with their original device time.
+- Tests: the choice rules (windows half-open, areas, shares within tolerance, contract-valid copies), and on Postgres a
+  stadium copying both crafted trips in its area and window (4 copies, 16 events, each completed, payloads carrying the
+  incident), and tunnel pings all released within the day, none doubled, plus malformed bytes. First runs on Neon caught
+  `DELETE ... RETURNING ... ORDER BY` (not valid Postgres) and a test assuming no slot named ridepulse_debezium (slots
+  are cluster-wide, and Neon has the real one).
+- Not yet: the real run (Lambda needs the new zip: `make replayer-plan && make replayer-apply`), and publishing
+  `incidents` to the lakehouse (a new topic in the Confluent stack, an apply); #25 can read the labels from Neon directly.

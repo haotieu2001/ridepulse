@@ -18,6 +18,7 @@ find "$out/replayer" -path '*.dist-info/RECORD' -delete
 copy() { mkdir -p "$out/$1/$(dirname "$2")" && cp "$2" "$out/$1/$2"; }
 for f in services/__init__.py services/prep/__init__.py services/prep/store.py services/seed/__init__.py services/seed/seed.py \
          contracts/__init__.py contracts/events/__init__.py contracts/events/driver_location.avsc ref/zone_centroids.csv \
+         ref/zone_neighbours.csv ref/taxi_zone_lookup.csv services/replayer/incidents.py \
          services/replayer/__init__.py services/replayer/handler.py services/replayer/tick.py services/replayer/supply.py \
          services/replayer/pings.py; do
   copy replayer "$f"
