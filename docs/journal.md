@@ -682,3 +682,8 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   and `trips_read`; in-flight trip reads are 340-550 rows a tick, much less than I first guessed. `sizing.md` §8 holds
   every measured number.
 - A transient DNS failure here (Tailscale's resolver) killed one replay-twice run and left a throwaway database; dropped.
+- CI's replayer plan always showed a change while a laptop's showed none: the Lambda zips weren't the same on two
+  machines. Two causes: zip bytes depend on zlib and file modes, and fastavro's `dist-info/RECORD` hashes a console
+  script whose shebang holds the installing Python's path. Terraform now compares a content hash (each file's path,
+  mode and bytes, `build/<name>.contenthash`, with a per-file `.manifest`), modes are normalised, and RECORD files and
+  `bin/` are dropped. CI and the laptop now produce identical hashes for both Lambdas. #14's "1 change" was partly this.
