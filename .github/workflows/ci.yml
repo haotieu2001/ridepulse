@@ -95,6 +95,7 @@ jobs:
             code=$?
             set -e
             summary="$(grep -E '^(Plan:|No changes)' "plan-$stack.txt" || true)"
+            echo "$stack: ${summary:-plan failed}"
             echo "### $stack: ${summary:-plan failed}" >> "$GITHUB_STEP_SUMMARY"
             if [ "$code" = 1 ]; then cat "plan-$stack.txt"; exit 1; fi
             if [ "$code" = 2 ]; then { echo '```'; grep -E '^  # ' "plan-$stack.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"; fi
