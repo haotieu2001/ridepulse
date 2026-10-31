@@ -30,7 +30,7 @@ for name in replayer window; do
   python3 -I - "$out/$name" "$out/$name.zip" "$out/$name.contenthash" <<'PY'
 import base64, hashlib, os, pathlib, sys, zipfile
 src, dest, hashfile = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
-digest = hashlib.sha256()
+digest, manifest = hashlib.sha256(), []
 with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as z:
     for path in sorted(p for p in src.rglob("*") if p.is_file()):
         name = str(path.relative_to(src))
@@ -41,7 +41,9 @@ with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as z:
         info.compress_type = zipfile.ZIP_DEFLATED
         z.writestr(info, body)
         digest.update(f"{name}\0{mode:o}\0{len(body)}\0".encode() + body)
+        manifest.append(f"{hashlib.sha256(body).hexdigest()[:16]} {mode:o} {name}")
 pathlib.Path(hashfile).write_text(base64.b64encode(digest.digest()).decode())
+pathlib.Path(hashfile).with_suffix(".manifest").write_text("\n".join(manifest) + "\n")
 PY
 done
 ls -la "$out"/*.zip
