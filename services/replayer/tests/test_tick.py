@@ -300,3 +300,62 @@ def test_the_daily_budget_stops_ticks_once_spent(conn, store):
     conn.execute("UPDATE replay_state SET budget_day = current_date - 1")
     assert tick(conn, store, budget_minutes=30).watermark_to == datetime(2025, 1, 6, 0, 40)
     assert conn.execute("SELECT budget_used_min FROM replay_state").fetchone()[0] == 10
+
+
+@needs_postgres
+def test_the_driver_cache_gives_the_same_replay_and_skips_reads(conn, store):
+    run_to_end(conn, store)
+    without = snapshot(conn)
+    conn.execute("TRUNCATE trips, drivers, driver_profiles, replay_runs, replay_state, outbox, outbox_log CASCADE")
+    cache = {}
+    start(conn, BEFORE_MONTH, 1440)
+    loaded = [tick(conn, store, driver_cache=cache).drivers_loaded for _ in range(33)]
+    assert snapshot(conn) == without
+    assert loaded[0] == 0 and sum(loaded) == 0   # the pool starts empty, then every tick reuses its own rows
+
+
+@needs_postgres
+def test_the_driver_cache_reloads_after_any_outside_change(conn, store):
+    start(conn, datetime(2025, 1, 6), 60)
+    cache = {}
+    for _ in range(9):
+        tick(conn, store, driver_cache=cache)
+    assert tick(conn, store, driver_cache=cache).drivers_loaded == 0
+    conn.execute("UPDATE drivers SET status_changed_at = status_changed_at WHERE driver_id = 'drv-000000'")  # bumps updated_at
+    n = conn.execute("SELECT count(*) FROM drivers").fetchone()[0]
+    assert tick(conn, store, driver_cache=cache).drivers_loaded == n
+
+
+@needs_postgres
+def test_a_failed_tick_leaves_the_cache_as_it_was(conn, store):
+    start(conn, datetime(2025, 1, 6), 60)
+    cache = {}
+    for _ in range(9):
+        tick(conn, store, driver_cache=cache)
+    before = {k: list(v) if isinstance(v, list) else v for k, v in cache.items()}
+
+    def boom():
+        raise RuntimeError("crash before commit")
+    with pytest.raises(RuntimeError):
+        tick(conn, store, driver_cache=cache, before_commit=boom)
+    assert cache == before
+
+
+@needs_postgres
+def test_replaying_the_same_slice_twice_changes_nothing(conn, store):
+    """NFR-2: the same slices from the same start give the same trips, drivers, events and pings, byte for byte."""
+    from services.replayer.tests.test_pings import ListSink
+
+    def replay_once():
+        conn.execute("TRUNCATE trips, drivers, driver_profiles, replay_runs, replay_state, outbox, outbox_log CASCADE")
+        sink = ListSink()
+        start(conn, BEFORE_MONTH, 1440)
+        for _ in range(33):
+            tick(conn, store, sink=sink)
+        rows = conn.execute("SELECT trip_key, status, driver_id, requested_at, assigned_at, driver_arrived_at, picked_up_at, "
+                            "dropped_off_at, trip_miles, base_fare, tolls, bcf, sales_tax, congestion_surcharge, airport_fee, "
+                            "cbd_fee, tips, driver_pay FROM trips ORDER BY 1").fetchall()
+        return rows, snapshot(conn), [p for batch in sink.batches for p in batch]
+
+    first, second = replay_once(), replay_once()
+    assert first[2] and first == second

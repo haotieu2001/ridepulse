@@ -36,7 +36,7 @@ def _setup() -> dict:
              "sasl.username": _ssm(f"{c}/kafka_api_key"), "sasl.password": _ssm(f"{c}/kafka_api_secret")}
     schema_id = registered_schema_id(_ssm(f"{c}/sr_url"), f"{_ssm(f'{c}/sr_api_key')}:{_ssm(f'{c}/sr_api_secret')}")
     return {"conninfo": conninfo, "sink": KafkaSink(kafka, Encoder(schema_id)), "store": S3Store(os.environ["LANDING_BUCKET"]),
-            "geography": Geography.load()}
+            "geography": Geography.load(), "drivers": {}}
 
 
 def handler(event, context) -> dict:
@@ -46,11 +46,12 @@ def handler(event, context) -> dict:
         try:
             r = tick(conn, _cold["store"], sink=_cold["sink"], ping_every=int(os.environ.get("PING_EVERY_S", "15")),
                      geography=_cold["geography"], require_slot=os.environ.get("REQUIRE_SLOT") or None,
-                     budget_minutes=float(os.environ["BUDGET_SIMULATED_MIN_PER_DAY"]))
+                     budget_minutes=float(os.environ["BUDGET_SIMULATED_MIN_PER_DAY"]), driver_cache=_cold["drivers"])
         except Waiting as w:
             print(f"waiting: {w}")
             return {"status": "waiting", "reason": str(w)}
     result = {"status": "ticked", "from": r.watermark_from.isoformat(), "to": r.watermark_to.isoformat(), "applied": r.applied,
-              "skipped": r.skipped, "new_drivers": r.new_drivers, "drivers_changed": r.drivers_changed, "pings": r.pings}
+              "skipped": r.skipped, "new_drivers": r.new_drivers, "drivers_changed": r.drivers_changed, "pings": r.pings,
+              "drivers_loaded": r.drivers_loaded, "trips_read": r.trips_read}
     print(result)
     return result

@@ -22,7 +22,7 @@ from __future__ import annotations
 import gzip
 import json
 import uuid
-from dataclasses import dataclass
+from dataclasses import astuple, dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
 
@@ -190,6 +190,8 @@ class TickResult:
     purged: int
     drivers_changed: int
     pings: int
+    drivers_loaded: int = 0
+    trips_read: int = 0          # in-flight trips read back: with drivers_loaded, the tick's own Neon egress
 
 
 def _plan(events: list[dict], known: dict[str, tuple[str, int, int]], supply: Supply, owned: list[datetime],
@@ -244,7 +246,7 @@ class BudgetSpent(Waiting):
 
 def tick(conn: psycopg.Connection, store: Store, *, sink=None, ping_every: int = DEFAULT_EVERY_S,
          geography: Geography | None = None, require_slot: str | None = None, budget_minutes: float | None = None,
-         before_commit=None) -> TickResult:
+         driver_cache: dict | None = None, before_commit=None) -> TickResult:
     """One tick. `conn` must be in autocommit mode with search_path on the dispatch schema. `sink` receives the
     window's pings and must raise unless all are delivered; with no sink, no pings are computed.
 
@@ -252,7 +254,10 @@ def tick(conn: psycopg.Connection, store: Store, *, sink=None, ping_every: int =
     - require_slot: Debezium's replication slot must be active. Ticking while CDC isn't reading would only pile up
       WAL, and with no slot at all the trip events would be lost. systemd's `active` doesn't prove this (#11).
     - budget_minutes: simulated minutes allowed per wall-clock day (V005); the day's ticks stop once it's spent.
+
+    driver_cache: a dict kept between ticks (the Lambda's warm container) to skip re-reading unchanged drivers.
     """
+    loaded = 0
     with conn.transaction(), conn.cursor() as cur:
         cur.execute("SELECT watermark, speed, CASE WHEN budget_day = current_date THEN budget_used_min ELSE 0 END "
                     "FROM replay_state WHERE id = 1 FOR UPDATE")
@@ -275,8 +280,19 @@ def tick(conn: psycopg.Connection, store: Store, *, sink=None, ping_every: int =
         keys = sorted({e["trip_key"] for e in events})
         cur.execute("SELECT trip_key, status, pickup_zone_id, dropoff_zone_id FROM trips WHERE trip_key = ANY(%s)", (keys,))
         known = {k: (s, p, d) for k, s, p, d in cur.fetchall()}
-        cur.execute(f"SELECT {COLUMNS} FROM drivers")
-        supply.load(cur.fetchall())
+        trips_read = len(known)
+        # Reading every driver each tick cost ~360 KB of Neon egress, about as much as all of CDC (#15). Only ticks
+        # write drivers and they run one at a time, so a warm Lambda can reuse its last committed rows when the
+        # fingerprint (row count, newest updated_at, which the database sets on every change) still matches.
+        cur.execute("SELECT count(*), max(updated_at) FROM drivers")
+        fingerprint = cur.fetchone()
+        if driver_cache is not None and driver_cache.get("fingerprint") == fingerprint:
+            rows = driver_cache["rows"]
+        else:
+            cur.execute(f"SELECT {COLUMNS} FROM drivers")
+            rows = cur.fetchall()
+            loaded = len(rows)
+        supply.load(rows)
         grid = ping_times(watermark, until, ping_every) if sink else None
         planned, skipped = _plan(events, known, supply, boundaries(watermark, until), grid)
 
@@ -305,9 +321,17 @@ def tick(conn: psycopg.Connection, store: Store, *, sink=None, ping_every: int =
         purged = cur.rowcount
         if sink:
             sink.send(supply.pings)   # last, so a failure above sends nothing; a failure here rolls back the tick
+        # The fingerprint of what this tick leaves behind, read under the lock: after COMMIT an overlapping tick
+        # could already have changed it.
+        cur.execute("SELECT count(*), max(updated_at) FROM drivers")
+        committed_fingerprint = cur.fetchone()
         if before_commit:
             before_commit()
-    return TickResult(watermark, until, applied, skipped, len(supply.new), purged, len(changed), len(supply.pings))
+    if driver_cache is not None:   # only after COMMIT: a rolled-back tick must not leave its state behind
+        driver_cache.clear()
+        driver_cache.update(fingerprint=committed_fingerprint, rows=[astuple(d) for d in supply.drivers.values()])
+    return TickResult(watermark, until, applied, skipped, len(supply.new), purged, len(changed), len(supply.pings), loaded,
+                      trips_read)
 
 
 def start(conn: psycopg.Connection, from_ts: datetime | None, speed: float) -> int:
