@@ -645,3 +645,19 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
 - Then bronze: 34,658 trip events (25,302 + 9,356, all distinct ids) and 1,505,594 pings (1,265,064 + 240,530). Every
   new ping's id was already there: #8's throwaway-database test replayed the same night, and the real run reproduced its
   pings to the second, the determinism ADR-0004 relies on. Silver drops them as repeats.
+
+### #14 CI v1
+- `ci.yml` has three jobs. `test`: ruff lint (E, F, W, I, B, UP; lint only, since the formatter would undo the repo's
+  alignment), then the suite on Postgres. `terraform`: fmt and validate for all five stacks, then a real read-only plan
+  for landing, debezium and replayer, through the `ridepulse-github-ci` role with `-lock=false`, results in the log and
+  the job summary. `bundle`: `databricks bundle validate -t stg`. `deploy.yml` now refuses anything but main.
+- Not planned in CI, deliberately: confluent (its plan needs the Confluent Cloud admin key, which would give every PR
+  admin control of Confluent) and bootstrap (needs the alert email, and manages CI's own role). Both are validated.
+- Terraform is pinned to 1.17.0 though it's 10 days old: the state was written by it, and older Terraform refuses newer
+  state.
+- ruff found 21 issues; two tests asserted a bare `Exception` and now expect the real ones (`ValueError`/`TypeError` from
+  fastavro, `ShortBody`/`IncompleteRead` from the downloader).
+- The first CI plans caught a real bug from #12: a stopped instance gives back its public IP, so AWS reports
+  `associate_public_ip_address = false` and Terraform wanted to replace the Debezium instance. Any apply between windows
+  would have destroyed it. Now ignored (it gets a new address at every start); the plan is clean. The replayer's plan shows
+  one change: this branch's code differs from what's deployed (the lint fixes touched `tick.py`), so it needs an apply.
