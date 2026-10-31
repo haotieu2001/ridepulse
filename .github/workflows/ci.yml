@@ -69,7 +69,7 @@ jobs:
       - name: Format
         run: terraform fmt -check -recursive infra/terraform
       - name: Build the Lambda zips (the replayer stack hashes them, even to validate)
-        run: scripts/build_lambdas.sh
+        run: scripts/build_lambdas.sh && grep -H . build/*.contenthash && cat build/replayer.manifest
       - name: Validate every stack
         run: |
           for stack in infra/terraform/*/; do

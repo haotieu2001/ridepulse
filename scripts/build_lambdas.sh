@@ -10,7 +10,10 @@ mkdir -p "$out/replayer" "$out/window"
 # Pinned like pyproject.toml; uv.lock is the source of these versions.
 uv pip install --quiet --target "$out/replayer" --python-platform aarch64-manylinux_2_28 --python-version 3.13 \
   --only-binary :all: 'psycopg[binary]==3.3.6' 'confluent-kafka==2.16.0' 'fastavro==1.13.1'
+# Console scripts aren't used, and their shebang holds the installing Python's path, which also makes each
+# dist-info/RECORD (it hashes them) differ by machine: drop both, so CI and a laptop build the same contents.
 rm -rf "$out/replayer/bin"
+find "$out/replayer" -path '*.dist-info/RECORD' -delete
 
 copy() { mkdir -p "$out/$1/$(dirname "$2")" && cp "$2" "$out/$1/$2"; }
 for f in services/__init__.py services/prep/__init__.py services/prep/store.py services/seed/__init__.py services/seed/seed.py \
@@ -23,18 +26,27 @@ for f in services/__init__.py services/window/__init__.py services/window/window
   copy window "$f"
 done
 
-# Fixed timestamps and order, so an unchanged build gives the same zip and Terraform sees no change. Python's
-# zipfile rather than the zip tool, which not every laptop has.
+# Fixed timestamps, order and modes. Python's zipfile rather than the zip tool, which not every laptop has.
+# The zip's bytes still differ between machines (zlib versions), so Terraform compares <name>.contenthash instead:
+# a hash of each file's path and bytes, the same wherever it's built (CI's plan must match a laptop's apply).
 for name in replayer window; do
-  python3 -I - "$out/$name" "$out/$name.zip" <<'PY'
-import os, pathlib, sys, zipfile
-src, dest = pathlib.Path(sys.argv[1]), sys.argv[2]
+  python3 -I - "$out/$name" "$out/$name.zip" "$out/$name.contenthash" <<'PY'
+import base64, hashlib, os, pathlib, sys, zipfile
+src, dest, hashfile = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+digest, manifest = hashlib.sha256(), []
 with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as z:
     for path in sorted(p for p in src.rglob("*") if p.is_file()):
-        info = zipfile.ZipInfo(str(path.relative_to(src)), date_time=(2025, 1, 1, 0, 0, 0))
-        info.external_attr = (os.stat(path).st_mode & 0o777 | 0o100000) << 16
+        name = str(path.relative_to(src))
+        body = path.read_bytes()
+        mode = 0o755 if os.stat(path).st_mode & 0o111 else 0o644
+        info = zipfile.ZipInfo(name, date_time=(2025, 1, 1, 0, 0, 0))
+        info.external_attr = (mode | 0o100000) << 16
         info.compress_type = zipfile.ZIP_DEFLATED
-        z.writestr(info, path.read_bytes())
+        z.writestr(info, body)
+        digest.update(f"{name}\0{mode:o}\0{len(body)}\0".encode() + body)
+        manifest.append(f"{hashlib.sha256(body).hexdigest()[:16]} {mode:o} {name}")
+pathlib.Path(hashfile).write_text(base64.b64encode(digest.digest()).decode())
+pathlib.Path(hashfile).with_suffix(".manifest").write_text("\n".join(manifest) + "\n")
 PY
 done
 ls -la "$out"/*.zip

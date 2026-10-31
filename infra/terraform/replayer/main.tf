@@ -79,9 +79,9 @@ resource "aws_lambda_function" "replayer" {
   architectures    = ["arm64"]
   handler          = "services.replayer.handler.handler"
   filename         = "${path.module}/../../../build/replayer.zip"
-  source_code_hash = filebase64sha256("${path.module}/../../../build/replayer.zip")
-  memory_size      = 1769 # one full vCPU: a peak tick encodes ~55k pings
-  timeout          = 90   # longer than a minute: an overlapping run waits on replay_state's lock instead (ADR-0004 §3)
+  source_code_hash = trimspace(file("${path.module}/../../../build/replayer.contenthash")) # same on every machine
+  memory_size      = 1769                                                                  # one full vCPU: a peak tick encodes ~55k pings
+  timeout          = 90                                                                    # longer than a minute: an overlapping run waits on replay_state's lock instead (ADR-0004 §3)
   # No reserved concurrency: this account's limit is 10, the minimum AWS keeps unreserved.
   environment {
     variables = {
@@ -198,7 +198,7 @@ resource "aws_lambda_function" "window" {
   architectures    = ["arm64"]
   handler          = "services.window.window.handler"
   filename         = "${path.module}/../../../build/window.zip"
-  source_code_hash = filebase64sha256("${path.module}/../../../build/window.zip")
+  source_code_hash = trimspace(file("${path.module}/../../../build/window.contenthash"))
   timeout          = 30
   environment {
     variables = { REPLAYER_SCHEDULE = aws_scheduler_schedule.replayer.name }
