@@ -8,6 +8,9 @@ variables:
   catalog:
     description: Unity Catalog catalog for this target.
     default: ridepulse_dev
+  kafka_bootstrap:
+    description: Confluent bootstrap server (also in SSM /ridepulse/confluent/dev/bootstrap_servers).
+    default: pkc-921jm.us-east-2.aws.confluent.cloud:9092
   tlc_month:
     description: TLC high-volume FHV month used by feasibility test S10 (YYYY-MM).
     default: "2025-01"

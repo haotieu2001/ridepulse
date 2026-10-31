@@ -602,3 +602,23 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
 - Unresolved, for #15: Neon's WAL grew about 30 MB over 160 simulated minutes at New Year's peak, roughly 120 MB per
   simulated day if that peak is about 2.2x the average, against the 82 MB estimate and about 125 MB available (5 GB
   over 40 days). It's an upper bound: WAL includes the unpublished `trips` table, which isn't sent. Measure real egress.
+
+### #13 Bronze ingestion
+- `databricks/src/bronze/pipeline.py`, deployed by the bundle: one triggered Lakeflow pipeline for `trips.v1`,
+  `cdc.dispatch.*` and pings, into `bronze.trips_v1`, `bronze.cdc_dispatch` (one table, `source_table` column) and
+  `bronze.locations`. Each row keeps the raw value, topic/partition/offset and both clocks: the wall clock (Kafka
+  timestamp; for CDC also the commit time) and the simulated clock (`occurred_at`, `device_ts` as TIMESTAMP_NTZ). Pings
+  are decoded with a copy of the contract (a test keeps it identical) and the registered schema id is checked.
+- Records that don't parse go to their `*.dlq` topic through a Lakeflow Kafka sink with the raw bytes in base64, the
+  error and the source offset, and never into bronze. The job `bronze_every_10_min` is scheduled but paused: #12's
+  demo windows run it. `failOnDataLoss` is off, because 1-day ping retention expires between windows.
+- Found on the real runs: Delta needs `timestampNtz` enabled on request; `{{secrets/...}}` references in a serverless
+  pipeline's configuration reached Kafka unresolved, so keys are read in code; a failed update retries by itself and
+  must be stopped before a fixed version can run; `from_json` returns a struct of nulls for broken JSON, which first
+  mislabelled it "missing envelope field".
+- Real data: every bronze count equals what #11 read from Kafka: 25,302 trip events (no repeated ids), 27,380 changes,
+  1,265,064 pings (#8's plus #10's check ping, which silver must drop). Simulated times keep their wall value. A second
+  run added nothing. Four malformed messages (one per topic, plus broken JSON for the label fix) all reached their DLQ
+  topic with the right offset and error, and bronze counts didn't move. They stay in the real topics until retention.
+- Not done: staging. The CI service principal can't read the `ridepulse` secret scope, so its pipeline would deploy but
+  fail to run; granting READ waits for a decision.
