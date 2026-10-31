@@ -1,0 +1,172 @@
+# Data contract: TLC high-volume for-hire trips, as RidePulse's silver layer exposes them.
+# One contract for both paths: silver.tlc_trips (monthly file) and silver.trips_completed (stream)
+# have exactly these columns, so the reconciliation between them is a plain join on trip_key.
+#
+# Baselines were measured on the full January 2025 file (20,405,666 rows) on 2026-10-29 with
+# contracts/validation/profile_tlc_month.sql and profile_details.sql. Column meanings and earlier
+# sample measurements: ridepulse-data-sources.html (the column guide).
+
+contract: tlc_trips
+version: 1.0.0
+status: active
+owner: platform (Hao Tieu)
+consumers: [silver.tlc_trips, silver.trips_completed, gold.*, RideDesk (read-only UC grant)]
+change_policy: >
+  Additive changes (a new nullable column) are a minor version. Renaming, retyping, removing a
+  column, or changing the key definition is a major version, announced here before it ships.
+
+source:
+  publisher: NYC Taxi & Limousine Commission, via NYC Open Data (no usage restrictions; cite TLC)
+  file: fhvhv_tripdata_YYYY-MM.parquet, published about 2 months after month end, sometimes re-published
+  pinning: ETag + Last-Modified per file; a changed ETag is a re-publication, reloaded as a new version
+  time_zone: New York wall clock with no offset; read as TIMESTAMP_NTZ
+  grain: one row per trip (a pooled ride with two riders is two rows)
+
+key:
+  column: trip_key
+  definition: contracts/trip_key.py
+  inputs: [hvfhs_license_num, request_datetime, pickup_datetime, dropoff_datetime, PULocationID, DOLocationID]
+  rule: >
+    sha256 hex of the six inputs (timestamps as yyyy-MM-dd HH:mm:ss, '|' separated), plus "-<n>"
+    for the n-th row (n >= 2, ordered by source_file, row_group, row_offset) sharing those inputs.
+  measured:
+    duplicates_without_dropoff: 271   # the five-column key the plan first proposed
+    duplicates_six_column: 3          # all pooled rides (shared_match_flag = Y), different fares: kept, suffixed
+    fractional_seconds: 0             # so whole-second serialisation is lossless
+  sample:
+    column: in_sample
+    rule: int(first 8 hex digits of the base key, base 16) % 20 = 0    # the 5% replay sample
+
+columns:
+  # --- identity and lineage -------------------------------------------------------------------
+  - {name: trip_key, type: STRING, nullable: false, from: derived, rule: see key}
+  - {name: in_sample, type: BOOLEAN, nullable: false, from: derived, rule: see key.sample}
+  - {name: provider_code, type: STRING, nullable: false, from: hvfhs_license_num,
+     values: {HV0002: Juno, HV0003: Uber, HV0004: Via, HV0005: Lyft}}
+  - {name: dispatching_base_num, type: STRING, nullable: false, from: dispatching_base_num}
+  - {name: originating_base_num, type: STRING, nullable: true, from: originating_base_num,
+     note: "Lyft leaves it empty (about 99.7% null)"}
+  - {name: source_file, type: STRING, nullable: false, from: "_metadata.file_path"}
+  - {name: source_etag, type: STRING, nullable: false, from: download metadata}
+  - {name: row_group, type: INT, nullable: false, from: parquet reader}
+  - {name: row_offset, type: BIGINT, nullable: false, from: parquet reader, note: "trip_key collision tiebreaker"}
+
+  # --- time --------------------------------------------------------------------------------------
+  - {name: requested_at, type: TIMESTAMP_NTZ, nullable: false, from: request_datetime,
+     note: "2-4% fall exactly on :00 (minute-rounded requests)"}
+  - {name: driver_arrived_at, type: TIMESTAMP_NTZ, nullable: true, from: on_scene_datetime,
+     note: "Null for 99.72% of Lyft trips in Jan 2025 (Lyft didn't report it before 2025); 0% Uber"}
+  - {name: picked_up_at, type: TIMESTAMP_NTZ, nullable: false, from: pickup_datetime, note: "defines the file month"}
+  - {name: dropped_off_at, type: TIMESTAMP_NTZ, nullable: false, from: dropoff_datetime, note: "can fall in the next month"}
+  - {name: pickup_date, type: DATE, nullable: false, from: derived, rule: "to_date(picked_up_at)", note: "partition and reconciliation key"}
+  - {name: pickup_hour, type: TIMESTAMP_NTZ, nullable: false, from: derived, rule: "date_trunc('HOUR', picked_up_at)"}
+  - {name: duration_s, type: INT, nullable: false, from: derived, rule: "seconds(dropped_off_at - picked_up_at)",
+     note: "use this, not reported_trip_time_s"}
+  - {name: reported_trip_time_s, type: INT, nullable: false, from: trip_time, note: "kept for the gap check"}
+  - {name: wait_for_car_min, type: "DECIMAL(8,2)", nullable: true, from: derived,
+     rule: "minutes(driver_arrived_at - requested_at)", note: "null where driver_arrived_at is null"}
+  - {name: request_to_pickup_min, type: "DECIMAL(8,2)", nullable: false, from: derived,
+     rule: "minutes(picked_up_at - requested_at)", note: "negative when pickup is before request (see expectations)"}
+
+  # --- place and distance ------------------------------------------------------------------------
+  - {name: pickup_zone_id, type: INT, nullable: false, from: PULocationID, note: "1-265; 264 = Unknown"}
+  - {name: dropoff_zone_id, type: INT, nullable: false, from: DOLocationID,
+     note: "265 = Outside of NYC is valid (4.0% of dropoffs); only 264 is unknown"}
+  - {name: trip_miles, type: "DECIMAL(8,3)", nullable: false, from: trip_miles,
+     note: "Lyft reports 3 decimals, Uber 2; max 507.22 mi in Jan 2025"}
+  - {name: touches_cbd, type: BOOLEAN, nullable: false, from: derived,
+     rule: "pickup or dropoff zone in ref.cbd_zones (the 37 Congestion Relief Zone zones)"}
+
+  # --- money (all exact at 2 decimals in the source) ---------------------------------------------
+  - {name: base_fare, type: "DECIMAL(10,2)", nullable: false, from: base_passenger_fare, note: "surge is already inside it"}
+  - {name: tolls, type: "DECIMAL(10,2)", nullable: false, from: tolls}
+  - {name: bcf, type: "DECIMAL(10,2)", nullable: false, from: bcf, note: "Black Car Fund; rate is dated in fare_rules (2.75% in Jan 2025)"}
+  - {name: sales_tax, type: "DECIMAL(10,2)", nullable: false, from: sales_tax, note: "take as reported; don't recompute"}
+  - {name: congestion_surcharge, type: "DECIMAL(10,2)", nullable: false, from: congestion_surcharge}
+  - {name: airport_fee, type: "DECIMAL(10,2)", nullable: false, from: airport_fee}
+  - {name: cbd_fee, type: "DECIMAL(10,2)", nullable: true, from: cbd_congestion_fee,
+     note: "column absent before Jan 2025 (null); paid on 30.9% of Jan 2025 trips"}
+  - {name: tips, type: "DECIMAL(10,2)", nullable: false, from: tips}
+  - {name: driver_pay, type: "DECIMAL(10,2)", nullable: false, from: driver_pay}
+  - {name: rider_total, type: "DECIMAL(10,2)", nullable: false, from: derived,
+     rule: "base_fare + tolls + bcf + sales_tax + congestion_surcharge + airport_fee + coalesce(cbd_fee, 0) + tips"}
+  - {name: platform_take, type: "DECIMAL(10,2)", nullable: false, from: derived, rule: "base_fare - driver_pay"}
+
+  # --- flags (source Y/N -> boolean) ---------------------------------------------------------------
+  - {name: shared_request, type: BOOLEAN, nullable: false, from: shared_request_flag}
+  - {name: shared_match, type: BOOLEAN, nullable: false, from: shared_match_flag}
+  - {name: access_a_ride, type: BOOLEAN, nullable: false, from: access_a_ride_flag}
+  - {name: wav_request, type: BOOLEAN, nullable: false, from: wav_request_flag}
+  - {name: wav_match, type: BOOLEAN, nullable: false, from: wav_match_flag}
+
+# Expectations run in the silver pipeline. Severity:
+#   fail = stop the load (the file or batch is wrong)    flag = keep the row, set dq_<name> = true
+#   warn = keep everything, alert when the rate leaves its band
+# Rates are per provider where the providers differ. Bands are relative to a trailing 3-month
+# baseline once three months are loaded; until then, the Jan 2025 baseline below.
+expectations:
+  - name: key_inputs_present
+    severity: fail
+    sql: "hvfhs_license_num IS NOT NULL AND request_datetime IS NOT NULL AND pickup_datetime IS NOT NULL AND dropoff_datetime IS NOT NULL AND PULocationID IS NOT NULL AND DOLocationID IS NOT NULL"
+    baseline: {rows_failing: 0}
+  - name: provider_known
+    severity: fail
+    sql: "hvfhs_license_num IN ('HV0002', 'HV0003', 'HV0004', 'HV0005')"
+    baseline: {rows_failing: 0, share: {HV0003: 0.7526, HV0005: 0.2474}}
+  - name: pickup_in_file_month
+    severity: fail
+    sql: "date_trunc('MONTH', pickup_datetime) = <file month>"
+    baseline: {rows_failing: 0}
+  - name: zone_in_range
+    severity: fail
+    sql: "PULocationID BETWEEN 1 AND 265 AND DOLocationID BETWEEN 1 AND 265"
+    baseline: {rows_failing: 0}
+  - name: passthrough_non_negative
+    severity: fail
+    sql: "tips >= 0 AND tolls >= 0 AND bcf >= 0 AND sales_tax >= 0 AND airport_fee >= 0"
+    baseline: {rows_failing: 0}
+  - name: zone_known
+    severity: flag
+    sql: "PULocationID <> 264 AND DOLocationID <> 264"
+    baseline: {rows_failing: 0}
+  - name: pickup_after_request
+    severity: warn
+    sql: "pickup_datetime >= request_datetime"
+    baseline: {rate_failing: {HV0003: 0.00788, HV0005: 0.01561}, early_by_s: {p50: 356, p99: 1575}}
+    note: "Real: likely pre-arranged or re-dispatched trips. Kept; waits use request_to_pickup_min with care."
+  - name: dropoff_after_pickup
+    severity: flag
+    sql: "dropoff_datetime > pickup_datetime"
+    baseline: {rows_failing: 4}
+  - name: trip_time_matches_duration
+    severity: flag
+    sql: "trip_time = unix_timestamp(dropoff_datetime) - unix_timestamp(pickup_datetime)"
+    baseline: {rate_failing: 0.000488, gap_s_p50: 1}
+    note: "Lyft's trip_time drifts in 2026 (20.6% of Aug 2026 trips); duration_s is authoritative"
+  - name: miles_positive
+    severity: flag
+    sql: "trip_miles > 0"
+    baseline: {rate_failing: 0.000128}
+  - name: base_fare_positive
+    severity: flag
+    sql: "base_passenger_fare > 0"
+    baseline: {rate_failing: 0.000843, negative_rows: 2427}
+    note: "Dec 2024 had 1.40% Lyft zeros: judge per provider and month, not with one fixed threshold"
+  - name: driver_pay_positive
+    severity: flag
+    sql: "driver_pay > 0"
+    baseline: {rate_failing: 0.000222}
+  - name: congestion_surcharge_known_value
+    severity: warn
+    sql: "congestion_surcharge IN (0, 0.75, 2.75, 5.5)"
+    baseline: {rows_failing: 0, rare_values: {"5.50": 6}}
+  - name: cbd_fee_known_value
+    severity: warn
+    sql: "cbd_congestion_fee IS NULL OR cbd_congestion_fee IN (0, 1.5, 3.0)"
+    baseline: {rows_failing: 0, rate_paid: 0.3087, rare_values: {"3.00": 5}}
+    note: "Test cbd_fee > 0 for 'paid', never cbd_fee = 1.50"
+  - name: airport_fee_standard_value
+    severity: warn
+    sql: "airport_fee IN (0, 1.25, 2.5, 5.0)"
+    baseline: {rows_failing: 1827}
+    note: "Rates are dated (2.50 in 2025, 3.50 by Aug 2026): read the standard set from fare_rules"

@@ -8,6 +8,10 @@ resources:
       catalog_name: ${var.catalog}
       name: bronze
       comment: Raw records as ingested.
+    silver:
+      catalog_name: ${var.catalog}
+      name: silver
+      comment: Typed, checked and deduplicated records.
 
   volumes:
     tlc:
