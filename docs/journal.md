@@ -687,3 +687,27 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   script whose shebang holds the installing Python's path. Terraform now compares a content hash (each file's path,
   mode and bytes, `build/<name>.contenthash`, with a per-file `.manifest`), modes are normalised, and RECORD files and
   `bin/` are dropped. CI and the laptop now produce identical hashes for both Lambdas. #14's "1 change" was partly this.
+
+## Phase 3: silver, CDC, rules
+
+### #16 Silver: parsing, data quality, quarantine
+- `databricks/src/silver/silver.py`, in the same pipeline update as bronze (ADR-0004 §7; the pipeline is now named
+  `streaming`): `silver.trip_events` (typed: times as TIMESTAMP_NTZ, money DECIMAL(10,2), miles DECIMAL(8,3)), one typed
+  change table per published dispatch table (`driver_changes`, `driver_profile_changes`, `replay_state_changes`,
+  `replay_runs_changes`, with op, LSN, transaction and commit time), `silver.locations`, `silver.quarantine` (source,
+  offset, key, reason, raw value) and `silver.dq_rates`. Duplicates stay until #17.
+- The contract's expectations run on an event only if it carries every column needed (`expectations.yml`): provider,
+  zones and key inputs on TripRequested; fees, miles, fare and pay on TripCompleted. Four need two events of a trip and
+  wait for the whole-trip table, each with its reason. A test keeps the contract copy identical, covers every expectation
+  once, and checks the SQL's columns. Severity mapping: `fail` quarantines (the contract's "stop the load" would let
+  one bad event from our own replayer stop the stream; prep already removed bad source rows), `flag` and `warn` keep the
+  row with `dq_<name>`, and `dq_rates` compares rates per provider and day with the contract's baselines.
+- Both first runs failed with "communication lost with driver": the driver spent half its time in GC while planning
+  `trip_events` (about 45k rows, so not data). The quarantine reason was a CASE nested once per check (about 30 levels)
+  and the columns came from a long `withColumn` chain, and the plan was built twice (table and quarantine flow). Flat
+  now: one select, and the reason a coalesce of one-branch CASEs. The update then took 34 s with no GC pressure. Also:
+  a failed update retries by itself with the code it started with, so after a fix stop the retry before running.
+- Real data: every silver table equals bronze (52,643 trip events, 44,962 driver changes, 6,960 profile changes, 85
+  replay_state and 4 replay_runs changes); pings 1,958,624 of 1,958,625, the one quarantined being #10's check ping
+  (`trip_key is not a contract key`), with no special case. Completed trips' fares sum to 411,147.35, equal to bronze's
+  raw strings, and no fare or dropoff time differs. Flag rates are small (2 zero fares and 6 zero-mile trips in 12,807).

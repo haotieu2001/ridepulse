@@ -1,0 +1,30 @@
+# How contracts/tlc_trips.yaml's expectations run on silver's trip events (#16). An expectation runs on an event
+# only if that event carries every column it needs; the rest wait for the whole-trip table. Severity and baselines
+# come from the contract itself (a copy, tlc_trips.yaml, held identical by contracts/tests/test_silver_expectations.py):
+#   fail -> the event goes to silver.quarantine with the expectation's name as its reason
+#   flag -> the event stays, with dq_<name> = true
+#   warn -> the event stays, with dq_<name> = true; silver.dq_rates compares the rate with the baseline
+# SQL uses silver.trip_events' column names.
+
+events:
+  TripRequested:
+    # Partial: the pickup and dropoff times arrive in later events.
+    key_inputs_present: "provider_code IS NOT NULL AND requested_at IS NOT NULL AND pickup_zone_id IS NOT NULL AND dropoff_zone_id IS NOT NULL"
+    provider_known: "provider_code IN ('HV0002', 'HV0003', 'HV0004', 'HV0005')"
+    zone_in_range: "pickup_zone_id BETWEEN 1 AND 265 AND dropoff_zone_id BETWEEN 1 AND 265"
+    zone_known: "pickup_zone_id <> 264 AND dropoff_zone_id <> 264"
+  TripCompleted:
+    passthrough_non_negative: "tips >= 0 AND tolls >= 0 AND bcf >= 0 AND sales_tax >= 0 AND airport_fee >= 0"
+    miles_positive: "trip_miles > 0"
+    base_fare_positive: "base_fare > 0"
+    driver_pay_positive: "driver_pay > 0"
+    congestion_surcharge_known_value: "congestion_surcharge IN (0, 0.75, 2.75, 5.5)"
+    cbd_fee_known_value: "cbd_fee IS NULL OR cbd_fee IN (0, 1.5, 3.0)"
+    airport_fee_standard_value: "airport_fee IN (0, 1.25, 2.5, 5.0)"
+
+# Need columns from two events of the same trip, so they run on the whole-trip table, not here.
+deferred:
+  pickup_in_file_month: "needs the TLC file month; the prep job enforces it before replay (#2)"
+  pickup_after_request: "requested_at is on TripRequested, picked_up_at on TripStarted"
+  dropoff_after_pickup: "picked_up_at is on TripStarted, dropped_off_at on TripCompleted"
+  trip_time_matches_duration: "picked_up_at is on TripStarted; dropped_off_at and the reported time on TripCompleted"

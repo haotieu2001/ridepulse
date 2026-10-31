@@ -1,10 +1,11 @@
-# Kafka -> bronze (#13). A triggered pipeline: each run reads what arrived since the last one and stops, so
-# the job below makes it "availableNow every 10 minutes". The schedule starts paused: demo windows (#12)
+# Kafka -> bronze (#13) -> silver (#16), one triggered pipeline: each run reads what arrived since the last one
+# and stops, so the job below makes it "availableNow every 10 minutes". Silver shares the update with bronze, so
+# the replay watermark and the trip events it covers land together (ADR-0004 §7). The schedule starts paused: demo windows (#12)
 # unpause it, so nothing reads Kafka or spends quota outside them.
 resources:
   pipelines:
     bronze_ingest:
-      name: bronze
+      name: streaming
       catalog: ${var.catalog}
       schema: ${resources.schemas.bronze.name}
       serverless: true
@@ -13,11 +14,15 @@ resources:
       libraries:
         - file:
             path: ../src/bronze/pipeline.py
+        - file:
+            path: ../src/silver/silver.py
       configuration:
         ridepulse.kafka.bootstrap: ${var.kafka_bootstrap}
         ridepulse.secret_scope: ridepulse
         ridepulse.ping_schema_path: ${workspace.file_path}/src/bronze/driver_location.avsc
         ridepulse.ping_schema_ids: "100002"
+        ridepulse.catalog: ${var.catalog}
+        ridepulse.silver_dir: ${workspace.file_path}/src/silver
         # Debezium's TIMESTAMP microseconds are read as UTC, so the simulated clock keeps its wall value.
         spark.sql.session.timeZone: UTC
 
