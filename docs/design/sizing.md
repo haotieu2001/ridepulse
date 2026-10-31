@@ -114,10 +114,28 @@ is the main thing to watch in Phases 3-4 (requirements, open question 3).
 | pings every 30 s instead of 15 s | Kafka bytes and cost drop by about 30% |
 | production scale (100% of trips) | ≈ 20x everything: Neon and Confluent Basic no longer fit; see production.md |
 
-## 8. To measure in later phases
+## 8. Measured in Phase 2
 
-- Outbox event sizes and Neon egress with the full design (Phase 2).
-- Online and busy driver counts and ping volume from the real replayer, against ADR-0003's simulation
-  (962 online, 510 busy on average) (Phase 2).
-- Bronze Delta size for a day of pings (Phase 2).
-- Daily job run time (Phase 4).
+Real windows from the replayer Lambda on New Year's night 2025 (#12, #15), scaled to January's average of 131,666
+trip events per simulated day where noted. The hours measured are busier than average, so per-event figures are
+what scale; per-hour figures are not.
+
+| What | Estimate above | Measured | How |
+|---|---|---|---|
+| Neon egress, CDC to Debezium | 82 MB / simulated day | **≈ 83.5 MB / day** (630-639 B per trip event, driver changes included) | bytes received on Debezium's sockets to Neon, over two full simulated hours (#15) |
+| Neon egress, the tick's own reads | not estimated | **≈ 8 MB / day**: in-flight trips ≈ 6.5 MB (340-550 rows a tick), drivers only on a cold start (360-480 KB each) | `trips_read`, `drivers_loaded` in each tick's log |
+| **Neon egress, total** | **≤ 125 MB / day (5 GB / 40 days)** | **≈ 92 MB / day, ≈ 3.7 GB for 40 days** | the two rows above |
+| `trips.v1` value size | ≈ 250 B, ≈ 600 B with fares | 328 B average: Requested 400, Assigned 156, Started 240, Completed 529 | `length(raw_value)` in bronze |
+| `cdc.dispatch.drivers` value size | ≈ 900 B | 701 B | bronze |
+| `cdc.dispatch.driver_profiles` / `replay_state` | ≈ 900 / 400 B | 639 / 579 B | bronze |
+| Driver changes per trip event | 3 status changes per trip | 0.77 per event (one write per driver per tick, ADR-0003) | tick logs |
+| Pings | 2.9M / simulated day, ≈ 100 B | 2.92M / day (max 3.53M), 107 B (#8) | offline month, real Kafka read-back |
+| Bronze Delta | ≈ 3-5 GB a week, mostly pings | pings ≈ 16 B a row (≈ 48 MB / simulated day); trip events ≈ 98 B; CDC rows ≈ 75 B | `DESCRIBE DETAIL` on 1.78M pings, 45k events, 47k changes |
+| Online and busy drivers | 962 online, 510 busy (ADR-0003) | the same: the replayer gives every January trip the simulator's driver (#7) | `docs/design/supply/parity.py` |
+| Prep job | ≤ 7 GB on Actions | 1.48-1.53 GB peak, 3 min 48 s to 4 min 5 s | GitHub Actions (#2, #3, #7) |
+| Replayer tick | < 60 s | 1.6-1.7 s warm, 2.8 s + 0.6 s init cold, 194 MB | Lambda REPORT lines (#12) |
+
+The total fits only because the tick no longer re-reads every driver: before #15 that alone was 50-70 MB a day, and
+the total about 140 MB. Keep the driver cache, and re-measure if the tick starts reading more.
+
+Still to measure: the daily job's run time (Phase 4).

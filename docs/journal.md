@@ -661,3 +661,24 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   `associate_public_ip_address = false` and Terraform wanted to replace the Debezium instance. Any apply between windows
   would have destroyed it. Now ignored (it gets a new address at every start); the plan is clean. The replayer's plan shows
   one change: this branch's code differs from what's deployed (the lint fixes touched `tick.py`), so it needs an apply.
+
+### #15 Vertical slice and Phase 2 measurements (Phase 2 done)
+- One simulated hour end to end (2026-10-31, 03:10 to 04:10 simulated): 8,985 trip events from the Lambda through Neon,
+  Debezium and Kafka into bronze. Bronze then held 45,439 trip events, exactly the earlier 34,658 plus the window's 10,781,
+  all distinct, the latest at 04:10. Opening that window (a stop and start) took no snapshot: both full re-reads in
+  bronze came from Debezium instances being created.
+- Replaying the same slice twice changes nothing (NFR-2): a Postgres test compares trips, drivers, events and pings byte
+  for byte, and the same ran on the real peak hour (23:00 to 01:00) into two throwaway Neon databases: 3,304 trips,
+  2,309 drivers, 11,410 events, 238,657 pings, identical.
+- Neon egress measured as the bytes Debezium's sockets received from Neon, which is what Neon bills, TLS included; WAL
+  growth overstates it, because WAL also carries the unpublished `trips` table. CDC is 630-639 B per trip event, about
+  83.5 MB per average simulated day: the 82 MB estimate held, and #11's 120 MB worst case didn't.
+- But the tick also read every driver back each minute (about 360 KB, 50-70 MB a day), which put the total near 140 MB a
+  day, over the 125 MB budget. Only ticks write drivers and they run one at a time, so a warm Lambda now reuses its last
+  committed rows while a fingerprint (row count, newest `updated_at`) matches, read under the lock so an overlapping tick
+  can't break it. Results are identical (tests on Neon, and the real replay-twice ran one side with it); a cold start or
+  any outside change reloads. In the next window the cold tick loaded 2,320 drivers and every later tick 0.
+- Total measured: about 92 MB per simulated day, about 3.7 GB for 40 days of Neon's 5 GB. Ticks now log `drivers_loaded`
+  and `trips_read`; in-flight trip reads are 340-550 rows a tick, much less than I first guessed. `sizing.md` §8 holds
+  every measured number.
+- A transient DNS failure here (Tailscale's resolver) killed one replay-twice run and left a throwaway database; dropped.
