@@ -1,7 +1,8 @@
 # Debezium Server on a small EC2: reads Neon's write-ahead log (pgoutput) and publishes change
 # events to Confluent Cloud. No SSH and no inbound ports: reach it with Session Manager.
 # Secrets are read from SSM by the instance at every service start, never baked in here. What it does is
-# env/<env>.properties. Ephemeral: make debezium-up, make debezium-down (which drops the slot first).
+# env/<env>.properties. Demo windows stop and start it (#12, make up / make down); make debezium-down drops the slot
+# and destroys it, for a long pause.
 
 variable "env" {
   description = "Environment: selects env/<env>.properties and the SSM paths."

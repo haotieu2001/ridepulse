@@ -25,7 +25,8 @@ resources:
     bronze_every_10_min:
       name: bronze_every_10_min
       schedule:
-        quartz_cron_expression: "0 0/10 * * * ?"
+        # The window hours from config/window.json, plus the hour after it to read the last ticks (a test checks).
+        quartz_cron_expression: "0 0/10 12-15 * * ?"
         timezone_id: UTC
         pause_status: PAUSED
       max_concurrent_runs: 1

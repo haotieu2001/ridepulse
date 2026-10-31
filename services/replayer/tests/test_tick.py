@@ -274,3 +274,29 @@ def test_new_drivers_get_a_profile(conn, store):
     assert n >= 1
     assert conn.execute("SELECT count(*) FROM driver_profiles").fetchone()[0] == n
     assert conn.execute("SELECT count(*) FROM drivers WHERE status_changed_at IS NULL").fetchone()[0] == 0
+
+
+@needs_postgres
+def test_no_active_slot_means_the_tick_waits_and_changes_nothing(conn, store):
+    from services.replayer.tick import CdcNotReady
+    start(conn, datetime(2025, 1, 6), 10)
+    before = conn.execute("SELECT watermark, budget_used_min FROM replay_state").fetchone()
+    with pytest.raises(CdcNotReady, match="missing"):
+        tick(conn, store, require_slot="ridepulse_debezium")
+    assert conn.execute("SELECT watermark, budget_used_min FROM replay_state").fetchone() == before
+
+
+@needs_postgres
+def test_the_daily_budget_stops_ticks_once_spent(conn, store):
+    from services.replayer.tick import BudgetSpent
+    start(conn, datetime(2025, 1, 6), 10)
+    for _ in range(3):
+        tick(conn, store, budget_minutes=30)
+    assert conn.execute("SELECT budget_used_min, budget_day = current_date FROM replay_state").fetchone() == (30, True)
+    with pytest.raises(BudgetSpent, match="30.00 of 30"):
+        tick(conn, store, budget_minutes=30)
+    assert conn.execute("SELECT watermark FROM replay_state").fetchone()[0] == datetime(2025, 1, 6, 0, 30)
+    # A new wall-clock day starts from zero.
+    conn.execute("UPDATE replay_state SET budget_day = current_date - 1")
+    assert tick(conn, store, budget_minutes=30).watermark_to == datetime(2025, 1, 6, 0, 40)
+    assert conn.execute("SELECT budget_used_min FROM replay_state").fetchone()[0] == 10

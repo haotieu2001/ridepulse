@@ -27,3 +27,6 @@ __pycache__/
 
 # Local data downloads
 data/
+
+# Lambda builds
+build/

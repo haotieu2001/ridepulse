@@ -61,8 +61,9 @@ stay documented but unused: no test failed.
   created with SQL (Default Storage only); no bundle development mode; one AI Search endpoint, kept
   running because it takes ~21 minutes to provision; three Apps at most.
 - Confluent Basic has no resource-level RBAC: topic and group access are Kafka ACLs.
-- The Debezium EC2 is ephemeral: created for CDC runs and destroyed afterwards, and its replication
-  slot must be dropped on teardown or Neon keeps WAL against its 1 GB storage.
+- The Debezium EC2 is stopped between demo windows and destroyed only for long pauses (#12), and its replication
+  slot stays between windows (little WAL: nothing writes while it is stopped) and must be dropped on teardown,
+  or Neon keeps WAL against its 1 GB storage.
 
 ### Revisit when
 

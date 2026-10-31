@@ -8,12 +8,13 @@ BOOTSTRAP   := infra/terraform/bootstrap
 LANDING     := infra/terraform/landing
 CONFLUENT   := infra/terraform/confluent
 DEBEZIUM    := infra/terraform/debezium
+REPLAYER    := infra/terraform/replayer
 LANDING_BUCKET ?= ridepulse-landing-dev-121403124761
 YEAR        ?= 2025
 
 export AWS_PROFILE
 
-.PHONY: help bootstrap-plan bootstrap-apply landing-plan landing-apply confluent-plan confluent-apply debezium-plan debezium-up debezium-down land-month land-zones land-noaa prep db-status db-migrate db-test db-seed catalog deploy s10-upload s10-run s10
+.PHONY: help bootstrap-plan bootstrap-apply landing-plan landing-apply confluent-plan confluent-apply debezium-plan debezium-up debezium-down build-lambdas replayer-plan replayer-apply up down window-status replay bronze land-month land-zones land-noaa prep db-status db-migrate db-test db-seed catalog deploy s10-upload s10-run s10
 
 help:
 	@echo "bootstrap-plan / bootstrap-apply  Terraform: state bucket, GitHub OIDC role, budget"
@@ -21,6 +22,10 @@ help:
 	@echo "confluent-plan / confluent-apply  Terraform: Confluent topics, ACLs and schemas"
 	@echo "debezium-plan / debezium-up       Terraform: the Debezium instance for a demo window"
 	@echo "debezium-down                     stop Debezium, drop its slot, destroy the instance"
+	@echo "replayer-plan / replayer-apply    Terraform: replayer Lambda, schedules, demo window"
+	@echo "up / down / window-status         open or close a demo window now (Debezium + replayer)"
+	@echo "replay DATE=2025-01-06 SPEED=10   start the replay, or jump forward, at a day boundary"
+	@echo "bronze                            run the bronze pipeline once"
 	@echo "land-month MONTH=2025-01          land one HVFHV month in S3 (pinned to its ETag)"
 	@echo "land-zones / land-noaa YEAR=2025  land the zone files / one NOAA GHCN-Daily year"
 	@echo "prep MONTH=2025-01 [OUT_DIR=dir]  prep job: contract, sample, event-time slices"
@@ -61,6 +66,38 @@ debezium-up:
 
 debezium-down:
 	scripts/debezium_down.sh
+
+build-lambdas:
+	scripts/build_lambdas.sh
+
+replayer-plan: build-lambdas
+	terraform -chdir=$(REPLAYER) init -input=false
+	terraform -chdir=$(REPLAYER) plan -input=false -out=replayer.tfplan
+
+replayer-apply:
+	terraform -chdir=$(REPLAYER) apply replayer.tfplan
+
+# A demo window by hand, through the same Lambda the daily schedule uses. Ticks wait until Debezium streams.
+up:
+	aws lambda invoke --function-name ridepulse-window --cli-binary-format raw-in-base64-out \
+	  --payload '{"action":"open"}' /dev/stdout
+
+down:
+	aws lambda invoke --function-name ridepulse-window --cli-binary-format raw-in-base64-out \
+	  --payload '{"action":"close"}' /dev/stdout
+
+window-status:
+	aws lambda invoke --function-name ridepulse-window --cli-binary-format raw-in-base64-out \
+	  --payload '{"action":"status"}' /dev/stdout
+
+# Start the replay at a day boundary, or jump forward to one (simulated time never goes back), at SPEED.
+replay:
+	@test -n "$(DATE)" || { echo "usage: make replay DATE=2025-01-06 [SPEED=10]"; exit 2; }
+	scripts/db.sh uv run python -m services.replayer start $(DATE) --speed $(or $(SPEED),10)
+
+# Bronze once now: the job runs it every 10 minutes only during the daily window's hours.
+bronze:
+	cd databricks && databricks bundle run -t dev bronze_ingest
 
 land-month:
 	uv run python -m services.tlc_downloader fhvhv $(MONTH) --bucket $(LANDING_BUCKET)

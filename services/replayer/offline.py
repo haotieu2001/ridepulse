@@ -6,7 +6,7 @@ from __future__ import annotations
 from dataclasses import astuple
 from datetime import datetime, timedelta
 
-from services.prep.prep import Store
+from services.prep.store import Store
 
 from .pings import ping_times
 from .supply import Geography, boundaries

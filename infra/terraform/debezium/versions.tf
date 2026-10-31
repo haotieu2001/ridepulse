@@ -8,7 +8,7 @@ terraform {
     }
   }
 
-  # Ephemeral stack: created for CDC runs, destroyed afterwards. Its state is separate so
+  # Kept between demo windows, stopped (#12); destroyed only for a long pause. Its state is separate so
   # `terraform destroy` here never touches the bootstrap or Confluent stacks.
   backend "s3" {
     bucket       = "ridepulse-tfstate-121403124761"
