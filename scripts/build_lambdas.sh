@@ -10,7 +10,10 @@ mkdir -p "$out/replayer" "$out/window"
 # Pinned like pyproject.toml; uv.lock is the source of these versions.
 uv pip install --quiet --target "$out/replayer" --python-platform aarch64-manylinux_2_28 --python-version 3.13 \
   --only-binary :all: 'psycopg[binary]==3.3.6' 'confluent-kafka==2.16.0' 'fastavro==1.13.1'
+# Console scripts aren't used, and their shebang holds the installing Python's path, which also makes each
+# dist-info/RECORD (it hashes them) differ by machine: drop both, so CI and a laptop build the same contents.
 rm -rf "$out/replayer/bin"
+find "$out/replayer" -path '*.dist-info/RECORD' -delete
 
 copy() { mkdir -p "$out/$1/$(dirname "$2")" && cp "$2" "$out/$1/$2"; }
 for f in services/__init__.py services/prep/__init__.py services/prep/store.py services/seed/__init__.py services/seed/seed.py \
