@@ -37,8 +37,8 @@ import resource
 import tempfile
 import time
 from collections import Counter
-from datetime import datetime, timedelta, timezone
-from typing import Iterator
+from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
 
 import pyarrow as pa
 import pyarrow.compute as pc
@@ -46,8 +46,7 @@ import pyarrow.parquet as pq
 
 from contracts.trip_key import KEY_FIELDS, SAMPLE_MODULUS, SEPARATOR
 
-from .store import (EVENT_TYPES, DirStore, S3Store, Store, output_prefix, pointer_key,  # noqa: F401  (re-exported)
-                    slice_name, source_manifest_key)
+from .store import EVENT_TYPES, DirStore, S3Store, Store, output_prefix, pointer_key, slice_name, source_manifest_key  # noqa: F401  (re-exported)
 from .supply import DEFAULT_TARGET_UTILISATION, heat_map, sign_on_zones, staffing
 
 FORMAT_VERSION = 3      # bump when the outputs' layout or content change (3: sign-on zones)
@@ -154,7 +153,7 @@ def events(r: dict, key: str) -> list[tuple[datetime, int, str, str]]:
          "wav_match": _flag(r["wav_match_flag"])},
     )
     out = []
-    for step, (t, kind, at, payload) in enumerate(zip(due, EVENT_TYPES, occurred, payloads)):
+    for step, (t, kind, at, payload) in enumerate(zip(due, EVENT_TYPES, occurred, payloads, strict=True)):
         line = json.dumps({"due_at": _ts(t), "type": kind, "trip_key": key, "occurred_at": _ts(at),
                            "payload": payload}, separators=(",", ":"), allow_nan=False)
         out.append((t, step, key, line))
@@ -309,7 +308,7 @@ def prep(month: str, store: Store, *, source_file: pathlib.Path | None = None, f
                    "max_peak_busy": max((h["peak_busy"] for h in staffed.values()), default=0),
                    "max_online_target": max((h["online_target"] for h in staffed.values()), default=0)},
         "first_due": slices[0]["hour"] if slices else None, "last_due": slices[-1]["hour"] if slices else None,
-        "prepared_at": (now or datetime.now(timezone.utc)).isoformat(timespec="seconds"),
+        "prepared_at": (now or datetime.now(UTC)).isoformat(timespec="seconds"),
         "run_seconds": round(time.monotonic() - started, 1), "peak_rss_mb": _peak_rss_mb(),
     }
     # Run facts (prepared_at, run time, memory) live only in the manifests, never in the slices.

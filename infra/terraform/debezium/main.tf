@@ -122,6 +122,13 @@ resource "aws_instance" "debezium" {
   tags = {
     Name = "ridepulse-debezium"
   }
+
+  # Demo windows stop the instance between runs (#12), and a stopped instance gives back its public IP: AWS then
+  # reports associate_public_ip_address = false, which would force a replacement on the next apply. It gets a new
+  # address at every start anyway.
+  lifecycle {
+    ignore_changes = [associate_public_ip_address]
+  }
 }
 
 output "instance_id" {

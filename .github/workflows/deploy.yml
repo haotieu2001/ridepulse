@@ -20,6 +20,8 @@ concurrency:
 
 jobs:
   stg:
+    # Only from main: a manual run from another branch would deploy unreviewed code with the stg identity.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:

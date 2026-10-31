@@ -14,8 +14,7 @@ import pytest
 
 from contracts.trip_key import trip_key
 from services.prep.prep import prep
-from services.prep.tests.test_prep import (LATE, LYFT_NO_ARRIVAL, MONTH, NORMAL, POOLED_2, PRE_ARRANGED, REPLAYED, ROWS,
-                                           land)
+from services.prep.tests.test_prep import LATE, LYFT_NO_ARRIVAL, MONTH, NORMAL, POOLED_2, PRE_ARRANGED, REPLAYED, ROWS, land
 from services.replayer.tick import NotPrepared, Slices, _months_around, event_id, start, tick
 from services.seed.seed import seed_sql
 
@@ -116,7 +115,8 @@ def test_a_whole_month_replays_every_trip_once(conn, store):
     logged = conn.execute("SELECT type, count(*) FROM outbox_log GROUP BY 1").fetchall()
     assert dict(logged) == {"TripRequested": 7, "DriverAssigned": 7, "TripStarted": 7, "TripCompleted": 7}
     # Nobody is left on a trip, and the V004 shift columns agree with the status.
-    assert conn.execute("SELECT count(*) FROM drivers WHERE status IN ('en_route', 'on_trip') OR current_trip_key IS NOT NULL").fetchone()[0] == 0
+    busy = "SELECT count(*) FROM drivers WHERE status IN ('en_route', 'on_trip') OR current_trip_key IS NOT NULL"
+    assert conn.execute(busy).fetchone()[0] == 0
     assert conn.execute("SELECT count(*) FROM drivers WHERE (status = 'offline') <> (online_since IS NULL) OR leaving").fetchone()[0] == 0
     assert conn.execute("SELECT count(*) FROM drivers").fetchone()[0] == conn.execute("SELECT count(*) FROM driver_profiles").fetchone()[0]
 

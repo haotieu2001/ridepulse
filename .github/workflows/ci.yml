@@ -1,8 +1,10 @@
 name: ci
 
-# Fast checks on every pull request and push to main, with no secrets: the data contracts and their
-# Python = Spark key parity tests, the downloader, and every dispatch migration applied by the real
-# runner to a throwaway Postgres (db/tests). Grows into the plan's full CI in phase 2 (#14).
+# Every pull request and push to main. Three jobs:
+#   test       lint, unit, contract and Postgres tests (no secrets: a throwaway postgres service)
+#   terraform  fmt and validate for every stack; a real plan for the stacks a read-only role can plan
+#   bundle     the Databricks bundle validated for stg, and the Lambda zips built
+# Deploying is deploy.yml's job, from main only.
 on:
   pull_request:
   push:
@@ -40,5 +42,77 @@ jobs:
           persist-credentials: false
       # Pinned to a commit SHA, and to a release at least two weeks old (v10.3.3 was a day old).
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - name: Lint
+        run: uv run ruff check .
       - name: Tests
         run: uv run pytest
+
+  terraform:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write   # OIDC: the read-only ridepulse-github-ci role, for plans
+    env:
+      AWS_REGION: us-east-2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      # 1.17.0 is younger than the two-week rule, but the state was written by it, and older Terraform
+      # refuses newer state. Pinned to the laptop's version on purpose.
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.17.0
+          terraform_wrapper: false
+      - name: Format
+        run: terraform fmt -check -recursive infra/terraform
+      - name: Build the Lambda zips (the replayer stack hashes them, even to validate)
+        run: scripts/build_lambdas.sh
+      - name: Validate every stack
+        run: |
+          for stack in infra/terraform/*/; do
+            echo "::group::$stack"
+            terraform -chdir="$stack" init -backend=false -input=false >/dev/null
+            terraform -chdir="$stack" validate
+            echo "::endgroup::"
+          done
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::121403124761:role/ridepulse-github-ci
+          aws-region: us-east-2
+      # Plans need only read access. Not planned here: confluent (its plan needs the Confluent Cloud admin key,
+      # which CI must not hold) and bootstrap (needs the alert email, and manages this very role).
+      # -lock=false: a plan never writes state, and must not block an apply running on a laptop.
+      - name: Plan
+        run: |
+          for stack in landing debezium replayer; do
+            dir="infra/terraform/$stack"
+            terraform -chdir="$dir" init -input=false >/dev/null
+            set +e
+            terraform -chdir="$dir" plan -input=false -lock=false -no-color -detailed-exitcode > "plan-$stack.txt" 2>&1
+            code=$?
+            set -e
+            summary="$(grep -E '^(Plan:|No changes)' "plan-$stack.txt" || true)"
+            echo "$stack: ${summary:-plan failed}"
+            echo "### $stack: ${summary:-plan failed}" >> "$GITHUB_STEP_SUMMARY"
+            if [ "$code" = 1 ]; then cat "plan-$stack.txt"; exit 1; fi
+            if [ "$code" = 2 ]; then { echo '```'; grep -E '^  # ' "plan-$stack.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"; fi
+          done
+
+  bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABRICKS_HOST: https://dbc-f915d382-6d5f.cloud.databricks.com
+      DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+      DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: databricks/setup-cli@8de769ec2543ee05e456ee2121350efc7efc4bda # v1.22.1
+      - name: Validate the bundle for stg
+        working-directory: databricks
+        run: databricks bundle validate -t stg

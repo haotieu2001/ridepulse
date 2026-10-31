@@ -7,7 +7,8 @@ import sys
 CHECK = """
 import sys
 import services.replayer.handler
-print(__import__("json").dumps(sorted(m.split(".")[0] for m in sys.modules if m.split(".")[0] in {"pyarrow", "jsonschema", "pandas", "numpy"})))
+heavy = {"pyarrow", "jsonschema", "pandas", "numpy"}
+print(__import__("json").dumps(sorted({m.split(".")[0] for m in sys.modules} & heavy)))
 """
 
 

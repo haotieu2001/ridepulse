@@ -31,7 +31,7 @@ def main():
     out = subprocess.run([str(ROOT / "scripts/feasibility/sql.sh"), f.name],
                          check=True, capture_output=True, text=True).stdout.splitlines()
     rows = [line for line in out if " | " in line]
-    got = dict(zip(rows[0].split(" | "), (int(v) for v in rows[1].split(" | "))))
+    got = dict(zip(rows[0].split(" | "), (int(v) for v in rows[1].split(" | ")), strict=True))
 
     total, ok = got["total"], True
     print(f"{TABLE} ({MONTH}): {total:,} rows\n")

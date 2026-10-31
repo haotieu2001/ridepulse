@@ -28,7 +28,8 @@ print("simulator:", metrics, flush=True)
 
 # The simulator stops at its last assignment, so stop at the tick that holds it to compare move counts.
 last = max(t[0] for t in trips)
-got = replay(DirStore(pathlib.Path(sys.argv[1])), START, last.replace(minute=last.minute - last.minute % 10, second=0) + timedelta(minutes=10))
+end = last.replace(minute=last.minute - last.minute % 10, second=0) + timedelta(minutes=10)
+got = replay(DirStore(pathlib.Path(sys.argv[1])), START, end)
 differs = [k for k in reference if got["assignments"].get(k) != reference[k]]
 print(f"trips simulator/replayer: {len(reference):,} / {len(got['assignments']):,}; different driver: {len(differs):,}")
 print(f"only in replayer: {len(set(got['assignments']) - set(reference)):,}")

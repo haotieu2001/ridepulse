@@ -16,8 +16,8 @@ import csv
 import math
 import pathlib
 from collections import Counter, defaultdict
+from collections.abc import Iterator
 from datetime import datetime
-from typing import Iterator
 
 import pyarrow as pa
 

@@ -18,7 +18,7 @@ import json
 import time
 import urllib.parse
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import BinaryIO, Protocol
 
 TLC = "https://d37ci6vzurychx.cloudfront.net"
@@ -227,7 +227,7 @@ def land(src: Source, store: Store, *, pause_s: float = 30.0, now=None) -> tuple
             time.sleep(pause_s * attempt)
 
     version = Version(src.url, etag, last_modified, body.size, body.sha256.hexdigest(), key,
-                      (now or datetime.now(timezone.utc)).isoformat(timespec="seconds"))
+                      (now or datetime.now(UTC)).isoformat(timespec="seconds"))
     history = (manifest or {}).get("history", [])
     if manifest:
         history = [manifest["current"], *history]
