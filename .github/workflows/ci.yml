@@ -68,6 +68,8 @@ jobs:
           terraform_wrapper: false
       - name: Format
         run: terraform fmt -check -recursive infra/terraform
+      - name: Build the Lambda zips (the replayer stack hashes them, even to validate)
+        run: scripts/build_lambdas.sh
       - name: Validate every stack
         run: |
           for stack in infra/terraform/*/; do
@@ -76,8 +78,6 @@ jobs:
             terraform -chdir="$stack" validate
             echo "::endgroup::"
           done
-      - name: Build the Lambda zips (the replayer stack plans them)
-        run: scripts/build_lambdas.sh
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: arn:aws:iam::121403124761:role/ridepulse-github-ci
