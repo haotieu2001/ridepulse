@@ -69,8 +69,9 @@ def trips_v1_parsed():
                       "event_id STRING, event_type STRING, occurred_at BIGINT, payload STRING")
     df = kafka(["trips.v1"]).select(*position(), F.col("key").alias("raw_key"), F.col("value").alias("raw_value"),
                                     env.alias("e"))
+    # from_json gives a struct of nulls for broken JSON, not a null, so test the text itself.
     error = (F.when(F.col("raw_value").isNull(), "null value")
-             .when(F.col("e").isNull(), "value is not JSON")
+             .when(F.expr("try_parse_json(cast(raw_value AS STRING))").isNull(), "value is not JSON")
              .when(F.col("e.event_id").isNull() | F.col("e.occurred_at").isNull() | F.col("e.payload").isNull(),
                    "missing envelope field")
              .when(~F.col("e.event_type").isin(EVENT_TYPES), "unknown event_type")
@@ -102,7 +103,7 @@ def cdc_dispatch_parsed():
                                   env.alias("e"))
     # A null value is a tombstone after a delete: valid, and kept so silver sees the delete.
     error = (F.when(F.col("raw_value").isNull(), None)
-             .when(F.col("e").isNull(), "value is not JSON")
+             .when(F.expr("try_parse_json(cast(raw_value AS STRING))").isNull(), "value is not JSON")
              .when(~F.col("e.op").isin("c", "u", "d", "r"), "unknown op")
              .when(F.col("e.source.lsn").isNull() | F.col("e.source.table").isNull(), "missing source position")
              .when((F.col("e.op") != "d") & F.col("e.after").isNull(), "change without an after image"))
