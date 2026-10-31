@@ -16,6 +16,10 @@ resources:
             path: ../src/bronze/pipeline.py
         - file:
             path: ../src/silver/silver.py
+        - file:
+            path: ../src/silver/state.py
+        - file:
+            path: ../src/ref/ref.py
       configuration:
         ridepulse.kafka.bootstrap: ${var.kafka_bootstrap}
         ridepulse.secret_scope: ridepulse
@@ -23,6 +27,7 @@ resources:
         ridepulse.ping_schema_ids: "100002"
         ridepulse.catalog: ${var.catalog}
         ridepulse.silver_dir: ${workspace.file_path}/src/silver
+        ridepulse.ref_dir: ${workspace.file_path}/src/ref
         # Debezium's TIMESTAMP microseconds are read as UTC, so the simulated clock keeps its wall value.
         spark.sql.session.timeZone: UTC
 

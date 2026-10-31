@@ -711,3 +711,50 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   replay_state and 4 replay_runs changes); pings 1,958,624 of 1,958,625, the one quarantined being #10's check ping
   (`trip_key is not a contract key`), with no special case. Completed trips' fares sum to 411,147.35, equal to bronze's
   raw strings, and no fare or dropoff time differs. Flag rates are small (2 zero fares and 6 zero-mile trips in 12,807).
+
+### #17 Silver de-duplication
+- `silver.trip_events_live`: the trip event stream, each `event_id` (UUIDv5 of trip_key and type) once within 2
+  simulated hours (`dropDuplicatesWithinWatermark`), for the rules. `silver.trip_events` is now an AUTO CDC (MERGE)
+  target keyed on `event_id`, so gold and batch readers see each event exactly once even if a copy arrives days later.
+  CDC changes are deduplicated on (pk, LSN); pings on (driver, device time).
+- The window is generous on purpose: late pings are data the rules must see (#20, #21), and a copy later than 2
+  simulated hours (12 wall minutes at 10x) is a replay of history, which the stream may drop and the MERGE covers.
+- A watermark needs TIMESTAMP and the simulated clock is TIMESTAMP_NTZ, so it runs on a TIMESTAMP copy (UTC session,
+  same value) that is dropped; tables keep the zone-less clock. A table that changes type, and a new table another
+  reads, need a full refresh of those silver tables (never bronze: pings older than a day are gone from Kafka). The CLI
+  takes the selection only in the JSON body (`full_refresh_selection`).
+- Real data: after the refresh, silver held 52,643 trip events (all distinct) and 1,308,002 pings, down from 1,958,624
+  (the reproduced pings of #8, #12 and #15 are gone), exactly as computed beforehand from distinct keys. CDC unchanged.
+- Redelivery test (`scripts/drills/redeliver.py`): the last 2,009 `trips.v1` messages (S8's count), 1,000 driver changes
+  and 10 watermark changes re-sent byte for byte to their partitions. Bronze grew by exactly 2,009 and 1,010; every silver
+  table stayed the same, and nothing new was quarantined. The copies stay in Kafka until retention.
+
+### #18 Driver state and the replay watermark
+- `databricks/src/silver/state.py`, same pipeline update: `silver.driver_state_history` (AUTO CDC SCD2 from
+  `silver.driver_changes`), `silver.driver_state` (the open version per driver) and `silver.replay_watermark` (the latest
+  watermark and `last_closed_day`, D closed once the watermark reaches D + 30 h, ADR-0004 §7).
+- History tracks state columns only: LSN, Kafka position and `updated_at` aren't versions, so the re-read every new
+  Debezium instance does (`op = r`, identical rows) adds none.
+- Sequencing by commit time alone was wrong: a new driver is inserted and updated in one transaction, so the two tie,
+  and AUTO CDC kept an arbitrary one (2 drivers off on real data: 38,004 versions against 38,002 computed). Now
+  `(committed_at, source_lsn)`: deterministic, the transaction's later change wins, and the first becomes a zero-length
+  version (start and end at the same commit time) that no as-of-commit-time query can select.
+- Real data: 40,322 versions, exactly what SQL over `driver_changes` gives with the same order; `silver.driver_state`
+  equals Neon's live `dispatch.drivers` for all 2,320 drivers, every column (status, zone, trip, both simulated times,
+  leaving). Watermark 2025-01-01 05:20, last closed day 2024-12-30, as the rule gives.
+- The watermark has its own topic, so one update can read a tick's watermark ahead of that tick's last trip events (one
+  tick, 10 simulated minutes); D + 30 h keeps about 3 h of margin over January's latest event, so a closed day can't be
+  missing events because of it.
+
+### #19 Surge areas and rule config
+- `databricks/src/ref/ref.py`, in the streaming pipeline: `ref.zones` (the 265 TLC zones with borough, name, centroid
+  and `is_airport`), `ref.zone_neighbours`, `ref.surge_areas` (each zone plus its neighbours, FR-10) and `ref.ops_rules`
+  (every threshold, one row per rule and parameter, from `ops_rules.yml`).
+- `ref/taxi_zone_lookup.csv` committed: byte-identical to the lookup the downloader landed (same sha256), needed for the
+  borough (R4). The pipeline uses copies of `ref/`; a test keeps them identical, the neighbours symmetric and known, and
+  the thresholds the requirements fix (R1 15 min, 10 requests, 1.5 and 3; R2 15 min; R4 3 min; late 2 min and 0.5%).
+- R3 (airport queue) and R4's area threshold have no number in the plan: the config proposes R3 at 4 idle drivers per
+  request (a queue) or 1.5 requests per idle driver (a shortage) with at least 5 requests, and R4 at half of a borough's
+  drivers on a trip silent, with at least 5 on a trip. Marked `status: proposed`, to calibrate in #25.
+- Real data: 265 zones (2 without a centroid: 264 and 265), 1,302 neighbour rows, 1,567 surge-area rows (265 + 1,302), the
+  largest area 13 zones, 18 thresholds; the airports are Newark, JFK and LaGuardia.
