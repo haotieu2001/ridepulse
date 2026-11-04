@@ -47,6 +47,11 @@ def main() -> int:
     t.add_argument("--count", type=int, default=1)
     t.add_argument("--ping-every", type=int, default=DEFAULT_EVERY_S, help="simulated seconds between a driver's pings")
     t.add_argument("--no-pings", action="store_true", help="skip Kafka: for a database-only run")
+    r = sub.add_parser("reemit", help="write the trip events of ticks in (FROM, TO] to the outbox again, after a dropped "
+                                      "slot lost them (docs/runbooks/slot-dropped.md)")
+    r.add_argument("after", metavar="FROM", type=datetime.fromisoformat, help="simulated time, exclusive")
+    r.add_argument("until", metavar="TO", type=datetime.fromisoformat, help="simulated time, inclusive")
+    r.add_argument("--slot", default="ridepulse_debezium", help="refuse unless this replication slot is active")
     a = p.parse_args()
 
     # Connection settings come from the PG* variables (scripts/db.sh).
@@ -67,6 +72,10 @@ def main() -> int:
         if not a.bucket:
             p.error("--bucket or LANDING_BUCKET is required")
         store = S3Store(a.bucket)
+        if a.command == "reemit":
+            written = job.reemit(conn, store, a.after, a.until, require_slot=a.slot)
+            print(f"re-emitted ({a.after}, {a.until}]: {dict(written)}")
+            return 0
         sink = None if a.no_pings else kafka_sink()
         for _ in range(a.count):
             r = tick(conn, store, sink=sink, ping_every=a.ping_every)

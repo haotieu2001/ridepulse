@@ -399,6 +399,65 @@ def tick(conn: psycopg.Connection, store: Store, *, sink=None, ping_every: int =
                       trips_read, dict(injected))
 
 
+_RANK = {status: i for i, status in enumerate(AFTER.values())}   # requested < assigned < started < completed
+# How far behind the watermark a re-emit may start: a trip with events after that was requested less than HOT_WINDOW
+# ago, so it's still here, unless it lasted over HOT_WINDOW - REEMIT_REACH (a day). Stop the replayer first (runbook).
+REEMIT_REACH = timedelta(hours=24)
+
+
+def reemit(conn: psycopg.Connection, store: Store, after: datetime, until: datetime, *, require_slot: str | None = None) -> Counter:
+    """Write the trip events of the ticks in (after, until] to the outbox again, exactly as they were written: the
+    repair after a dropped replication slot lost them (NFR-4, docs/runbooks/slot-dropped.md).
+
+    The transitions are guarded and in order, so a trip that has reached a status applied every event up to it, once;
+    the events come from the same slices and stadium copies, and the driver from the trip's row. The same ids,
+    payloads and times, so silver drops whatever wasn't lost. Holds replay_state's lock, so no tick runs meanwhile.
+    Limits: completed trips are purged HOT_WINDOW after their request, so only the last REEMIT_REACH can be re-emitted,
+    and a forward jump deletes the open trips it cancels, so their events can't be. Rerun the completeness check after:
+    it is what proves the gap closed."""
+    with conn.transaction(), conn.cursor() as cur:
+        cur.execute("SELECT watermark FROM replay_state WHERE id = 1 FOR UPDATE")
+        row = cur.fetchone()
+        if row is None or until > row[0]:
+            raise ValueError(f"can only re-emit what ticks wrote: {until} is past the watermark {row and row[0]}")
+        if after < row[0] - REEMIT_REACH:
+            raise ValueError(f"{after} is too old: only the last {REEMIT_REACH} can be re-emitted, since completed trips "
+                             f"are purged {HOT_WINDOW} after their request")
+        if require_slot:   # re-emitting with nothing reading the WAL would lose the events again
+            cur.execute("SELECT active FROM pg_replication_slots WHERE slot_name = %s", (require_slot,))
+            slot = cur.fetchone()
+            if not slot or not slot[0]:
+                raise CdcNotReady(f"replication slot {require_slot} is {'not active' if slot else 'missing'}")
+        events = Slices(store).due(after, until)
+        keys = sorted({e["trip_key"] for e in events})
+        cur.execute("SELECT trip_key, status, pickup_zone_id, dropoff_zone_id, requested_at FROM trips WHERE trip_key = ANY(%s)",
+                    (keys,))
+        found = cur.fetchall()
+        incidents = Incidents(Incidents.load(cur, after, until))
+        if incidents.of("stadium"):
+            events, _ = _with_stadium_copies(events, {k: (r, p) for k, _, p, _, r in found}, incidents, cur, {})
+        cur.execute("SELECT trip_key, status, driver_id FROM trips WHERE trip_key = ANY(%s)",
+                    (sorted({e["trip_key"] for e in events}),))
+        trips = {k: (s, d) for k, s, d in cur.fetchall()}
+        written: Counter = Counter()
+        with conn.pipeline():
+            for e in events:
+                key, kind = e["trip_key"], e["type"]
+                if key not in trips or _RANK[trips[key][0]] < _RANK[AFTER[kind]]:
+                    written["not_applied"] += 1
+                    continue
+                payload = dict(e["payload"])
+                if kind != "TripRequested":
+                    payload["driver_id"] = trips[key][1]
+                payload = exact_payload(payload)
+                cur.execute("INSERT INTO outbox (id, aggregateid, type, payload, occurred_at) "
+                            "VALUES (%s::uuid, %s, %s, %s::jsonb, %s::timestamp)",
+                            (event_id(key, kind), key, kind, json.dumps(payload, sort_keys=True), e["occurred_at"]))
+                written[kind] += 1
+        cur.execute("DELETE FROM outbox")
+    return written
+
+
 def start(conn: psycopg.Connection, from_ts: datetime | None, speed: float) -> int:
     """Start, resume or jump the replay (V002 refuses going back and mid-day starts). A forward jump
     cancels trips still open: their later events are skipped, so nothing would finish them, and their
