@@ -728,3 +728,20 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
 - Redelivery test (`scripts/drills/redeliver.py`): the last 2,009 `trips.v1` messages (S8's count), 1,000 driver changes
   and 10 watermark changes re-sent byte for byte to their partitions. Bronze grew by exactly 2,009 and 1,010; every silver
   table stayed the same, and nothing new was quarantined. The copies stay in Kafka until retention.
+
+### #18 Driver state and the replay watermark
+- `databricks/src/silver/state.py`, same pipeline update: `silver.driver_state_history` (AUTO CDC SCD2 from
+  `silver.driver_changes`), `silver.driver_state` (the open version per driver) and `silver.replay_watermark` (the latest
+  watermark and `last_closed_day`, D closed once the watermark reaches D + 30 h, ADR-0004 §7).
+- History tracks state columns only: LSN, Kafka position and `updated_at` aren't versions, so the re-read every new
+  Debezium instance does (`op = r`, identical rows) adds none.
+- Sequencing by commit time alone was wrong: a new driver is inserted and updated in one transaction, so the two tie,
+  and AUTO CDC kept an arbitrary one (2 drivers off on real data: 38,004 versions against 38,002 computed). Now
+  `(committed_at, source_lsn)`: deterministic, the transaction's later change wins, and the first becomes a zero-length
+  version (start and end at the same commit time) that no as-of-commit-time query can select.
+- Real data: 40,322 versions, exactly what SQL over `driver_changes` gives with the same order; `silver.driver_state`
+  equals Neon's live `dispatch.drivers` for all 2,320 drivers, every column (status, zone, trip, both simulated times,
+  leaving). Watermark 2025-01-01 05:20, last closed day 2024-12-30, as the rule gives.
+- The watermark has its own topic, so one update can read a tick's watermark ahead of that tick's last trip events (one
+  tick, 10 simulated minutes); D + 30 h keeps about 3 h of margin over January's latest event, so a closed day can't be
+  missing events because of it.

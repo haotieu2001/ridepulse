@@ -16,6 +16,8 @@ resources:
             path: ../src/bronze/pipeline.py
         - file:
             path: ../src/silver/silver.py
+        - file:
+            path: ../src/silver/state.py
       configuration:
         ridepulse.kafka.bootstrap: ${var.kafka_bootstrap}
         ridepulse.secret_scope: ridepulse
