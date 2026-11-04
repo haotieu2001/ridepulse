@@ -780,3 +780,16 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   are cluster-wide, and Neon has the real one).
 - Not yet: the real run (Lambda needs the new zip: `make replayer-plan && make replayer-apply`), and publishing
   `incidents` to the lakehouse (a new topic in the Confluent stack, an apply); #25 can read the labels from Neon directly.
+
+### #23 Live KPIs and driver earnings per shift
+- `databricks/src/ops/kpis.py`: `ops.kpis_by_minute` (completed trips and GMV per simulated minute and pickup borough;
+  GMV is the contract's rider_total) and `ops.driver_shift_earnings` (each shift's trips, pay, tips, open or closed,
+  labelled synthetic drivers). Materialized views over silver's exactly-once tables, recomputed every update: the volume
+  is small and a view stays exact through redelivery and late events. Stadium copies count, with `injected_trips`.
+- `live` is a reserved schema name in Lakeflow pipelines, so these live in `ops`, with the rest of what on-call reads.
+- A check caught a real bug: only 13 of 12,807 trips landed in a shift. #18's zero-length insert version (a new driver
+  inserted offline, signed on in the same transaction) looked like a sign-off after the shift began. A sign-off now ends
+  the shift of the version just before it, so that insert ends nothing.
+- Real data: 12,807 completed trips across five boroughs, the same as silver's completed events; every trip in exactly
+  one shift; pay 354,347.16 on both sides; 965 open shifts, equal to the drivers silver shows online. Not yet compared
+  with Neon (AWS sign-in expired).

@@ -16,6 +16,10 @@ resources:
       catalog_name: ${var.catalog}
       name: ref
       comment: Reference data and rule configuration.
+    ops:
+      catalog_name: ${var.catalog}
+      name: ops
+      comment: What on-call reads, refreshed every pipeline update - live KPIs, late events, alerts.
 
   volumes:
     tlc:
