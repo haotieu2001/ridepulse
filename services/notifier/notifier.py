@@ -25,15 +25,24 @@ POLL_SECONDS = 20
 REF = pathlib.Path(__file__).resolve().parents[2] / "ref"
 
 
-def claim(dynamo, table: str, alert: dict) -> bool:
-    """True if this run claimed the alert; False if an earlier one did (it was sent, or is being sent)."""
+def claim(dynamo, table: str, alert: dict) -> dict | None:
+    """The claim's item if this run claimed the alert; None if an earlier one did (it was sent, or is being sent)."""
+    item = {"alert_id": {"S": alert["alert_id"]}, "rule": {"S": alert["rule"]}, "area": {"S": str(alert["area"])},
+            "window_start": {"S": str(alert["window_start"])}, "claimed_at": {"N": str(int(time.time()))}}
     try:
-        dynamo.put_item(TableName=table, ConditionExpression="attribute_not_exists(alert_id)",
-                        Item={"alert_id": {"S": alert["alert_id"]}, "rule": {"S": alert["rule"]},
-                              "claimed_at": {"N": str(int(time.time()))}})
-        return True
+        dynamo.put_item(TableName=table, ConditionExpression="attribute_not_exists(alert_id)", Item=item)
+        return item
     except dynamo.exceptions.ConditionalCheckFailedException:
-        return False
+        return None
+
+
+def mark_sent(dynamo, table: str, item: dict) -> None:
+    """Record when the email went out (SLA-1 ends there, #25). Best effort: the email is sent and the claim stands, so
+    a failure here only loses the timestamp, and must not hold back the batch's other alerts."""
+    try:
+        dynamo.put_item(TableName=table, Item={**item, "sent_at_ms": {"N": str(int(time.time() * 1000))}})
+    except Exception as e:  # noqa: BLE001
+        print(json.dumps({"warning": "sent_at not recorded", "alert_id": item["alert_id"]["S"], "error": str(e)}))
 
 
 @functools.cache
@@ -81,7 +90,8 @@ def message(alert: dict) -> tuple[str, str]:
 def deliver(alerts: list[dict], dynamo, sns, table: str, topic_arn: str) -> dict:
     sent = skipped = 0
     for alert in alerts:
-        if not claim(dynamo, table, alert):
+        item = claim(dynamo, table, alert)
+        if item is None:
             skipped += 1
             continue
         subject, body = message(alert)
@@ -90,6 +100,7 @@ def deliver(alerts: list[dict], dynamo, sns, table: str, topic_arn: str) -> dict
         except Exception:
             dynamo.delete_item(TableName=table, Key={"alert_id": {"S": alert["alert_id"]}})
             raise
+        mark_sent(dynamo, table, item)
         sent += 1
     return {"sent": sent, "skipped": skipped}
 

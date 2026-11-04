@@ -17,10 +17,10 @@ class FakeDynamo:
     def __init__(self):
         self.items = {}
 
-    def put_item(self, TableName, Item, ConditionExpression):
-        assert ConditionExpression == "attribute_not_exists(alert_id)"
+    def put_item(self, TableName, Item, ConditionExpression=None):
+        assert ConditionExpression in (None, "attribute_not_exists(alert_id)")
         key = Item["alert_id"]["S"]
-        if key in self.items:
+        if ConditionExpression and key in self.items:
             raise ConditionalCheckFailedException()
         self.items[key] = Item
 
@@ -97,6 +97,18 @@ def test_a_failed_publish_releases_the_claim_and_commits_nothing():
     assert set(dynamo.items) == {"id-1"}          # id-2 can be sent by the next run
     result, _ = run([alert(1), alert(2)], dynamo, FakeSns())   # the retry: id-1 already sent, id-2 now
     assert (result["sent"], result["skipped"]) == (1, 1)
+
+
+def test_a_sent_alert_records_when_it_went_out():
+    dynamo = FakeDynamo()
+    run([alert(1)], dynamo, FakeSns())
+    item = dynamo.items["id-1"]
+    assert int(item["sent_at_ms"]["N"]) >= int(item["claimed_at"]["N"]) * 1000
+    assert (item["rule"]["S"], item["area"]["S"], item["window_start"]["S"]) == ("R1", "161", "2025-01-01T00:00:00")
+    dynamo, sns = FakeDynamo(), FakeSns(fail_on="id-1")
+    with pytest.raises(RuntimeError):
+        run([alert(1)], dynamo, sns)
+    assert dynamo.items == {}   # not sent: no claim, no sent_at
 
 
 def test_nothing_to_read_commits_nothing():
