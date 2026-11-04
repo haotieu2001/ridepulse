@@ -6,7 +6,8 @@ Where seeded reference data comes from. The trip columns and how they behave are
 ## Zones
 
 `dispatch.zones` is loaded from the TLC's `taxi_zone_lookup.csv`, the version the downloader landed
-(`manifests/tlc_zones/current/taxi_zone_lookup.csv.json`). Publisher: NYC TLC.
+(`manifests/tlc_zones/current/taxi_zone_lookup.csv.json`). Publisher: NYC TLC. `ref/taxi_zone_lookup.csv` is a copy of
+that same file (sha256 `1a99e105...c8ed`, checked on 2026-10-31), for the lakehouse's `ref.zones`.
 
 ## Fee rates (`ref/fare_rules.csv`)
 

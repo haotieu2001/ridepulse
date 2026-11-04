@@ -1,0 +1,42 @@
+# The ops rules' thresholds as data (FR-10): published as ref.ops_rules and read by the rules (#20), so tuning one is a
+# config change, not a code change. Windows are simulated time. Each surge area is a zone plus its neighbours
+# (ref.surge_areas). "status: proposed" means the plan gave no number: the value is a first guess, calibrated against
+# the injected incidents in #25.
+
+R1_surge:
+  description: requests per idle driver in a surge area
+  status: from the plan (FR-10)
+  window_minutes: 15
+  min_requests: 10          # one zone over 5 minutes sees about 0.4 requests at a 5% sample: noise
+  surge_ratio: 1.5          # requests / idle drivers above this writes a surge band
+  alert_ratio: 3.0          # ... and above this, an alert
+
+R2_long_waits:
+  description: p90 wait for a car per surge area
+  status: from the plan
+  window_minutes: 15
+  min_trips: 10
+  p90_wait_minutes: 15      # the real p90 is 7-10 min (Aug 2026)
+  wait_fallback: request_to_pickup   # where driver_arrived_at is null (Lyft before 2025)
+
+R3_airport_queue:
+  description: idle drivers against requests at the airports
+  status: proposed
+  window_minutes: 15
+  airport_zones: [1, 132, 138]       # Newark, JFK, LaGuardia
+  min_requests: 5
+  queue_idle_per_request: 4.0        # drivers piling up: a queue building
+  shortage_requests_per_idle: 1.5    # riders waiting: the other way out of balance
+
+R4_app_outage:
+  description: drivers on a trip whose app stopped sending pings, by borough
+  status: proposed (the 3-minute silence is from the plan)
+  silence_minutes: 3
+  min_on_trip: 5
+  silent_share: 0.5                  # at least half of a borough's drivers on a trip are silent
+
+late_events:
+  description: events behind the watermark go to ops.late_events (FR-12)
+  status: from the requirements
+  grace_minutes: 2
+  alert_share: 0.005                 # an alert above 0.5% of a window's events

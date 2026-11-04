@@ -12,6 +12,10 @@ resources:
       catalog_name: ${var.catalog}
       name: silver
       comment: Typed, checked and deduplicated records.
+    ref:
+      catalog_name: ${var.catalog}
+      name: ref
+      comment: Reference data and rule configuration.
 
   volumes:
     tlc:
