@@ -1,14 +1,20 @@
-"""Silver, part 1 (#16): typed records from bronze, checked against the contracts, with every rejected record kept in
-silver.quarantine with its reason and source offset. Runs in the same pipeline update as bronze (ADR-0004 §7).
+"""Silver: typed records from bronze, checked against the contracts (#16), each record once (#17). Every rejected
+record is kept in silver.quarantine with its reason and source offset. Runs in the same pipeline update as bronze
+(ADR-0004 §7).
 
-    silver.trip_events        one row per trip event, typed, with dq_<name> for the contract's flag/warn checks
-    silver.driver_changes     Debezium changes to dispatch.drivers, typed (op, LSN, commit time)
+    silver.trip_events_live   trip events as a stream, duplicates dropped within 2 simulated hours: for the rules
+    silver.trip_events        each trip event exactly once (MERGE on event_id): for gold and anything batch
+    silver.driver_changes     Debezium changes to dispatch.drivers, typed (op, LSN, commit time), once per (pk, LSN)
     silver.driver_profile_changes, silver.replay_state_changes, silver.replay_runs_changes   the same per table
-    silver.locations          valid driver pings
+    silver.locations          valid driver pings, once per (driver, device time)
     silver.quarantine         what failed: source, offset, reason, raw value
     silver.dq_rates           flag/warn rates per provider and day, against the contract's baselines
 
-Duplicates stay (Debezium redelivers, a retried tick re-produces pings): removing them is #17.
+Duplicates come from Debezium redelivering after a restart (at-least-once, S8 saw 2,009) and from a retried or
+repeated tick re-producing pings with the same ids. Streams drop them within a watermark, which bounds the state;
+the watermark is generous (2 simulated hours, 12 wall minutes at 10x) because late pings are data the rules must see
+(#20, #21), and a copy arriving later than that is a replay of history, not news. trip_events adds a MERGE, so even
+a copy re-emitted days later can't appear twice in what gold reads.
 """
 import dlt
 import yaml
@@ -103,10 +109,30 @@ def trip_events_checked():
     return df.select(*keep, first_reason(*checks).alias("reason"), *flags)
 
 
-@dlt.table(name=silver("trip_events"), comment="Trip events, typed and checked; duplicates kept until #17",
-           cluster_by=["event_type", "occurred_at"], table_properties={"delta.feature.timestampNtz": "supported"})
-def trip_events():
-    return dlt.read_stream("trip_events_checked").where("reason IS NULL").drop("reason", "raw_value")
+NTZ = {"delta.feature.timestampNtz": "supported"}
+DEDUP_WINDOW = "2 hours"   # simulated time; see the module docstring
+
+
+def dedup(df: DataFrame, event_time: str, keys: list[str]) -> DataFrame:
+    """Each `keys` once within DEDUP_WINDOW of `event_time`. A watermark needs a TIMESTAMP, and the simulated clock is
+    TIMESTAMP_NTZ, so the watermark runs on a TIMESTAMP copy (the session is UTC, so the value is unchanged) that is
+    dropped again: tables keep the clock without a zone."""
+    return (df.withColumn("_watermark", F.col(event_time).cast("timestamp"))
+            .withWatermark("_watermark", DEDUP_WINDOW).dropDuplicatesWithinWatermark(keys).drop("_watermark"))
+
+
+@dlt.table(name=silver("trip_events_live"), comment="Trip events as a stream, each once within 2 simulated hours",
+           cluster_by=["event_type", "occurred_at"], table_properties=NTZ)
+def trip_events_live():
+    # event_id is UUIDv5(trip_key, type) (V001), so this is the issue's "trip_key + type".
+    return dedup(dlt.read_stream("trip_events_checked").where("reason IS NULL").drop("reason", "raw_value"),
+                 "occurred_at", ["event_id"])
+
+
+dlt.create_streaming_table(name=silver("trip_events"), comment="Each trip event exactly once (MERGE on event_id)",
+                           cluster_by=["event_type", "occurred_at"], table_properties=NTZ)
+dlt.create_auto_cdc_flow(target=silver("trip_events"), source=silver("trip_events_live"), keys=["event_id"],
+                         sequence_by="kafka_ts", stored_as_scd_type=1)
 
 
 quarantine_flow("trip_events", "trips.v1", "trip_events_checked", F.col("trip_key"))
@@ -162,10 +188,13 @@ def cdc_tables(table: str, target: str, pk: str, schema: str, kinds: dict) -> No
                          "from_snapshot", "topic", "partition", "offset", "kafka_ts", "raw_value", "key",
                          reason.alias("reason"))
 
-    @dlt.table(name=silver(target), comment=f"Changes to dispatch.{table} from Debezium, typed; duplicates kept until #17",
-               cluster_by=[pk], table_properties={"delta.feature.timestampNtz": "supported"})
+    @dlt.table(name=silver(target), comment=f"Changes to dispatch.{table} from Debezium, typed, once per ({pk}, LSN)",
+               cluster_by=[pk], table_properties=NTZ)
     def changes():
-        return dlt.read_stream(f"{target}_checked").where("reason IS NULL").drop("reason", "raw_value", "key")
+        # A redelivered change has the same key and LSN; a snapshot row has its snapshot's LSN, so two snapshots
+        # (two Debezium instances) both stay: they are real re-reads, and history (#18) treats equal rows as no change.
+        return dedup(dlt.read_stream(f"{target}_checked").where("reason IS NULL").drop("reason", "raw_value", "key"),
+                     "committed_at", [pk, "source_lsn"])
 
     quarantine_flow(target, f"cdc.dispatch.{table}", f"{target}_checked", F.col("key"))
 
@@ -189,10 +218,11 @@ def locations_checked():
     return df.withColumn("reason", reason)
 
 
-@dlt.table(name=silver("locations"), comment="Valid driver pings; duplicates kept until #17",
-           cluster_by=["device_ts"], table_properties={"delta.feature.timestampNtz": "supported"})
+@dlt.table(name=silver("locations"), comment="Valid driver pings, each (driver, device time) once",
+           cluster_by=["device_ts"], table_properties=NTZ)
 def locations():
-    return dlt.read_stream("locations_checked").where("reason IS NULL").drop("reason", "raw_value")
+    return dedup(dlt.read_stream("locations_checked").where("reason IS NULL").drop("reason", "raw_value"),
+                 "device_ts", ["driver_id", "device_ts"])
 
 
 quarantine_flow("locations", "driver.locations.v1", "locations_checked", F.col("driver_id"))
