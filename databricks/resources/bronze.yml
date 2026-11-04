@@ -22,6 +22,12 @@ resources:
             path: ../src/ref/ref.py
         - file:
             path: ../src/ops/kpis.py
+        - file:
+            path: ../src/ops/supply.py
+        - file:
+            path: ../src/ops/rules.py
+        - file:
+            path: ../src/ops/alerts.py
       configuration:
         ridepulse.kafka.bootstrap: ${var.kafka_bootstrap}
         ridepulse.secret_scope: ridepulse
