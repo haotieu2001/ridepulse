@@ -111,5 +111,8 @@ def test_emails_name_the_place_not_just_an_id():
     assert "area: Laurelton, Queens (and neighbours) (id 139)" in body and "to 2025-01-01 02:15" in body
     assert message({**a, "rule": "R3", "area": "132"})[0] == "RidePulse R3 alert: JFK Airport, Queens, 2025-01-01 02:00"
     assert message({**a, "rule": "R4", "area": "Brooklyn"})[0] == "RidePulse R4 alert: Brooklyn, 2025-01-01 02:00"
+    detail = message({**a, "detail": '{"requests":20,"idle":6,"ratio":3.3333333333333335,"supply_lsn":546476752}'})[1]
+    assert "\nrequests: 20\nidle: 6\nratio: 3.33\nsupply_lsn: 546476752\n" in detail
+    assert "detail: not json" in message({**a, "detail": "not json"})[1]
     long = message({**a, "rule": "late_events", "area": "x" * 120})[0]
     assert len(long) == 100 and long.endswith("...")

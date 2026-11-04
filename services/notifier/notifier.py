@@ -56,6 +56,17 @@ def _minute(ts: str) -> str:
     return ts.replace("T", " ")[:16]   # 2025-01-01T02:00:00.000 -> 2025-01-01 02:00
 
 
+def details(detail: str) -> list[str]:
+    """The rule's numbers, one per line, floats to 2 decimals; anything that isn't a JSON object as it came."""
+    try:
+        fields = json.loads(detail)
+    except (TypeError, ValueError):
+        return [f"detail: {detail}"]
+    if not isinstance(fields, dict):
+        return [f"detail: {detail}"]
+    return [f"{k}: {round(v, 2) if isinstance(v, float) else v}" for k, v in fields.items()]
+
+
 def message(alert: dict) -> tuple[str, str]:
     where = place(alert)
     subject = f"RidePulse {alert['rule']} alert: {where}, {_minute(alert['window_start'])}"
@@ -63,7 +74,7 @@ def message(alert: dict) -> tuple[str, str]:
         subject = subject[:97] + "..."
     body = "\n".join([subject, "", f"rule: {alert['rule']}", f"area: {where} (id {alert['area']})",
                       f"window: {_minute(alert['window_start'])} to {_minute(alert['window_end'])} (simulated time)",
-                      f"detail: {alert['detail']}", f"alert_id: {alert['alert_id']}"])
+                      "", *details(alert["detail"]), "", f"alert_id: {alert['alert_id']}"])
     return subject, body
 
 
