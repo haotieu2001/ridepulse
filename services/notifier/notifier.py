@@ -12,13 +12,17 @@ as everything else (ADR-0002, amended).
 """
 from __future__ import annotations
 
+import csv
+import functools
 import json
 import os
+import pathlib
 import time
 
 import boto3
 
 POLL_SECONDS = 20
+REF = pathlib.Path(__file__).resolve().parents[2] / "ref"
 
 
 def claim(dynamo, table: str, alert: dict) -> bool:
@@ -32,11 +36,35 @@ def claim(dynamo, table: str, alert: dict) -> bool:
         return False
 
 
+@functools.cache
+def _zones() -> dict[str, tuple[str, str]]:
+    """TLC zone id -> (zone name, borough), from the copy of ref/taxi_zone_lookup.csv in the Lambda's zip."""
+    with open(REF / "taxi_zone_lookup.csv", encoding="utf-8-sig") as f:
+        return {r["LocationID"]: (r["Zone"], r["Borough"]) for r in csv.DictReader(f)}
+
+
+def place(alert: dict) -> str:
+    """Where the alert is, in words: R1 and R2 name a surge area by its centre zone, R3 a zone, R4 a borough."""
+    area = alert["area"]
+    if alert["rule"] not in ("R1", "R2", "R3") or area not in _zones():
+        return area
+    zone, borough = _zones()[area]
+    return f"{zone}, {borough}" + (" (and neighbours)" if alert["rule"] in ("R1", "R2") else "")
+
+
+def _minute(ts: str) -> str:
+    return ts.replace("T", " ")[:16]   # 2025-01-01T02:00:00.000 -> 2025-01-01 02:00
+
+
 def message(alert: dict) -> tuple[str, str]:
-    subject = f"RidePulse {alert['rule']} alert: {alert['area']}, window {alert['window_start']}"
-    body = "\n".join([subject, "", f"window: {alert['window_start']} to {alert['window_end']} (simulated time)",
+    where = place(alert)
+    subject = f"RidePulse {alert['rule']} alert: {where}, {_minute(alert['window_start'])}"
+    if len(subject) > 100:   # SNS's limit for an email subject
+        subject = subject[:97] + "..."
+    body = "\n".join([subject, "", f"rule: {alert['rule']}", f"area: {where} (id {alert['area']})",
+                      f"window: {_minute(alert['window_start'])} to {_minute(alert['window_end'])} (simulated time)",
                       f"detail: {alert['detail']}", f"alert_id: {alert['alert_id']}"])
-    return subject[:100], body
+    return subject, body
 
 
 def deliver(alerts: list[dict], dynamo, sns, table: str, topic_arn: str) -> dict:

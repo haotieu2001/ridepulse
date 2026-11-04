@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from services.notifier.notifier import handler
+from services.notifier.notifier import handler, message
 
 
 class ConditionalCheckFailedException(Exception):
@@ -102,3 +102,14 @@ def test_a_failed_publish_releases_the_claim_and_commits_nothing():
 def test_nothing_to_read_commits_nothing():
     result, consumer = run([], FakeDynamo(), FakeSns())
     assert result == {"sent": 0, "skipped": 0, "read": 0} and not consumer.committed
+
+
+def test_emails_name_the_place_not_just_an_id():
+    a = {**alert(1), "area": "139", "window_start": "2025-01-01T02:00:00.000", "window_end": "2025-01-01T02:15:00.000"}
+    subject, body = message(a)
+    assert subject == "RidePulse R1 alert: Laurelton, Queens (and neighbours), 2025-01-01 02:00"
+    assert "area: Laurelton, Queens (and neighbours) (id 139)" in body and "to 2025-01-01 02:15" in body
+    assert message({**a, "rule": "R3", "area": "132"})[0] == "RidePulse R3 alert: JFK Airport, Queens, 2025-01-01 02:00"
+    assert message({**a, "rule": "R4", "area": "Brooklyn"})[0] == "RidePulse R4 alert: Brooklyn, 2025-01-01 02:00"
+    long = message({**a, "rule": "late_events", "area": "x" * 120})[0]
+    assert len(long) == 100 and long.endswith("...")
