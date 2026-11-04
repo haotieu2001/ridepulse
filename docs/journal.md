@@ -793,3 +793,28 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
 - Real data: 12,807 completed trips across five boroughs, the same as silver's completed events; every trip in exactly
   one shift; pay 354,347.16 on both sides; 965 open shifts, equal to the drivers silver shows online. Not yet compared
   with Neon (AWS sign-in expired).
+
+### #20 Rules R1-R4, late events, alerts
+- Decision (issue comment, 2026-11-04): supply as of the last tick at or before a window's end (option A). Each tick's
+  driver changes and its watermark share a transaction, so `ops.tick_watermarks` gives every driver version a simulated
+  time; `ops.zone_supply` keeps idle and busy drivers per zone as intervals between ticks (running sums of +1/-1 at each
+  change, so it scales), and `ops.supply_by_area` / `ops.supply_by_borough` read them at every window end, with the LSN.
+  Supply can be up to one tick old (10 simulated minutes at 10x).
+- `databricks/src/ops/rules.py`: R1 (requests per idle driver per surge area, 15 min), R2 (p90 wait, a stream-stream join
+  of requests and pickups), R3 (airport zones, queue and shortage), R4 (busy drivers per borough that sent no ping, 3 min).
+  Streaming aggregations emit each window once, when the watermark passes its end plus the 2-minute grace: pipeline
+  streaming tables are append-only, so there's no update mode. R4 compares busy drivers (from CDC supply) with drivers
+  that pinged: a per-trip join would only know a trip at its completion, too late for an outage.
+- `databricks/src/ops/alerts.py`: `ops.late_events` (an event is late if it arrived after the watermark passed its window,
+  found from Kafka arrival times because stateful aggregations drop late rows silently), `ops.late_rates` and
+  `ops.alerts` (`alert_id = sha2(rule | area | window_start)`). Thresholds from `ops_rules.yml`.
+- R2 first produced nothing: a time-bounded stream-stream join holds its output watermark back by its range, and with
+  pickups allowed 6 hours after a request no window had closed after 6 hours of replay. Now 30 min before to 75 min after:
+  windows close ~75 simulated minutes late (7.5 wall minutes at 10x), and waits over 75 min fall out (real p99: 19 min).
+- Real data (New Year's night, to 05:20): supply after the last tick equals `silver.driver_state` in every zone (457 idle,
+  508 busy, 65 tick transactions). R1: 5,419 windows, request counts equal to independent SQL in every one, idle equal to
+  supply; 175 surge rows of 3,216 evaluated, 27 alerts. R2: 4,025 windows (through 03:45, as the hold-back gives), trip
+  counts equal to SQL in every one; median p90 11.3 min, 351 alerts. R3: 29 windows, 2 alerts. R4: 619 windows; the
+  approximate distinct count is within 1.7% of the exact one. Late events: 0, nothing injected yet.
+- To judge in #25, with injected incidents: R2's alert rate on New Year's night (13% of evaluated windows) and the R3/R4
+  thresholds proposed in #19.
