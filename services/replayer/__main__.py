@@ -47,6 +47,14 @@ def main() -> int:
     t.add_argument("--count", type=int, default=1)
     t.add_argument("--ping-every", type=int, default=DEFAULT_EVERY_S, help="simulated seconds between a driver's pings")
     t.add_argument("--no-pings", action="store_true", help="skip Kafka: for a database-only run")
+    t.add_argument("--slot", default="ridepulse_debezium", help="wait unless this replication slot is active, as the Lambda does")
+    t.add_argument("--no-slot-check", action="store_true",
+                   help="tick even with nothing reading the WAL: its trip events are lost if the slot goes (the #24 drill)")
+    r = sub.add_parser("reemit", help="write the trip events of ticks in (FROM, TO] to the outbox again, after a dropped "
+                                      "slot lost them (docs/runbooks/slot-dropped.md)")
+    r.add_argument("after", metavar="FROM", type=datetime.fromisoformat, help="simulated time, exclusive")
+    r.add_argument("until", metavar="TO", type=datetime.fromisoformat, help="simulated time, inclusive")
+    r.add_argument("--slot", default="ridepulse_debezium", help="refuse unless this replication slot is active")
     a = p.parse_args()
 
     # Connection settings come from the PG* variables (scripts/db.sh).
@@ -67,9 +75,17 @@ def main() -> int:
         if not a.bucket:
             p.error("--bucket or LANDING_BUCKET is required")
         store = S3Store(a.bucket)
+        if a.command == "reemit":
+            written = job.reemit(conn, store, a.after, a.until, require_slot=a.slot)
+            print(f"re-emitted ({a.after}, {a.until}]: {dict(written)}")
+            return 0
         sink = None if a.no_pings else kafka_sink()
         for _ in range(a.count):
-            r = tick(conn, store, sink=sink, ping_every=a.ping_every)
+            try:
+                r = tick(conn, store, sink=sink, ping_every=a.ping_every, require_slot=None if a.no_slot_check else a.slot)
+            except job.Waiting as e:
+                print(f"waiting, nothing changed: {e}", file=sys.stderr)
+                return 3
             print(f"{r.watermark_from} -> {r.watermark_to}: applied {r.applied}, skipped {r.skipped}, "
                   f"new drivers {r.new_drivers}, purged {r.purged}, pings {r.pings}")
     return 0

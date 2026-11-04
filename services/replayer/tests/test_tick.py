@@ -7,7 +7,7 @@ import subprocess
 import sys
 import threading
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import psycopg
 import pytest
@@ -362,3 +362,59 @@ def test_replaying_the_same_slice_twice_changes_nothing(conn, store):
 
     first, second = replay_once(), replay_once()
     assert first[2] and first == second
+
+
+LOGGED = "SELECT id, aggregateid, type, payload, occurred_at FROM outbox_log ORDER BY id"
+
+
+def take_log(conn):
+    rows = conn.execute(LOGGED).fetchall()
+    conn.execute("TRUNCATE outbox_log")
+    return rows
+
+
+@needs_postgres
+def test_reemit_writes_every_window_exactly_as_its_tick_did(conn, store):
+    from services.replayer.tick import reemit
+    start(conn, BEFORE_MONTH, 1440)
+    total = 0
+    for _ in range(33):
+        r = tick(conn, store)
+        ticked = take_log(conn)
+        written = reemit(conn, store, r.watermark_from, r.watermark_to)
+        assert take_log(conn) == ticked   # same ids, trips, types, payloads (driver included) and times
+        assert sum(n for k, n in written.items() if k != "not_applied") == len(ticked)
+        total += len(ticked)
+    assert total == EVENTS and conn.execute("SELECT count(*) FROM outbox").fetchone()[0] == 0
+
+
+@needs_postgres
+def test_reemit_after_later_ticks_moved_the_trips_on(conn, store):
+    from services.replayer.tick import reemit
+    start(conn, datetime(2025, 1, 6), 60)
+    windows, checked = [], 0
+    for _ in range(24):
+        r = tick(conn, store)
+        windows.append((r, take_log(conn)))
+        if len(windows) > 3:   # three windows at once, ending one tick ago: their trips have moved on since
+            span = windows[-4:-1]
+            reemit(conn, store, span[0][0].watermark_from, span[-1][0].watermark_to)
+            ticked = sorted((row for _, log in span for row in log), key=lambda row: row[0])
+            assert take_log(conn) == ticked
+            checked += len(ticked)
+    assert checked > 0
+
+
+@needs_postgres
+def test_reemit_refuses_past_the_watermark_too_old_and_with_no_slot(conn, store):
+    from services.replayer.tick import REEMIT_REACH, CdcNotReady, reemit
+    start(conn, datetime(2025, 1, 6), 60)
+    r = tick(conn, store)
+    with pytest.raises(ValueError, match="past the watermark"):
+        reemit(conn, store, r.watermark_from, r.watermark_to + timedelta(minutes=1))
+    with pytest.raises(ValueError, match="too old"):
+        reemit(conn, store, r.watermark_to - REEMIT_REACH - timedelta(minutes=1), r.watermark_to)
+    take_log(conn)
+    with pytest.raises(CdcNotReady, match="missing"):
+        reemit(conn, store, r.watermark_from, r.watermark_to, require_slot="rp_test_no_such_slot")
+    assert take_log(conn) == []

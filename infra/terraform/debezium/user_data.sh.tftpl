@@ -84,6 +84,8 @@ ExecStartPre=/opt/debezium-server/render-config.sh
 ExecStart=/opt/debezium-server/run.sh
 Restart=on-failure
 RestartSec=10
+# The JVM exits 143 on SIGTERM: a clean `systemctl stop`, not a failure (#24's drill saw `failed` after one).
+SuccessExitStatus=143
 
 [Install]
 WantedBy=multi-user.target

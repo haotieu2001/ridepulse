@@ -838,3 +838,25 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   Deployed and run for real: the group moved to 3 before the end (the backlog is mostly uncalibrated R2, #25), one
   run sent 3 emails, the next read nothing; rewound over the same 3, a run read 3, sent 0, skipped 3 (DynamoDB holds
   3 claims).
+
+### #24 Failure drills: kill Debezium, drop the slot, recover
+- `python -m services.replayer reemit FROM TO`: writes the trip events of the ticks in (FROM, TO] to the outbox again,
+  exactly as they were written: the same slices and stadium copies, the driver from each trip's row (the transitions are
+  guarded and in order, so a trip's status says which events it applied). Refuses past the watermark, more than
+  24 simulated hours back (completed trips are purged 48 hours after their request; a test found it) and with no
+  active slot. Tests: row for row equal to what each tick of a month wrote, three windows later, with stadium copies.
+- `scripts/drills/completeness.py`: every event Neon's trips imply against silver's `trip_events` (missing, extra,
+  repeated), and Neon's drivers against `silver.driver_state`; prints the `reemit` to run; exits 1 on a difference.
+- Found: the `tick` CLI didn't check the slot (only the Lambda did), so a tick by hand with CDC down writes events a lost
+  slot loses. It now waits like the Lambda unless `--no-slot-check`.
+- Kill drill (NFR-5): SIGKILL mid-stream; systemd restarted Debezium within 30 s, the ticks waited and went on. Nothing
+  missing, extra or repeated; drivers equal.
+- Slot drill (NFR-4): freezing Debezium can't leave unread WAL on Neon (`wal_sender_timeout` 10 s, so the slot turns
+  inactive and ticks wait), so two ticks ran by hand with `--no-slot-check` while it was stopped, then the slot was
+  dropped (by hand: the drop needs a person's approval). Debezium's `when_needed` snapshotted on restart (drivers
+  repaired, outbox empty); completeness found exactly the 1,233 events the two ticks applied; the printed `reemit` wrote
+  5,545, silver kept the 1,233 it lacked; the check then said silver equals Neon (57,319 events, 14,449 trips).
+- A clean `systemctl stop debezium` left the unit `failed` (the JVM exits 143): `SuccessExitStatus=143`, applied with
+  the next Debezium apply (it replaces the instance; offsets are in Kafka, the slot in Neon).
+- Runbooks: `docs/runbooks/debezium-killed.md`, `docs/runbooks/slot-dropped.md`. The drill's 43 alerts were skipped
+  for the notifier (R2 isn't calibrated yet, #25).

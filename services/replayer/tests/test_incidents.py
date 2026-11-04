@@ -107,3 +107,18 @@ def test_tunnel_pings_arrive_later_with_their_own_time_and_retries_inject_the_sa
     assert len(sent) == len({(p.driver_id, p.device_ts) for p in sent})   # held, not doubled
     assert sink.raw and all(v[0] != 0 for _, v in sink.raw)
     assert conn.execute("SELECT count(*) FROM late_pings").fetchone()[0] == 0
+
+
+@needs_postgres
+def test_reemit_writes_a_stadiums_copies_again_too(conn, store):  # noqa: F811
+    from services.replayer.tick import reemit
+    conn.execute("TRUNCATE incidents CASCADE")
+    starts = NORMAL["request_datetime"] - timedelta(minutes=1)
+    iid = schedule(conn, "stadium", starts, 40, zone=NORMAL["PULocationID"], factor=3)
+    run_day(conn, store)
+    logged = "SELECT id, aggregateid, type, payload, occurred_at FROM outbox_log ORDER BY id"
+    ticked = conn.execute(logged).fetchall()
+    conn.execute("TRUNCATE outbox_log")
+    reemit(conn, store, datetime(2025, 1, 6), datetime(2025, 1, 7))
+    again = conn.execute(logged).fetchall()
+    assert again == ticked and sum(1 for r in again if r[3].get("incident_id") == iid) == 4   # 2 copies x 2 trips requested
