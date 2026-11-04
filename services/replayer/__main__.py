@@ -1,13 +1,15 @@
 import argparse
+import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import psycopg
 
 from services.prep.store import S3Store
 
 from . import tick as job
+from .incidents import KINDS
 from .pings import DEFAULT_EVERY_S, Encoder, KafkaSink, registered_schema_id
 from .tick import start, tick
 
@@ -36,6 +38,11 @@ def main() -> int:
     s = sub.add_parser("start", help="start or jump at a day boundary; with no date, resume at a new speed")
     s.add_argument("from_date", nargs="?", type=datetime.fromisoformat)
     s.add_argument("--speed", type=int, choices=SPEEDS, default=10)
+    i = sub.add_parser("incident", help="schedule an injected incident (#21); the ticks whose window it overlaps apply it")
+    i.add_argument("kind", choices=KINDS)
+    i.add_argument("--at", required=True, type=datetime.fromisoformat, help="simulated start, e.g. 2025-01-01T18:00")
+    i.add_argument("--minutes", required=True, type=int)
+    i.add_argument("--params", default="{}", help='JSON, e.g. \'{"zone": 161, "factor": 3}\' or \'{"share": 0.05}\'')
     t = sub.add_parser("tick", help="run ticks now (the schedule runs one per wall minute)")
     t.add_argument("--count", type=int, default=1)
     t.add_argument("--ping-every", type=int, default=DEFAULT_EVERY_S, help="simulated seconds between a driver's pings")
@@ -46,6 +53,16 @@ def main() -> int:
     with psycopg.connect(autocommit=True, options=f"-c search_path={a.schema}") as conn:
         if a.command == "start":
             print(f"run {start(conn, a.from_date, a.speed)}")
+            return 0
+        if a.command == "incident":
+            params = json.loads(a.params)
+            needed = {"stadium": {"zone", "factor"}, "ping_outage": {"borough"}, "tunnel_pings": {"share", "delay_minutes"}}
+            missing = needed.get(a.kind, {"share"}) - set(params)
+            if missing:
+                p.error(f"{a.kind} needs {sorted(missing)} in --params")
+            row = conn.execute("INSERT INTO incidents (kind, starts_at, ends_at, params) VALUES (%s, %s, %s, %s::jsonb) "
+                               "RETURNING incident_id", (a.kind, a.at, a.at + timedelta(minutes=a.minutes), json.dumps(params)))
+            print(f"incident {row.fetchone()[0]}: {a.kind} from {a.at} for {a.minutes} simulated minutes, {params}")
             return 0
         if not a.bucket:
             p.error("--bucket or LANDING_BUCKET is required")

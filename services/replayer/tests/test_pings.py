@@ -145,8 +145,9 @@ class ListSink:
     def __init__(self, fail=False):
         self.batches, self.fail = [], fail
 
-    def send(self, pings):
+    def send(self, pings, raw=()):
         self.batches.append(list(pings))
+        self.raw = getattr(self, "raw", []) + list(raw)
         if self.fail:
             raise RuntimeError("Kafka is down")
 

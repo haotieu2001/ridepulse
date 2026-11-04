@@ -22,7 +22,8 @@ from __future__ import annotations
 import gzip
 import json
 import uuid
-from dataclasses import astuple, dataclass
+from collections import Counter
+from dataclasses import astuple, dataclass, field
 from datetime import datetime, timedelta
 from decimal import Decimal
 
@@ -31,6 +32,7 @@ import psycopg
 from services.prep.store import EVENT_TYPES, Store, pointer_key
 from services.seed.seed import driver_row, profile_row
 
+from .incidents import Incidents, malformed_bytes, ping_from_row, ping_row
 from .pings import DEFAULT_EVERY_S, ping_times
 from .supply import COLUMNS, Geography, Supply, boundaries
 
@@ -53,14 +55,14 @@ def exact_payload(payload: dict) -> dict:
     """Money and miles as exact strings (NFR-3), as Debezium sends NUMERIC on the CDC path. Slices hold
     the TLC's values as JSON numbers; a value finer than the contract stops the tick instead of rounding."""
     out = dict(payload)
-    for field, value in payload.items():
-        scale = 2 if field in MONEY else 3 if field == "trip_miles" else None
+    for name, value in payload.items():
+        scale = 2 if name in MONEY else 3 if name == "trip_miles" else None
         if scale is None or value is None:
             continue
         text = f"{Decimal(repr(value)):.{scale}f}"
         if Decimal(text) != Decimal(repr(value)):
-            raise ValueError(f"{field} = {value} has more than {scale} decimals (contracts/tlc_trips.yaml)")
-        out[field] = text
+            raise ValueError(f"{name} = {value} has more than {scale} decimals (contracts/tlc_trips.yaml)")
+        out[name] = text
     return out
 
 
@@ -153,8 +155,9 @@ SELECT %(id)s::uuid, trip_key, %(type)s, %(payload)s::jsonb, %(occurred_at)s::ti
 
 SQL = {
     "TripRequested": """WITH t AS (
-  INSERT INTO trips (trip_key, provider_code, pickup_zone_id, dropoff_zone_id, requested_at)
-  VALUES (%(trip_key)s, %(provider_code)s, %(pickup_zone_id)s::integer, %(dropoff_zone_id)s::integer, %(requested_at)s::timestamp)
+  INSERT INTO trips (trip_key, provider_code, pickup_zone_id, dropoff_zone_id, requested_at, incident_id)
+  VALUES (%(trip_key)s, %(provider_code)s, %(pickup_zone_id)s::integer, %(dropoff_zone_id)s::integer, %(requested_at)s::timestamp,
+          %(incident_id)s::bigint)
   ON CONFLICT (trip_key) DO NOTHING RETURNING trip_key
 )
 """ + _OUTBOX,
@@ -192,6 +195,7 @@ class TickResult:
     pings: int
     drivers_loaded: int = 0
     trips_read: int = 0          # in-flight trips read back: with drivers_loaded, the tick's own Neon egress
+    injected: dict = field(default_factory=dict)   # what incidents did this tick (#21), for the logs
 
 
 def _plan(events: list[dict], known: dict[str, tuple[str, int, int]], supply: Supply, owned: list[datetime],
@@ -224,12 +228,64 @@ def _plan(events: list[dict], known: dict[str, tuple[str, int, int]], supply: Su
         known[key] = (AFTER[kind], pickup, dropoff)
         payload = exact_payload(payload)
         planned.append((kind, {**payload, "trip_key": key, "due_at": e["due_at"], "id": event_id(key, kind), "type": kind,
-                               "occurred_at": e["occurred_at"], "payload": json.dumps(payload, sort_keys=True)}))
+                               "incident_id": payload.get("incident_id"), "occurred_at": e["occurred_at"],
+                               "payload": json.dumps(payload, sort_keys=True)}))
     for b in pending:
         supply.boundary(b)
     for t in to_ping:
         supply.ping(t)
     return planned, skipped
+
+
+def _with_stadium_copies(events: list[dict], origin: dict, incidents: Incidents, cur, known: dict) -> tuple[list[dict], dict]:
+    """Add a stadium incident's copies of each real trip's events (#21). Whether a trip is copied depends only on its
+    request time and pickup zone: from the TripRequested event in this window, or the trip's row for later events."""
+    for e in events:
+        if e["type"] == "TripRequested":
+            origin.setdefault(e["trip_key"], (datetime.fromisoformat(e["payload"]["requested_at"]), e["payload"]["pickup_zone_id"]))
+    extra = []
+    for e in events:
+        if e["trip_key"] not in origin:
+            continue
+        for copy, incident_id in incidents.copies(e["trip_key"], *origin[e["trip_key"]]):
+            c = {**e, "trip_key": copy}
+            if e["type"] == "TripRequested":
+                c["payload"] = {**e["payload"], "incident_id": incident_id}
+            extra.append(c)
+    if not extra:
+        return events, {"read": 0, "events": 0}
+    cur.execute("SELECT trip_key, status, pickup_zone_id, dropoff_zone_id FROM trips WHERE trip_key = ANY(%s)",
+                (sorted({c["trip_key"] for c in extra}),))
+    rows = cur.fetchall()
+    known.update({k: (s, p, d) for k, s, p, d in rows})
+    merged = sorted(events + extra, key=lambda e: (e["due_at"], STEP[e["type"]], e["trip_key"]))
+    return merged, {"read": len(rows), "events": len(extra)}
+
+
+def _injected_pings(pings, incidents: Incidents, cur, until: datetime, injected: Counter) -> tuple[list, list]:
+    """The pings to send after the ping incidents (#21), plus raw messages (malformed ones). Tunnel pings are written to
+    late_pings in this transaction and sent by the tick whose window reaches their release time."""
+    outgoing, raw, held = [], [], []
+    for p in pings:
+        fate, inc = incidents.fate(p)
+        if fate == "send":
+            outgoing.append(p)
+            continue
+        injected[f"pings_{fate}"] += 1
+        if fate == "duplicate":
+            outgoing += [p, p]
+        elif fate == "malformed":
+            raw.append((p.driver_id, malformed_bytes(p)))
+        elif fate == "late":
+            held.append((p.driver_id, p.device_ts, p.device_ts + timedelta(minutes=float(inc.params["delay_minutes"])), ping_row(p)))
+    for row in held:
+        cur.execute("INSERT INTO late_pings (driver_id, device_ts, release_at, ping) VALUES (%s, %s, %s, %s::jsonb) "
+                    "ON CONFLICT (driver_id, device_ts) DO NOTHING", row)
+    cur.execute("DELETE FROM late_pings WHERE release_at <= %s RETURNING ping", (until,))
+    released = [ping_from_row(r[0]) for r in cur.fetchall()]
+    released.sort(key=lambda p: (p.device_ts, p.driver_id))
+    injected["pings_released_late"] += len(released)
+    return outgoing + released, raw
 
 
 class Waiting(RuntimeError):
@@ -277,10 +333,18 @@ def tick(conn: psycopg.Connection, store: Store, *, sink=None, ping_every: int =
         events = slices.due(watermark, until)
         supply = load_supply(store, slices, _hour(watermark), geography)
 
+        incidents = Incidents(Incidents.load(cur, watermark, until))
+        injected: Counter = Counter()
         keys = sorted({e["trip_key"] for e in events})
-        cur.execute("SELECT trip_key, status, pickup_zone_id, dropoff_zone_id FROM trips WHERE trip_key = ANY(%s)", (keys,))
-        known = {k: (s, p, d) for k, s, p, d in cur.fetchall()}
-        trips_read = len(known)
+        cur.execute("SELECT trip_key, status, pickup_zone_id, dropoff_zone_id, requested_at FROM trips WHERE trip_key = ANY(%s)",
+                    (keys,))
+        found = cur.fetchall()
+        known = {k: (s, p, d) for k, s, p, d, _ in found}
+        trips_read = len(found)
+        if incidents.of("stadium"):
+            events, copied = _with_stadium_copies(events, {k: (r, p) for k, _, p, _, r in found}, incidents, cur, known)
+            trips_read += copied["read"]
+            injected["stadium_events"] = copied["events"]
         # Reading every driver each tick cost ~360 KB of Neon egress, about as much as all of CDC (#15). Only ticks
         # write drivers and they run one at a time, so a warm Lambda can reuse its last committed rows when the
         # fingerprint (row count, newest updated_at, which the database sets on every change) still matches.
@@ -314,13 +378,14 @@ def tick(conn: psycopg.Connection, store: Store, *, sink=None, ping_every: int =
                             vars(d))
         cur.execute("WITH gone AS (DELETE FROM outbox RETURNING 1) SELECT count(*) FROM gone")
         applied = cur.fetchone()[0]
+        outgoing, raw = _injected_pings(supply.pings, incidents, cur, until, injected) if sink else ([], [])
 
         cur.execute("UPDATE replay_state SET budget_used_min = %s + %s, budget_day = current_date WHERE id = 1", (used, speed))
         cur.execute("SELECT advance_watermark(%s::timestamp)", (until,))
         cur.execute("DELETE FROM trips WHERE status = 'completed' AND requested_at < %s::timestamp", (until - HOT_WINDOW,))
         purged = cur.rowcount
         if sink:
-            sink.send(supply.pings)   # last, so a failure above sends nothing; a failure here rolls back the tick
+            sink.send(outgoing, raw)   # last, so a failure above sends nothing; a failure here rolls back the tick
         # The fingerprint of what this tick leaves behind, read under the lock: after COMMIT an overlapping tick
         # could already have changed it.
         cur.execute("SELECT count(*), max(updated_at) FROM drivers")
@@ -331,7 +396,7 @@ def tick(conn: psycopg.Connection, store: Store, *, sink=None, ping_every: int =
         driver_cache.clear()
         driver_cache.update(fingerprint=committed_fingerprint, rows=[astuple(d) for d in supply.drivers.values()])
     return TickResult(watermark, until, applied, skipped, len(supply.new), purged, len(changed), len(supply.pings), loaded,
-                      trips_read)
+                      trips_read, dict(injected))
 
 
 def start(conn: psycopg.Connection, from_ts: datetime | None, speed: float) -> int:

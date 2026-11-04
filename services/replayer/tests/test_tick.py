@@ -82,7 +82,7 @@ def connect(database):
 @pytest.fixture
 def conn(database):
     with connect(database) as c:
-        c.execute("TRUNCATE trips, drivers, driver_profiles, replay_runs, replay_state, outbox, outbox_log CASCADE")
+        c.execute("TRUNCATE trips, drivers, driver_profiles, replay_runs, replay_state, outbox, outbox_log, incidents, late_pings CASCADE")
         yield c
 
 
@@ -173,7 +173,7 @@ def test_retry_after_a_failure_before_commit_leaves_nothing_and_gives_the_same_r
         tick(conn, store)
     retried = snapshot(conn)
 
-    conn.execute("TRUNCATE trips, drivers, driver_profiles, replay_runs, replay_state, outbox, outbox_log CASCADE")
+    conn.execute("TRUNCATE trips, drivers, driver_profiles, replay_runs, replay_state, outbox, outbox_log, incidents, late_pings CASCADE")
     run_to_end(conn, store)
     assert snapshot(conn) == retried
 
@@ -282,7 +282,9 @@ def test_no_active_slot_means_the_tick_waits_and_changes_nothing(conn, store):
     start(conn, datetime(2025, 1, 6), 10)
     before = conn.execute("SELECT watermark, budget_used_min FROM replay_state").fetchone()
     with pytest.raises(CdcNotReady, match="missing"):
-        tick(conn, store, require_slot="ridepulse_debezium")
+        # Slots are cluster-wide: on Neon the real (stopped) ridepulse_debezium slot is visible here, so use a name
+        # no environment has.
+        tick(conn, store, require_slot="rp_test_no_such_slot")
     assert conn.execute("SELECT watermark, budget_used_min FROM replay_state").fetchone() == before
 
 
@@ -306,7 +308,7 @@ def test_the_daily_budget_stops_ticks_once_spent(conn, store):
 def test_the_driver_cache_gives_the_same_replay_and_skips_reads(conn, store):
     run_to_end(conn, store)
     without = snapshot(conn)
-    conn.execute("TRUNCATE trips, drivers, driver_profiles, replay_runs, replay_state, outbox, outbox_log CASCADE")
+    conn.execute("TRUNCATE trips, drivers, driver_profiles, replay_runs, replay_state, outbox, outbox_log, incidents, late_pings CASCADE")
     cache = {}
     start(conn, BEFORE_MONTH, 1440)
     loaded = [tick(conn, store, driver_cache=cache).drivers_loaded for _ in range(33)]
@@ -347,7 +349,8 @@ def test_replaying_the_same_slice_twice_changes_nothing(conn, store):
     from services.replayer.tests.test_pings import ListSink
 
     def replay_once():
-        conn.execute("TRUNCATE trips, drivers, driver_profiles, replay_runs, replay_state, outbox, outbox_log CASCADE")
+        conn.execute("TRUNCATE trips, drivers, driver_profiles, replay_runs, replay_state, outbox, outbox_log, incidents, "
+                     "late_pings CASCADE")
         sink = ListSink()
         start(conn, BEFORE_MONTH, 1440)
         for _ in range(33):

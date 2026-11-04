@@ -58,6 +58,10 @@
     },
     "wav_request": {
       "type": "boolean"
+    },
+    "incident_id": {
+      "type": "integer",
+      "description": "Set only on an injected stadium copy of a real trip (#21)"
     }
   }
 }

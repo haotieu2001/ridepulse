@@ -69,7 +69,8 @@ PAYLOAD = ("provider_code STRING, dispatching_base_num STRING, originating_base_
            "dropoff_zone_id INT, requested_at STRING, shared_request BOOLEAN, access_a_ride BOOLEAN, wav_request BOOLEAN, "
            "driver_id STRING, driver_arrived_at STRING, picked_up_at STRING, dropped_off_at STRING, trip_miles STRING, "
            "reported_trip_time_s INT, base_fare STRING, tolls STRING, bcf STRING, sales_tax STRING, congestion_surcharge STRING, "
-           "airport_fee STRING, cbd_fee STRING, tips STRING, driver_pay STRING, shared_match BOOLEAN, wav_match BOOLEAN")
+           "airport_fee STRING, cbd_fee STRING, tips STRING, driver_pay STRING, shared_match BOOLEAN, wav_match BOOLEAN, "
+           "incident_id BIGINT")
 TIMES = ["requested_at", "driver_arrived_at", "picked_up_at", "dropped_off_at"]
 MONEY = ["base_fare", "tolls", "bcf", "sales_tax", "congestion_surcharge", "airport_fee", "cbd_fee", "tips", "driver_pay"]
 # What each event must carry to be usable (beyond the contract's own checks).
@@ -85,7 +86,7 @@ def trip_events_checked():
                                    "kafka_ts", "raw_value", p)
     typed = [F.col(f"p.{c}") for c in ("provider_code", "dispatching_base_num", "originating_base_num", "pickup_zone_id",
                                        "dropoff_zone_id", "shared_request", "access_a_ride", "wav_request", "driver_id",
-                                       "reported_trip_time_s", "shared_match", "wav_match")]
+                                       "reported_trip_time_s", "shared_match", "wav_match", "incident_id")]
     typed += [F.expr(f"try_cast(p.{c} AS TIMESTAMP_NTZ)").alias(c) for c in TIMES]
     typed += [F.expr("try_cast(p.trip_miles AS DECIMAL(8,3))").alias("trip_miles")]
     typed += [F.expr(f"try_cast(p.{c} AS DECIMAL(10,2))").alias(c) for c in MONEY]
