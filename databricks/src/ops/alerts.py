@@ -4,6 +4,8 @@
                      aggregations drop such rows without a trace, so they're found here from arrival times
     ops.late_rates   late events per window and source, against the 0.5% alert share
     ops.alerts       one row per alert_id = sha2(rule | area | window_start), from R1-R4 and late rates
+    ops.alerts.v1    (Kafka) R1-R4 alerts as they close, for the notifier (#22) to email once. Late-event alerts stay in
+                     ops.alerts only: they come from a recomputed view, which a pipeline can't stream to Kafka
 
 An event is late when it arrived after the first event whose time was at least its window's end plus the grace: that
 is when the stream's watermark passed the window (Kafka timestamps are the wall clock, ADR-0004 §9). Exact over what
@@ -11,11 +13,18 @@ silver holds, recomputed every update.
 """
 import dlt
 import yaml
+from databricks.sdk.runtime import dbutils
 from pyspark.sql import DataFrame, Window
 from pyspark.sql import functions as F
 
 conf = spark.conf  # noqa: F821  (the pipeline's session)
 CATALOG = conf.get("ridepulse.catalog")
+SCOPE = conf.get("ridepulse.secret_scope")
+KAFKA = {"kafka.bootstrap.servers": conf.get("ridepulse.kafka.bootstrap"), "kafka.security.protocol": "SASL_SSL",
+         "kafka.sasl.mechanism": "PLAIN",
+         "kafka.sasl.jaas.config": ("kafkashaded.org.apache.kafka.common.security.plain.PlainLoginModule required "
+                                    f"username='{dbutils.secrets.get(SCOPE, 'kafka-api-key')}' "
+                                    f"password='{dbutils.secrets.get(SCOPE, 'kafka-api-secret')}';")}
 RULES = yaml.safe_load(open(f"{conf.get('ridepulse.ref_dir')}/ops_rules.yml"))
 GRACE_MIN = RULES["late_events"]["grace_minutes"]
 NTZ = {"delta.feature.timestampNtz": "supported"}
@@ -72,26 +81,51 @@ def late_rates():
                     (share > RULES["late_events"]["alert_share"]).alias("alert")))
 
 
-def alerts_from(name: str, rule: str, area: str, detail) -> DataFrame:
-    df = spark.read.table(table("ops", name)).where("alert")  # noqa: F821
-    return df.select(F.lit(rule).alias("rule"), F.col(area).cast("string").alias("area"), "window_start", "window_end",
-                     F.to_json(detail).alias("detail"))
+RULE_TABLES = {   # rule -> (table, area column, what the alert carries)
+    "R1": ("r1_surge", "area_id", ["requests", "idle", "ratio", "supply_lsn"]),
+    "R2": ("r2_long_waits", "area_id", ["trips", "p90_wait_min"]),
+    "R3": ("r3_airport_queue", "zone_id", ["requests", "idle", "queue_building", "shortage", "supply_lsn"]),
+    "R4": ("r4_app_outage", "borough", ["busy", "pinged", "silent_share", "supply_lsn"]),
+}
+
+
+def alert_rows(df: DataFrame, rule: str) -> DataFrame:
+    _, area, detail = RULE_TABLES[rule]
+    rows = df.where("alert").select(F.lit(rule).alias("rule"), F.col(area).cast("string").alias("area"), "window_start",
+                                    "window_end", F.to_json(F.struct(*detail)).alias("detail"))
+    return with_alert_id(rows)
+
+
+def with_alert_id(rows: DataFrame) -> DataFrame:
+    return rows.select(F.sha2(F.concat_ws("|", "rule", "area", F.col("window_start").cast("string")), 256).alias("alert_id"),
+                       "*")
+
+
+dlt.create_sink("alerts_out", "kafka", {**KAFKA, "topic": "ops.alerts.v1"})
+
+
+def kafka_flow(rule: str) -> None:
+    @dlt.append_flow(name=f"alerts_to_kafka_{rule.lower()}", target="alerts_out")
+    def flow():
+        rows = alert_rows(dlt.read_stream(table("ops", RULE_TABLES[rule][0])), rule)
+        return rows.select(F.col("alert_id").alias("key"), F.to_json(F.struct(*rows.columns)).alias("value"))
+
+
+for _rule in RULE_TABLES:
+    kafka_flow(_rule)
 
 
 @dlt.table(name=table("ops", "alerts"), table_properties=NTZ, cluster_by=["window_start"],
            comment="One row per alert: alert_id = sha2(rule | area | window_start), the key #22 sends each alert once by")
 def alerts():
-    rows = (alerts_from("r1_surge", "R1", "area_id", F.struct("requests", "idle", "ratio", "supply_lsn"))
-            .unionByName(alerts_from("r2_long_waits", "R2", "area_id", F.struct("trips", "p90_wait_min")))
-            .unionByName(alerts_from("r3_airport_queue", "R3", "zone_id",
-                                     F.struct("requests", "idle", "queue_building", "shortage", "supply_lsn")))
-            .unionByName(alerts_from("r4_app_outage", "R4", "borough", F.struct("busy", "pinged", "silent_share", "supply_lsn"))))
+    rows = None
+    for rule, (name, _, _) in RULE_TABLES.items():
+        part = alert_rows(spark.read.table(table("ops", name)), rule)  # noqa: F821
+        rows = part if rows is None else rows.unionByName(part)
     minutes = F.when(F.col("source") == "trips.v1", RULES["R1_surge"]["window_minutes"]).otherwise(
         RULES["R4_app_outage"]["silence_minutes"])
     late_alerts = (spark.read.table(table("ops", "late_rates")).where("alert")  # noqa: F821
                    .select(F.lit("late_events").alias("rule"), F.col("source").alias("area"),
                            (F.col("window_end") - F.make_dt_interval(mins=minutes)).alias("window_start"), "window_end",
                            F.to_json(F.struct("events", "late", "late_share")).alias("detail")))
-    rows = rows.unionByName(late_alerts)
-    return rows.select(F.sha2(F.concat_ws("|", "rule", "area", F.col("window_start").cast("string")), 256).alias("alert_id"),
-                       "*")
+    return rows.unionByName(with_alert_id(late_alerts))

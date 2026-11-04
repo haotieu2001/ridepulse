@@ -791,8 +791,9 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   inserted offline, signed on in the same transaction) looked like a sign-off after the shift began. A sign-off now ends
   the shift of the version just before it, so that insert ends nothing.
 - Real data: 12,807 completed trips across five boroughs, the same as silver's completed events; every trip in exactly
-  one shift; pay 354,347.16 on both sides; 965 open shifts, equal to the drivers silver shows online. Not yet compared
-  with Neon (AWS sign-in expired).
+  one shift; pay 354,347.16 on both sides; 965 open shifts, equal to the drivers silver shows online. Against Neon at
+  watermark 2025-01-01 05:20 (checked with #22): trips and GMV per borough equal to the cent in all five, pay
+  354,347.16 for 12,807 completed trips, 965 drivers online.
 
 ### #20 Rules R1-R4, late events, alerts
 - Decision (issue comment, 2026-11-04): supply as of the last tick at or before a window's end (option A). Each tick's
@@ -818,3 +819,22 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   approximate distinct count is within 1.7% of the exact one. Late events: 0, nothing injected yet.
 - To judge in #25, with injected incidents: R2's alert rate on New Year's night (13% of evaluated windows) and the R3/R4
   thresholds proposed in #19.
+
+### #22 Alerts to email, sent once
+- Decision (2026-11-04): a poller, not a Lambda Kafka trigger, which would need the Kafka keys in Secrets Manager.
+  Recorded as ADR-0002 amendment 1; c4's open point closed.
+- The pipeline sends R1-R4 alerts to `ops.alerts.v1` through a Kafka sink as each rule window closes, keyed by
+  `alert_id`. Late-event alerts stay in `ops.alerts` only: they come from a recomputed view, which can't feed a sink.
+- `services/notifier`: a Lambda on a one-minute schedule that the window opens and closes with the replayer. It reads
+  the topic as group `ridepulse-notifier`, claims each `alert_id` with a DynamoDB conditional put, publishes to SNS, and
+  commits offsets only after; a failed publish releases the claim so the next run sends it. A crash between claim and
+  publish loses that one email: the price of never sending twice. Alerts made after a window closes wait in Kafka.
+- Infra (replayer stack): DynamoDB `ridepulse-alerts-sent`, SNS `ridepulse-ops-alerts`, the notifier Lambda (the
+  replayer's zip, which has confluent-kafka), its schedule. The email address comes from SSM `/ridepulse/dev/alerts/email`
+  by path, so a plan works before it exists (no subscription yet).
+- Tests: once per alert across a duplicate in one batch and a retried batch; a failed publish releases the claim and
+  commits nothing, and the retry sends it; nothing read commits nothing; the window toggles the notifier. Real data:
+  380 alerts in `ops.alerts`, all distinct ids; the four sink flows ran, and `ops.alerts.v1` holds the same 380.
+  Deployed and run for real: the group moved to 3 before the end (the backlog is mostly uncalibrated R2, #25), one
+  run sent 3 emails, the next read nothing; rewound over the same 3, a run read 3, sent 0, skipped 3 (DynamoDB holds
+  3 claims).

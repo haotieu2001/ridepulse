@@ -79,3 +79,12 @@ pushes of `.github/workflows/*` are rejected; an SSH key needs no scope.
 - The project moves to a paid Databricks workspace: switch CI to workload identity federation.
 - A secret needs automatic rotation (production phase): consider Secrets Manager for that one.
 - More people work on the repo: per-person identities and GitHub environments with approvals for prod.
+
+### Amendment 1 (2026-11-04, #22): the alert notifier polls
+
+A Lambda Kafka event source on Confluent with SASL/PLAIN needs its credentials in Secrets Manager, which would make a
+second home for the Kafka keys. Decided: no Secrets Manager. The notifier (`services/notifier`) is a Lambda on a
+one-minute schedule, on only while a demo window is open, that reads the same SSM keys as everything else, consumes
+`ops.alerts.v1` as group `ridepulse-notifier`, and commits offsets only after sending. Its role reads 3 SSM parameters,
+writes one DynamoDB table and publishes to one SNS topic. Cost: alerts wait up to a minute for the next poll, and
+alerts produced after a window closes go out when the next one opens.
