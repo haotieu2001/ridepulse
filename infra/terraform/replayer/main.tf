@@ -122,7 +122,7 @@ resource "aws_iam_role_policy" "scheduler" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{ Effect = "Allow", Action = "lambda:InvokeFunction",
-    Resource = [aws_lambda_function.replayer.arn, aws_lambda_function.window.arn] }]
+    Resource = [aws_lambda_function.replayer.arn, aws_lambda_function.window.arn, aws_lambda_function.notifier.arn] }]
   })
 }
 
@@ -168,7 +168,7 @@ data "aws_iam_policy_document" "window" {
   }
   statement {
     actions   = ["scheduler:GetSchedule", "scheduler:UpdateSchedule"]
-    resources = [aws_scheduler_schedule.replayer.arn]
+    resources = [aws_scheduler_schedule.replayer.arn, aws_scheduler_schedule.notifier.arn]
   }
   statement {
     actions   = ["iam:PassRole"] # UpdateSchedule re-sends the target's role
@@ -201,7 +201,10 @@ resource "aws_lambda_function" "window" {
   source_code_hash = trimspace(file("${path.module}/../../../build/window.contenthash"))
   timeout          = 30
   environment {
-    variables = { REPLAYER_SCHEDULE = aws_scheduler_schedule.replayer.name }
+    variables = {
+      REPLAYER_SCHEDULE = aws_scheduler_schedule.replayer.name
+      NOTIFIER_SCHEDULE = aws_scheduler_schedule.notifier.name
+    }
   }
   depends_on = [aws_cloudwatch_log_group.window, aws_iam_role_policy.window]
 }

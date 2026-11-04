@@ -83,3 +83,14 @@ def test_status_changes_nothing_and_unknown_actions_fail():
     assert run("status", ec2)[0]["replayer_schedule"] == "DISABLED" and ec2.calls == []
     with pytest.raises(ValueError):
         run("reopen", FakeEc2())
+
+
+def test_the_notifier_opens_with_the_window_and_closes_after_debezium(monkeypatch):
+    monkeypatch.setenv("NOTIFIER_SCHEDULE", "notifier")
+    ec2 = FakeEc2()
+    result, _ = run("open", ec2)
+    assert ec2.calls == [("start", ["i-1"]), ("schedule", "ENABLED"), ("schedule", "ENABLED")]
+    assert result["notifier_schedule"] == "ENABLED"
+    ec2 = FakeEc2(state="running")
+    run("close", ec2)
+    assert ec2.calls == [("schedule", "DISABLED"), ("stop", ["i-1"]), ("schedule", "DISABLED")]

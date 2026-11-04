@@ -818,3 +818,20 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   approximate distinct count is within 1.7% of the exact one. Late events: 0, nothing injected yet.
 - To judge in #25, with injected incidents: R2's alert rate on New Year's night (13% of evaluated windows) and the R3/R4
   thresholds proposed in #19.
+
+### #22 Alerts to email, sent once
+- Decision (2026-11-04): a poller, not a Lambda Kafka trigger, which would need the Kafka keys in Secrets Manager.
+  Recorded as ADR-0002 amendment 1; c4's open point closed.
+- The pipeline sends R1-R4 alerts to `ops.alerts.v1` through a Kafka sink as each rule window closes, keyed by
+  `alert_id`. Late-event alerts stay in `ops.alerts` only: they come from a recomputed view, which can't feed a sink.
+- `services/notifier`: a Lambda on a one-minute schedule that the window opens and closes with the replayer. It reads
+  the topic as group `ridepulse-notifier`, claims each `alert_id` with a DynamoDB conditional put, publishes to SNS, and
+  commits offsets only after; a failed publish releases the claim so the next run sends it. A crash between claim and
+  publish loses that one email: the price of never sending twice. Alerts made after a window closes wait in Kafka.
+- Infra (replayer stack): DynamoDB `ridepulse-alerts-sent`, SNS `ridepulse-ops-alerts`, the notifier Lambda (the
+  replayer's zip, which has confluent-kafka), its schedule. The email address comes from SSM `/ridepulse/dev/alerts/email`
+  by path, so a plan works before it exists (no subscription yet).
+- Tests: once per alert across a duplicate in one batch and a retried batch; a failed publish releases the claim and
+  commits nothing, and the retry sends it; nothing read commits nothing; the window toggles the notifier. Real data:
+  380 alerts in `ops.alerts`, all distinct ids; the four sink flows ran. Not yet: reading the topic back, and a real
+  email (AWS sign-in expired; the stack needs an apply).

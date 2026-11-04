@@ -20,7 +20,7 @@ for f in services/__init__.py services/prep/__init__.py services/prep/store.py s
          contracts/__init__.py contracts/events/__init__.py contracts/events/driver_location.avsc ref/zone_centroids.csv \
          ref/zone_neighbours.csv ref/taxi_zone_lookup.csv services/replayer/incidents.py \
          services/replayer/__init__.py services/replayer/handler.py services/replayer/tick.py services/replayer/supply.py \
-         services/replayer/pings.py; do
+         services/replayer/pings.py services/notifier/__init__.py services/notifier/notifier.py; do
   copy replayer "$f"
 done
 for f in services/__init__.py services/window/__init__.py services/window/window.py; do

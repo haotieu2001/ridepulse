@@ -1,10 +1,12 @@
-"""Open and close a demo window: the Debezium instance and the replayer's every-minute schedule together (#12).
+"""Open and close a demo window: the Debezium instance, the replayer's and the notifier's every-minute schedules (#12, #22).
 
-    open:   start the Debezium instance, then enable the replayer schedule. Ticks wait (CdcNotReady) until
-            Debezium's slot is active, so the order inside the window needs no timing.
+    open:   start the Debezium instance, then enable the replayer and notifier schedules. Ticks wait (CdcNotReady)
+            until Debezium's slot is active, so the order inside the window needs no timing.
     close:  disable the replayer schedule first, then stop the instance (a clean shutdown: Debezium flushes its
-            offset). The slot stays: it holds only the little WAL written while nothing runs, and keeping it means
-            the next window resumes instead of re-reading the tables. For a long pause, `make debezium-down`.
+            offset), then disable the notifier. The slot stays: it holds only the little WAL written while nothing
+            runs, and keeping it means the next window resumes instead of re-reading the tables. For a long pause,
+            `make debezium-down`. Alerts from the pipeline's last run after a close wait in Kafka and go out when the
+            next window opens: late, never lost or doubled.
     status: what's running.
 
 Run as a Lambda by two daily schedules (infra/terraform/replayer), or by `make up` / `make down`, which invoke
@@ -41,6 +43,7 @@ def handler(event, context=None, ec2=None, scheduler=None) -> dict:
     ec2 = ec2 or boto3.client("ec2")
     scheduler = scheduler or boto3.client("scheduler")
     schedule = os.environ["REPLAYER_SCHEDULE"]
+    notifier = os.environ.get("NOTIFIER_SCHEDULE")
     action = (event or {}).get("action", "status")
     instance = debezium_instance(ec2)
     if action == "open":
@@ -48,10 +51,14 @@ def handler(event, context=None, ec2=None, scheduler=None) -> dict:
             raise RuntimeError("no Debezium instance: create it first with make debezium-plan debezium-up")
         ec2.start_instances(InstanceIds=[instance])
         set_schedule(scheduler, schedule, "ENABLED")
+        if notifier:
+            set_schedule(scheduler, notifier, "ENABLED")
     elif action == "close":
         set_schedule(scheduler, schedule, "DISABLED")
         if instance is not None:
             ec2.stop_instances(InstanceIds=[instance])
+        if notifier:
+            set_schedule(scheduler, notifier, "DISABLED")
     elif action != "status":
         raise ValueError(f"unknown action {action!r}: open, close or status")
     state = None
@@ -59,5 +66,7 @@ def handler(event, context=None, ec2=None, scheduler=None) -> dict:
         state = ec2.describe_instances(InstanceIds=[instance])["Reservations"][0]["Instances"][0]["State"]["Name"]
     result = {"action": action, "debezium_instance": instance, "debezium_state": state,
               "replayer_schedule": scheduler.get_schedule(Name=schedule)["State"]}
+    if notifier:
+        result["notifier_schedule"] = scheduler.get_schedule(Name=notifier)["State"]
     print(result)
     return result
