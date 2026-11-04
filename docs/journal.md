@@ -833,5 +833,7 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   by path, so a plan works before it exists (no subscription yet).
 - Tests: once per alert across a duplicate in one batch and a retried batch; a failed publish releases the claim and
   commits nothing, and the retry sends it; nothing read commits nothing; the window toggles the notifier. Real data:
-  380 alerts in `ops.alerts`, all distinct ids; the four sink flows ran. Not yet: reading the topic back, and a real
-  email (AWS sign-in expired; the stack needs an apply).
+  380 alerts in `ops.alerts`, all distinct ids; the four sink flows ran, and `ops.alerts.v1` holds the same 380.
+  Deployed and run for real: the group moved to 3 before the end (the backlog is mostly uncalibrated R2, #25), one
+  run sent 3 emails, the next read nothing; rewound over the same 3, a run read 3, sent 0, skipped 3 (DynamoDB holds
+  3 claims).
