@@ -30,8 +30,11 @@ It reports `missing` per event kind, the simulated time range, and the `reemit` 
 1. **Stop the replayer** (disable its schedule, or `make down` and later `make up`), so the watermark stays put while
    you repair. `reemit` only reaches the last 24 simulated hours: completed trips are purged 48 hours after their
    request.
-2. **Get Debezium streaming on a new slot.** Restart it (`systemctl restart debezium` through SSM). Check its journal for
-   the snapshot (`journalctl -u debezium | grep -i snapshot`) and that `pg_replication_slots` shows the slot active.
+2. **Get Debezium streaming on a new slot.** Restart it (`systemctl restart debezium` through SSM). It creates the slot
+   and snapshots; its journal says `The last recorded offset is no longer available but we are in when_needed snapshot
+   mode. Attempting to snapshot data to fill the gap.` and `Finished exporting 0 records for table 'dispatch.outbox'`.
+   (It also logs `offset mismatch strategy 'no_validation' ... Slot recreation is not detected`: ignore it, the
+   snapshot still runs.) Check that `pg_replication_slots` shows the slot active.
 3. **Re-emit the gap**, with the command the check printed, e.g.:
    ```
    scripts/db.sh uv run python -m services.replayer reemit 2025-01-01T04:00 2025-01-01T06:00
@@ -47,8 +50,17 @@ It reports `missing` per event kind, the simulated time range, and the `reemit` 
 - A forward jump (`start` to a later day) deletes the open trips it cancels, so their events can't be re-emitted.
 - Driver history (SCD2) keeps a gap: the versions between the last change Debezium read and the snapshot.
 
-## Drill (#24)
+## Drill (#24, 2026-11-04)
 
-The drill freezes Debezium (SIGSTOP: its connection stays up, so the slot stays active and ticks keep committing WAL
-it doesn't read), terminates its walsender and drops the slot, then lets it restart and follows this runbook.
-Results: see the #24 entry in `docs/journal.md`.
+To leave changes in the WAL that nothing reads, the drill stopped the replayer schedule and Debezium and ran two ticks
+by hand with `tick --no-slot-check` (the CLI otherwise waits for the slot, like the Lambda), then dropped the slot.
+Freezing Debezium instead doesn't work on Neon: `wal_sender_timeout` is 10 s, so the walsender closes, the slot turns
+inactive and ticks wait.
+
+| Step | Result |
+|---|---|
+| Two unguarded ticks, 06:10 to 06:30 simulated | 1,233 trip events applied (626 + 607), unread |
+| Slot dropped, Debezium started | new slot, snapshot: 2,320 drivers, 2,320 profiles, 0 outbox rows |
+| Completeness | 1,233 missing (297 requested, 298 assigned, 307 started, 331 completed), 0 extra, 0 repeated; drivers 2,320 = 2,320 |
+| `reemit 2025-01-01T05:09:39 2025-01-01T06:30:00` | 5,545 events written again, 1,233 of them lost ones |
+| Pipeline, completeness | `complete: silver equals Neon`: 57,319 events for 14,449 trips, 0 missing, 0 extra, 0 repeated |

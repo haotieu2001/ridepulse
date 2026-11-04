@@ -37,7 +37,12 @@ scripts/db.sh uv run python scripts/drills/completeness.py
 It compares every trip event Neon implies with silver's `trip_events` (missing, extra, repeated) and Neon's drivers
 with `silver.driver_state`, and exits 1 on any difference.
 
-## Drill (#24)
+## Drill (#24, 2026-11-04)
 
-The drill kills Debezium with SIGKILL right after a tick commits, while it's streaming, and runs the check above.
-Results: see the #24 entry in `docs/journal.md`.
+`systemctl kill -s SIGKILL debezium` at 15:01:40 UTC, right after a tick committed (watermark 05:40 simulated), while
+Debezium streamed it. systemd restarted it; by 15:02:09 the slot was active again (walsender 5595 replaced by 5912) and
+the ticks went on (05:50, 06:00). After the pipeline, the completeness check found nothing missing, extra or repeated
+outside the slot drill's gap that followed, and drivers equal to Neon (2,320); the slot drill's final check, over
+both, was clean: 57,319 events, 0 missing, 0 extra, 0 repeated.
+
+A clean `systemctl stop` left the unit `failed`: the JVM exits 143 on SIGTERM. The unit now counts 143 as success.
