@@ -791,8 +791,9 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   inserted offline, signed on in the same transaction) looked like a sign-off after the shift began. A sign-off now ends
   the shift of the version just before it, so that insert ends nothing.
 - Real data: 12,807 completed trips across five boroughs, the same as silver's completed events; every trip in exactly
-  one shift; pay 354,347.16 on both sides; 965 open shifts, equal to the drivers silver shows online. Not yet compared
-  with Neon (AWS sign-in expired).
+  one shift; pay 354,347.16 on both sides; 965 open shifts, equal to the drivers silver shows online. Against Neon at
+  watermark 2025-01-01 05:20 (checked with #22): trips and GMV per borough equal to the cent in all five, pay
+  354,347.16 for 12,807 completed trips, 965 drivers online.
 
 ### #20 Rules R1-R4, late events, alerts
 - Decision (issue comment, 2026-11-04): supply as of the last tick at or before a window's end (option A). Each tick's
