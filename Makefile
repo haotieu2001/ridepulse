@@ -14,7 +14,7 @@ YEAR        ?= 2025
 
 export AWS_PROFILE
 
-.PHONY: help bootstrap-plan bootstrap-apply landing-plan landing-apply confluent-plan confluent-apply debezium-plan debezium-up debezium-down build-lambdas replayer-plan replayer-apply up down window-status replay bronze land-month land-zones land-noaa prep db-status db-migrate db-test db-seed catalog deploy s10-upload s10-run s10
+.PHONY: help bootstrap-plan bootstrap-apply landing-plan landing-apply confluent-plan confluent-apply debezium-plan debezium-up debezium-down build-lambdas replayer-plan replayer-apply up down window-status replay pipeline-start pipeline-stop land-month land-zones land-noaa prep db-status db-migrate db-test db-seed catalog deploy s10-upload s10-run s10
 
 help:
 	@echo "bootstrap-plan / bootstrap-apply  Terraform: state bucket, GitHub OIDC role, budget"
@@ -25,7 +25,7 @@ help:
 	@echo "replayer-plan / replayer-apply    Terraform: replayer Lambda, schedules, demo window"
 	@echo "up / down / window-status         open or close a demo window now (Debezium + replayer)"
 	@echo "replay DATE=2025-01-06 SPEED=10   start the replay, or jump forward, at a day boundary"
-	@echo "bronze                            run the bronze pipeline once"
+	@echo "pipeline-start / pipeline-stop    the continuous streaming pipeline by hand (a window does both)"
 	@echo "land-month MONTH=2025-01          land one HVFHV month in S3 (pinned to its ETag)"
 	@echo "land-zones / land-noaa YEAR=2025  land the zone files / one NOAA GHCN-Daily year"
 	@echo "prep MONTH=2025-01 [OUT_DIR=dir]  prep job: contract, sample, event-time slices"
@@ -95,9 +95,15 @@ replay:
 	@test -n "$(DATE)" || { echo "usage: make replay DATE=2025-01-06 [SPEED=10]"; exit 2; }
 	scripts/db.sh uv run python -m services.replayer start $(DATE) --speed $(or $(SPEED),10)
 
-# Bronze once now: the job runs it every 10 minutes only during the daily window's hours.
-bronze:
-	cd databricks && databricks bundle run -t dev bronze_ingest
+# The streaming pipeline is continuous in dev (#25): the window starts and stops it. By hand, outside a window (to let it
+# catch up after `make down`, say), start it and stop it again: it runs until stopped.
+pipeline-start:
+	databricks pipelines start-update "$$(aws ssm get-parameter --name /ridepulse/dev/databricks/streaming_pipeline_id \
+	  --query Parameter.Value --output text)" --profile $(DBX_PROFILE)
+
+pipeline-stop:
+	databricks pipelines stop "$$(aws ssm get-parameter --name /ridepulse/dev/databricks/streaming_pipeline_id \
+	  --query Parameter.Value --output text)" --profile $(DBX_PROFILE) --no-wait
 
 land-month:
 	uv run python -m services.tlc_downloader fhvhv $(MONTH) --bucket $(LANDING_BUCKET)
@@ -137,8 +143,15 @@ catalog:
 	    --json "{\"warehouse_id\":\"$$wh\",\"statement\":\"CREATE CATALOG IF NOT EXISTS $(CATALOG)\",\"wait_timeout\":\"50s\"}" \
 	    | jq -e '.status.state == "SUCCEEDED"' >/dev/null && echo "created catalog $(CATALOG)"; }
 
+# The window Lambda finds the streaming pipeline by the id published here (#25). Deploying a continuous pipeline starts
+# it, so outside a window (the replayer's schedule off) it's stopped again: nothing reads Kafka between windows.
 deploy:
 	cd databricks && databricks bundle deploy -t dev
+	id="$$(cd databricks && databricks bundle summary -t dev -o json | jq -r .resources.pipelines.bronze_ingest.id)" && \
+	  aws ssm put-parameter --name /ridepulse/dev/databricks/streaming_pipeline_id --type String --value "$$id" \
+	    --overwrite --query Version --output text && \
+	  if [ "$$(aws scheduler get-schedule --name ridepulse-replayer --query State --output text)" = DISABLED ]; then \
+	    echo "no window open: stopping the streaming pipeline"; databricks pipelines stop "$$id" --profile $(DBX_PROFILE); fi
 
 # TLC's CloudFront answers 403 after bursts of downloads, so retry with a pause.
 s10-upload:

@@ -1,7 +1,11 @@
 """The window's order of operations, against fake EC2 and Scheduler clients that record every call."""
+import base64
+import json
+import urllib.request
+
 import pytest
 
-from services.window.window import handler
+from services.window.window import Pipeline, handler
 
 
 class FakeEc2:
@@ -36,14 +40,32 @@ class FakeScheduler:
         self.log.append(("schedule", kw["State"]))
 
 
+class FakePipeline:
+    def __init__(self, log, state="IDLE"):
+        self.log, self._state = log, state
+
+    def state(self):
+        return self._state
+
+    def start(self):
+        if self._state != "RUNNING":
+            self.log.append(("pipeline", "start"))
+            self._state = "RUNNING"
+
+    def stop(self):
+        self.log.append(("pipeline", "stop"))
+        self._state = "IDLE"
+
+
 @pytest.fixture(autouse=True)
 def env(monkeypatch):
     monkeypatch.setenv("REPLAYER_SCHEDULE", "replayer")
+    monkeypatch.delenv("DATABRICKS_SSM", raising=False)
 
 
-def run(action, ec2):
+def run(action, ec2, pipeline=None):
     sched = FakeScheduler(ec2.calls)
-    return handler({"action": action}, ec2=ec2, scheduler=sched), sched
+    return handler({"action": action}, ec2=ec2, scheduler=sched, pipeline=pipeline), sched
 
 
 def test_open_starts_debezium_then_enables_the_replayer():
@@ -94,3 +116,59 @@ def test_the_notifier_opens_with_the_window_and_closes_after_debezium(monkeypatc
     ec2 = FakeEc2(state="running")
     run("close", ec2)
     assert ec2.calls == [("schedule", "DISABLED"), ("stop", ["i-1"]), ("schedule", "DISABLED")]
+
+
+def test_the_pipeline_starts_last_on_open_and_stops_after_debezium_on_close():
+    ec2 = FakeEc2()
+    result, _ = run("open", ec2, FakePipeline(ec2.calls))
+    assert ec2.calls == [("start", ["i-1"]), ("schedule", "ENABLED"), ("pipeline", "start")]
+    assert result["pipeline_state"] == "RUNNING"
+    ec2 = FakeEc2(state="running")
+    result, _ = run("close", ec2, FakePipeline(ec2.calls, state="RUNNING"))
+    assert ec2.calls == [("schedule", "DISABLED"), ("stop", ["i-1"]), ("pipeline", "stop")]
+    assert result["pipeline_state"] == "IDLE"
+
+
+def test_opening_twice_leaves_a_running_pipeline_alone():
+    ec2 = FakeEc2(state="running")
+    run("open", ec2, FakePipeline(ec2.calls, state="RUNNING"))
+    assert ("pipeline", "start") not in ec2.calls
+
+
+def test_status_reports_the_pipeline_without_touching_it():
+    ec2 = FakeEc2()
+    result, _ = run("status", ec2, FakePipeline(ec2.calls, state="RUNNING"))
+    assert result["pipeline_state"] == "RUNNING" and ec2.calls == []
+
+
+def test_the_pipeline_client_gets_one_token_and_calls_the_rest_api(monkeypatch):
+    sent, states = [], iter(["RUNNING", "IDLE"])
+
+    class Resp:
+        def __init__(self, body):
+            self.body = json.dumps(body).encode()
+
+        def read(self):
+            return self.body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def urlopen(req, timeout):
+        sent.append((req.get_method(), req.full_url, req.get_header("Authorization"), req.data))
+        if req.full_url.endswith("/oidc/v1/token"):
+            return Resp({"access_token": "tok"})
+        return Resp({"state": next(states)} if req.get_method() == "GET" else {})
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    p = Pipeline("https://dbc.example/", "id", "secret", "pipe-1")
+    p.start()   # already running: nothing started
+    p.start()   # idle: one update
+    assert sent[0][:3] == ("POST", "https://dbc.example/oidc/v1/token", "Basic " + base64.b64encode(b"id:secret").decode())
+    assert [s[:2] for s in sent[1:]] == [("GET", "https://dbc.example/api/2.0/pipelines/pipe-1"),
+                                         ("GET", "https://dbc.example/api/2.0/pipelines/pipe-1"),
+                                         ("POST", "https://dbc.example/api/2.0/pipelines/pipe-1/updates")]
+    assert all(s[2] == "Bearer tok" for s in sent[1:]) and json.loads(sent[-1][3]) == {"full_refresh": False}

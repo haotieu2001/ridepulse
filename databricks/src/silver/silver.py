@@ -241,7 +241,8 @@ def baseline_rate(name: str, provider: str) -> float | None:
     return b["rows_failing"] / MONTH_ROWS if "rows_failing" in b else None
 
 
-@dlt.table(name=silver("dq_rates"), comment="Flag and warn rates per provider and simulated day, against the contract's baselines")
+@dlt.table(name=silver("dq_rates"), comment="Flag and warn rates per provider and simulated day, against the contract's baselines",
+           spark_conf={"pipelines.trigger.interval": "10 minutes"})   # a view: off the alert path (#25)
 def dq_rates():
     events = spark.read.table(silver("trip_events"))  # noqa: F821
     provider = events.where("event_type = 'TripRequested'").select("trip_key", "provider_code").dropDuplicates(["trip_key"])

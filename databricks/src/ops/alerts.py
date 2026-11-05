@@ -28,6 +28,9 @@ KAFKA = {"kafka.bootstrap.servers": conf.get("ridepulse.kafka.bootstrap"), "kafk
 RULES = yaml.safe_load(open(f"{conf.get('ridepulse.ref_dir')}/ops_rules.yml"))
 GRACE_MIN = RULES["late_events"]["grace_minutes"]
 NTZ = {"delta.feature.timestampNtz": "supported"}
+# A continuous pipeline in a demo window (#25): views recomputed in full refresh every 10 minutes, off the alert path
+# (alerts reach email through the Kafka sink, not ops.alerts).
+VIEW_REFRESH = {"pipelines.trigger.interval": "10 minutes"}
 
 
 def table(schema: str, name: str) -> str:
@@ -50,7 +53,7 @@ def late(df: DataFrame, source: str, key: str, event_time: str, minutes: int) ->
     return events.join(closed, "window_end").where(F.col("kafka_ts") > F.col("closed_at"))
 
 
-@dlt.table(name=table("ops", "late_events"), table_properties=NTZ, cluster_by=["window_end"],
+@dlt.table(name=table("ops", "late_events"), table_properties=NTZ, spark_conf=VIEW_REFRESH, cluster_by=["window_end"],
            comment="Requests and pings that arrived after the watermark passed their window (FR-12)")
 def late_events():
     events = spark.read.table(table("silver", "trip_events"))  # noqa: F821
@@ -61,7 +64,7 @@ def late_events():
                               "driver.locations.v1", "key", "device_ts", RULES["R4_app_outage"]["silence_minutes"])))
 
 
-@dlt.table(name=table("ops", "late_rates"), table_properties=NTZ,
+@dlt.table(name=table("ops", "late_rates"), table_properties=NTZ, spark_conf=VIEW_REFRESH,
            comment="Late events per window and source, against the alert share (FR-12)")
 def late_rates():
     events = spark.read.table(table("silver", "trip_events")).where("event_type = 'TripRequested'")  # noqa: F821
@@ -115,7 +118,7 @@ for _rule in RULE_TABLES:
     kafka_flow(_rule)
 
 
-@dlt.table(name=table("ops", "alerts"), table_properties=NTZ, cluster_by=["window_start"],
+@dlt.table(name=table("ops", "alerts"), table_properties=NTZ, spark_conf=VIEW_REFRESH, cluster_by=["window_start"],
            comment="One row per alert: alert_id = sha2(rule | area | window_start), the key #22 sends each alert once by")
 def alerts():
     rows = None

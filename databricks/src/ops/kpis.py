@@ -18,6 +18,8 @@ from pyspark.sql import functions as F
 conf = spark.conf  # noqa: F821  (the pipeline's session)
 CATALOG = conf.get("ridepulse.catalog")
 NTZ = {"delta.feature.timestampNtz": "supported"}
+# A continuous pipeline in a demo window (#25): views recomputed in full refresh every 10 minutes, off the alert path.
+VIEW_REFRESH = {"pipelines.trigger.interval": "10 minutes"}
 
 
 def table(schema: str, name: str) -> str:
@@ -35,7 +37,7 @@ def completed_trips():
     return done.join(requested, "trip_key", "left")
 
 
-@dlt.table(name=table("ops", "kpis_by_minute"), table_properties=NTZ,
+@dlt.table(name=table("ops", "kpis_by_minute"), table_properties=NTZ, spark_conf=VIEW_REFRESH,
            comment="Completed trips and GMV per simulated minute and pickup borough")
 def kpis_by_minute():
     zones = spark.read.table(table("ref", "zones")).select(F.col("zone_id").alias("pickup_zone_id"), "borough")  # noqa: F821
@@ -45,7 +47,7 @@ def kpis_by_minute():
                  F.count("incident_id").alias("injected_trips"), F.max("completed_at").alias("latest_event")))
 
 
-@dlt.table(name=table("ops", "driver_shift_earnings"), table_properties=NTZ,
+@dlt.table(name=table("ops", "driver_shift_earnings"), table_properties=NTZ, spark_conf=VIEW_REFRESH,
            comment="Each driver shift's trips and pay so far. Drivers are synthetic (ADR-0003); trip pay is the real TLC pay")
 def driver_shift_earnings():
     history = spark.read.table(table("silver", "driver_state_history"))  # noqa: F821

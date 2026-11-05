@@ -175,6 +175,12 @@ data "aws_iam_policy_document" "window" {
     resources = [aws_iam_role.scheduler.arn]
   }
   statement {
+    # The streaming pipeline (#25): ridepulse-window's OAuth credentials and the pipeline id `make deploy` writes.
+    actions = ["ssm:GetParameter"]
+    resources = [for p in ["host", "window_client_id", "window_client_secret", "streaming_pipeline_id"] :
+    "${local.ssm_arn}/ridepulse/${var.env}/databricks/${p}"]
+  }
+  statement {
     actions   = ["logs:CreateLogStream", "logs:PutLogEvents"]
     resources = ["${aws_cloudwatch_log_group.window.arn}:*"]
   }
@@ -204,6 +210,7 @@ resource "aws_lambda_function" "window" {
     variables = {
       REPLAYER_SCHEDULE = aws_scheduler_schedule.replayer.name
       NOTIFIER_SCHEDULE = aws_scheduler_schedule.notifier.name
+      DATABRICKS_SSM    = "/ridepulse/${var.env}/databricks"
     }
   }
   depends_on = [aws_cloudwatch_log_group.window, aws_iam_role_policy.window]

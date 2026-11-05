@@ -18,13 +18,16 @@ from pyspark.sql import functions as F
 conf = spark.conf  # noqa: F821  (the pipeline's session)
 CATALOG = conf.get("ridepulse.catalog")
 NTZ = {"delta.feature.timestampNtz": "supported"}
+# A continuous pipeline in a demo window (#25): the rules join these as they stand at each micro-batch, so they refresh
+# every 10 seconds, well inside the wall minute between ticks. Slower, a rule window could close on supply a tick old.
+SUPPLY_REFRESH = {"pipelines.trigger.interval": "10 seconds"}
 
 
 def table(schema: str, name: str) -> str:
     return f"{CATALOG}.{schema}.{name}"
 
 
-@dlt.table(name=table("ops", "tick_watermarks"), table_properties=NTZ,
+@dlt.table(name=table("ops", "tick_watermarks"), table_properties=NTZ, spark_conf=SUPPLY_REFRESH,
            comment="One row per replayer tick transaction: its simulated end and LSN")
 def tick_watermarks():
     state = spark.read.table(table("silver", "replay_state_changes")).where("op IN ('c', 'u', 'r')")  # noqa: F821
@@ -32,7 +35,7 @@ def tick_watermarks():
         F.max("watermark").alias("tick_end"), F.max("source_lsn").alias("tick_lsn"))
 
 
-@dlt.table(name=table("ops", "zone_supply"), table_properties=NTZ,
+@dlt.table(name=table("ops", "zone_supply"), table_properties=NTZ, spark_conf=SUPPLY_REFRESH,
            comment="Idle and busy drivers per zone in simulated time: valid from valid_from until the zone's next change")
 def zone_supply():
     changes = spark.read.table(table("silver", "driver_changes")).where("op <> 'd'")  # noqa: F821
@@ -79,7 +82,7 @@ def supply_at_window_ends(minutes: int):
     return joined.select("window_end", "zone_id", "idle", "busy", "supply_lsn")
 
 
-@dlt.table(name=table("ops", "supply_by_area"), table_properties=NTZ,
+@dlt.table(name=table("ops", "supply_by_area"), table_properties=NTZ, spark_conf=SUPPLY_REFRESH,
            comment="Idle and busy drivers per surge area at each 15-minute window end, and the LSN of the tick they came from")
 def supply_by_area():
     areas = spark.read.table(table("ref", "surge_areas"))  # noqa: F821
@@ -88,7 +91,7 @@ def supply_by_area():
                                                   F.max("supply_lsn").alias("supply_lsn")))
 
 
-@dlt.table(name=table("ops", "supply_by_borough"), table_properties=NTZ,
+@dlt.table(name=table("ops", "supply_by_borough"), table_properties=NTZ, spark_conf=SUPPLY_REFRESH,
            comment="Busy drivers per borough at each 3-minute window end (R4)")
 def supply_by_borough():
     zones = spark.read.table(table("ref", "zones")).select("zone_id", "borough")  # noqa: F821

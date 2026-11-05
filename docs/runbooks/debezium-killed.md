@@ -27,8 +27,9 @@ Debezium Server on the EC2 instance stopped mid-replay: a crash, an OOM kill, a 
 
 ## Check: nothing lost, nothing doubled
 
-Stop the replayer (`make down`, or disable its schedule) so Neon stops moving, run the pipeline (`make bronze`), and
-when it finishes:
+Stop the replayer (`make down`, or disable its schedule) so Neon stops moving. `make down` also stops the streaming
+pipeline: start it again (`make pipeline-start`), give it 10 minutes (silver is current in seconds, but
+`silver.driver_state` refreshes every 10 minutes, #25), run the check, then `make pipeline-stop`:
 
 ```
 scripts/db.sh uv run python scripts/drills/completeness.py
