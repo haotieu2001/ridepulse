@@ -4,7 +4,8 @@ once (FR-11).
     1. read what arrived since the last commit (consumer group ridepulse-notifier)
     2. per alert, claim alert_id with a DynamoDB conditional put; a claim that already exists means it was sent: skip
     3. publish to SNS; if that fails, release the claim, so a later run sends it, and stop before committing
-    4. commit the Kafka offsets
+    4. stamp the claim with sent_at: SLA-1's end (#25)
+    5. commit the Kafka offsets
 
 A run that dies between 2 and 3 leaves a claim without an email: the price of never emailing twice. A poller rather
 than a Lambda Kafka trigger, whose SASL credentials would have to live in Secrets Manager: it reads the same SSM keys
@@ -26,14 +27,27 @@ REF = pathlib.Path(__file__).resolve().parents[2] / "ref"
 
 
 def claim(dynamo, table: str, alert: dict) -> bool:
-    """True if this run claimed the alert; False if an earlier one did (it was sent, or is being sent)."""
+    """True if this run claimed the alert; False if an earlier one did (it was sent, or is being sent). The claim keeps
+    which window the alert is for and when the pipeline wrote it to Kafka, so #25 can split SLA-1 into stages."""
+    item = {"alert_id": {"S": alert["alert_id"]}, "rule": {"S": alert["rule"]}, "area": {"S": str(alert["area"])},
+            "window_start": {"S": alert["window_start"]}, "claimed_at": {"N": str(int(time.time()))}}
+    if alert.get("kafka_ts_ms") is not None:
+        item["kafka_ts_ms"] = {"N": str(alert["kafka_ts_ms"])}
     try:
-        dynamo.put_item(TableName=table, ConditionExpression="attribute_not_exists(alert_id)",
-                        Item={"alert_id": {"S": alert["alert_id"]}, "rule": {"S": alert["rule"]},
-                              "claimed_at": {"N": str(int(time.time()))}})
+        dynamo.put_item(TableName=table, ConditionExpression="attribute_not_exists(alert_id)", Item=item)
         return True
     except dynamo.exceptions.ConditionalCheckFailedException:
         return False
+
+
+def stamp_sent(dynamo, table: str, alert: dict) -> None:
+    """sent_at (epoch ms) once SNS has accepted the email. The email is out either way, so a failure here loses only
+    the measurement, and the run goes on."""
+    try:
+        dynamo.update_item(TableName=table, Key={"alert_id": {"S": alert["alert_id"]}}, UpdateExpression="SET sent_at = :t",
+                           ExpressionAttributeValues={":t": {"N": str(time.time_ns() // 1_000_000)}})
+    except Exception as e:  # noqa: BLE001
+        print(f"sent {alert['alert_id']} but couldn't record sent_at: {e}")
 
 
 @functools.cache
@@ -90,6 +104,7 @@ def deliver(alerts: list[dict], dynamo, sns, table: str, topic_arn: str) -> dict
         except Exception:
             dynamo.delete_item(TableName=table, Key={"alert_id": {"S": alert["alert_id"]}})
             raise
+        stamp_sent(dynamo, table, alert)
         sent += 1
     return {"sent": sent, "skipped": skipped}
 
@@ -104,7 +119,8 @@ def read_alerts(consumer, seconds: float = POLL_SECONDS) -> list[dict]:
         for m in batch:
             if m.error():
                 raise RuntimeError(f"Kafka error: {m.error()}")
-            out.append(json.loads(m.value()))
+            kind, ts = m.timestamp()   # kind 0: the message has no timestamp
+            out.append({**json.loads(m.value()), "kafka_ts_ms": ts if kind else None})
     return out
 
 
