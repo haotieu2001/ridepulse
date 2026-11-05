@@ -860,3 +860,36 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   the next Debezium apply (it replaces the instance; offsets are in Kafka, the slot in Neon).
 - Runbooks: `docs/runbooks/debezium-killed.md`, `docs/runbooks/slot-dropped.md`. The drill's 43 alerts were skipped
   for the notifier (R2 isn't calibrated yet, #25).
+
+### #25 SLA-1 latency and the rules' precision and recall
+- Notifier: the claim now keeps the alert's window, area and Kafka timestamp, and `sent_at` (ms) is set once SNS takes
+  the email (`dynamodb:UpdateItem` added). A failed stamp loses the measurement, not the email.
+- `scripts/measure/alerts.py latency`: per emailed R1-R3 alert, from the Postgres commit of the last event its window
+  counted to `sent_at`. No new column: a tick writes its events and the watermark in one transaction and simulated time
+  never goes back, so an event's commit is the Debezium source time of the first watermark that reached it
+  (`silver.replay_state_changes`). `score`: each `dispatch.incidents` row against the alerts it should raise (stadium ->
+  R1 in any area sharing a zone with its own, R3 at an airport; outage -> R4 in its borough; tunnel pings -> late
+  events), precision per rule, and the alarm rate on windows no incident touched.
+- The run (2026-11-05, 12:40-15:39 UTC): `make replay DATE=2025-01-08`, eight incidents (#7-#14: 5% duplicate and 0.5%
+  malformed pings all day, tunnel pings 08:00, outages Manhattan 11:00 and Brooklyn 17:30, stadiums at Flushing Meadows
+  13:00 x4, JFK 15:00 x3, Madison Square Garden 19:00 x3), the window opened by hand and the Databricks schedule
+  unpaused for it. 30 simulated hours, the day's whole budget.
+- SLA-1, 1,132 alerts: p50 16.1, p95 24.2, max 29.1 min (R1 p95 22.1, R2 28.1, R3 20.1). **Missed.** Stage medians
+  for R1: commit -> Kafka 0.0 min, Kafka -> alert in Kafka 14.5, alert -> email 0.6. A pipeline run takes ~10.5 min,
+  not the 1.5 the estimate used: ~3 min to start, ~4.5 min for bronze, silver and the rules (R1's Kafka sink flow is
+  done ~7.5 min in), then ~2 min more for the views recomputed every run (`ops.alerts`, `late_events`, KPIs). With
+  `max_concurrent_runs: 1` the 10-minute triggers queue, so runs go back to back. R2 adds its 75-minute join hold-back
+  (8 wall min at 10x). Fixing it is a design decision, left open (requirements §10, question 4).
+- Recall 6/6, each in its first window: tunnel pings (20 late-event alerts, 3,924 of 206,418 pings = 1.9% late, in their
+  own windows), both outages (R4 within 6 min), all three stadiums (R1; JFK also R3). Duplicate and malformed pings
+  raised nothing.
+- Noise, before calibration: 1,219 emails in three hours. R1 alarmed on 8.2% of clean windows (precision 27%): most at
+  3 or fewer idle drivers, where 10 requests already make a ratio over 3. One stadium sets off ~18 overlapping surge
+  areas per window (149 R1 alerts for Flushing Meadows), so an incident is many emails: grouping is a gap. R3 alarmed on
+  52%, all from its shortage side, because JFK has 0 idle drivers in 39% of windows (the supply has no holding lot).
+- Calibration, recomputed exactly from `ops.r1_surge` and `ops.r3_airport_queue` (they keep requests and idle):
+  R1 `alert_min_requests: 20` (new; the surge band keeps 10): clean alarms 710 -> 106 (1.2%), all three stadiums still
+  alert at their own area. An idle floor of 3 changed nothing. R3 `min_requests` 10 and shortage ratio 4: 52% -> 20%,
+  JFK stadium in 3 of 5 windows. R2 and R4 kept. Takes effect at the next bundle deploy.
+- A window opened with `make up` stays open until `make down` (the close schedule is only for daily windows): Debezium
+  idled from 15:39, when the budget ran out, to 16:27.

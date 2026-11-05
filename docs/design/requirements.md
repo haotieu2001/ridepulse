@@ -168,4 +168,5 @@ the support copilot itself (RideDesk).
 3. **Free Edition daily quota** (Phases 3-4): do 18 streaming runs plus the daily job per demo day
    stay under it?
 4. **Alert latency distribution** (Phase 3): measure p50/p95 for SLA-1 from real replays; it goes on
-   the README.
+   the README. **Measured (#25):** p50 16.1, p95 24.2, max 29.1 min: SLA-1 is missed. The estimate assumed a
+   1.5-minute run; a run of the whole pipeline takes ~10.5 min. Open: how to get the rules under 12 min.

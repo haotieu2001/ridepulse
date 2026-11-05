@@ -1,19 +1,21 @@
 # The ops rules' thresholds as data (FR-10): published as ref.ops_rules and read by the rules (#20), so tuning one is a
 # config change, not a code change. Windows are simulated time. Each surge area is a zone plus its neighbours
-# (ref.surge_areas). "status: proposed" means the plan gave no number: the value is a first guess, calibrated against
-# the injected incidents in #25.
+# (ref.surge_areas). "status: calibrated (#25)" values were set from a replay of 2025-01-08 with injected incidents
+# (docs/journal.md #25): the alarm rate on windows no incident touched, against catching every incident.
 
 R1_surge:
   description: requests per idle driver in a surge area
-  status: from the plan (FR-10)
+  status: from the plan (FR-10); alert_min_requests calibrated (#25)
   window_minutes: 15
   min_requests: 10          # one zone over 5 minutes sees about 0.4 requests at a 5% sample: noise
   surge_ratio: 1.5          # requests / idle drivers above this writes a surge band
   alert_ratio: 3.0          # ... and above this, an alert
+  alert_min_requests: 20    # #25: at 10, 8.2% of clean windows alarmed (10 requests / 3 idle is already > 3); at 20,
+                            # 1.2%, and all three injected stadiums still alerted at their own area
 
 R2_long_waits:
   description: p90 wait for a car per surge area
-  status: from the plan
+  status: from the plan; kept after #25 (1.1% of clean windows alarm)
   window_minutes: 15
   min_trips: 10
   p90_wait_minutes: 15      # the real p90 is 7-10 min (Aug 2026)
@@ -21,16 +23,19 @@ R2_long_waits:
 
 R3_airport_queue:
   description: idle drivers against requests at the airports
-  status: proposed
+  status: calibrated (#25)
   window_minutes: 15
   airport_zones: [1, 132, 138]       # Newark, JFK, LaGuardia
-  min_requests: 5
-  queue_idle_per_request: 4.0        # drivers piling up: a queue building
-  shortage_requests_per_idle: 1.5    # riders waiting: the other way out of balance
+  min_requests: 10                   # #25: was 5
+  queue_idle_per_request: 4.0        # drivers piling up: a queue building (never fired on a clean window in #25)
+  shortage_requests_per_idle: 4.0    # riders waiting. #25: at 1.5, 52% of clean windows alarmed; at 4 (and 10
+                                     # requests), 20%, the JFK stadium still alerting in 3 of 5 windows. The rest is
+                                     # the supply model: no holding lot, so JFK has 0 idle drivers in 39% of windows
 
 R4_app_outage:
   description: drivers on a trip whose app stopped sending pings, by borough
-  status: proposed (the 3-minute silence is from the plan)
+  status: calibrated (#25), kept as proposed (the 3-minute silence is from the plan)
+  # #25: both injected outages alerted within 6 minutes; 0.1% of clean windows alarmed
   silence_minutes: 3
   min_on_trip: 5
   silent_share: 0.5                  # at least half of a borough's drivers on a trip are silent

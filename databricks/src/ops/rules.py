@@ -67,7 +67,8 @@ def r1_surge():
             .select("window_start", "window_end", "area_id", "requests", F.coalesce("idle", F.lit(0)).alias("idle"),
                     ratio.alias("ratio"), evaluated.alias("evaluated"),
                     (evaluated & (ratio > r["surge_ratio"])).alias("surge"),
-                    (evaluated & (ratio > r["alert_ratio"])).alias("alert"), "supply_lsn"))
+                    (evaluated & (F.col("requests") >= r["alert_min_requests"]) & (ratio > r["alert_ratio"])).alias("alert"),
+                    "supply_lsn"))
 
 
 # --- R2 long waits -------------------------------------------------------------------------------------------

@@ -6,7 +6,7 @@
               incidents that explain them; and the alarm rate on windows no incident touched (for calibrating #19's
               proposed thresholds).
 
-    AWS_PROFILE=ridepulse uv run python scripts/measure/alerts.py latency --since 2026-11-06T12:00
+    AWS_PROFILE=ridepulse uv run python scripts/measure/alerts.py latency --since 2026-11-06T12:00 --from 2025-01-08
     scripts/db.sh uv run python scripts/measure/alerts.py score --from 2025-01-08T00:00 --to 2025-01-09T06:00
 
 Where an event's commit time comes from: a tick writes its events and the new watermark in one transaction, and
@@ -53,7 +53,9 @@ def percentile(values: list[float], q: float) -> float:
     return ordered[max(0, math.ceil(q * len(ordered)) - 1)]
 
 
-def latency_sql(catalog: str, sent: list[tuple[str, int | None, int]]) -> str:
+def latency_sql(catalog: str, sent: list[tuple[str, int | None, int]], start: datetime | None = None) -> str:
+    """`start` (simulated) drops windows from before the run: a jump closes old windows, whose requests were committed
+    days earlier, and their emails go out in the run."""
     c = catalog
     grace = rules()["late_events"]["grace_minutes"]
     airports = ", ".join(str(z) for z in rules()["R3_airport_queue"]["airport_zones"])
@@ -79,7 +81,8 @@ evidence AS (
   SELECT a.alert_id, a.rule, a.area, a.window_start, a.window_end, count(*) AS events,
          max(n.occurred_at) AS last_event, max(n.kafka_ts) AS last_kafka,
          a.window_end + make_dt_interval(0, 0, {grace} + CASE a.rule WHEN 'R2' THEN {R2_HOLD_BACK_MIN} ELSE 0 END, 0) AS close_at
-  FROM {c}.ops.alerts a JOIN sent USING (alert_id)
+  FROM {c}.ops.alerts a JOIN sent ON a.alert_id = sent.alert_id
+  {"" if start is None else f"AND a.window_start >= '{start:%Y-%m-%d %H:%M:%S}'"}
   JOIN counted n ON n.rule = a.rule AND n.area = a.area AND n.occurred_at >= a.window_start AND n.occurred_at < a.window_end
   GROUP BY a.alert_id, a.rule, a.area, a.window_start, a.window_end)
 SELECT e.alert_id, e.rule, e.area, CAST(e.window_start AS STRING), e.events,
@@ -319,6 +322,8 @@ def main() -> int:
     sub = p.add_subparsers(dest="command", required=True)
     lat = sub.add_parser("latency", help="SLA-1: request commit -> alert email")
     lat.add_argument("--since", required=True, type=datetime.fromisoformat, help="wall time (UTC) the run began")
+    lat.add_argument("--from", dest="start", type=datetime.fromisoformat,
+                     help="simulated time the run began: earlier windows a jump closed don't count")
     lat.add_argument("--table", default="ridepulse-alerts-sent")
     sc = sub.add_parser("score", help="precision and recall against dispatch.incidents")
     sc.add_argument("--from", dest="start", required=True, type=datetime.fromisoformat, help="simulated time")
@@ -332,7 +337,7 @@ def main() -> int:
         if not sent:
             print(f"no alerts emailed since {a.since}")
             return 1
-        ts = timings(sql(latency_sql(a.catalog, sent)))
+        ts = timings(sql(latency_sql(a.catalog, sent, a.start)))
         print(f"{len(sent)} alerts emailed since {a.since}; {len(ts)} R1-R3 alerts traced to their last event's commit")
         print("\n".join(latency_report(ts)))
         return 0
