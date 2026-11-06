@@ -5,7 +5,7 @@ import urllib.request
 
 import pytest
 
-from services.window.window import Pipeline, handler
+from services.window.window import Jobs, handler
 
 
 class FakeEc2:
@@ -40,21 +40,57 @@ class FakeScheduler:
         self.log.append(("schedule", kw["State"]))
 
 
-class FakePipeline:
-    def __init__(self, log, state="IDLE"):
-        self.log, self._state = log, state
+class FakeJobs:
+    def __init__(self, log, paused=True):
+        self.log, self.paused = log, paused
+
+    def open(self):
+        self.log.append(("jobs", "open"))
+        self.paused = False
+
+    def close(self):
+        self.log.append(("jobs", "close"))
+        self.paused = True
 
     def state(self):
-        return self._state
+        status = "PAUSED" if self.paused else "UNPAUSED"
+        return {"streaming_job": status, "views_job": status, "streaming_runs_active": 0 if self.paused else 1}
 
-    def start(self):
-        if self._state != "RUNNING":
-            self.log.append(("pipeline", "start"))
-            self._state = "RUNNING"
 
-    def stop(self):
-        self.log.append(("pipeline", "stop"))
-        self._state = "IDLE"
+class Resp:
+    def __init__(self, body):
+        self.body = json.dumps(body).encode()
+
+    def read(self):
+        return self.body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def fake_databricks(monkeypatch, jobs: dict):
+    """A Jobs API that keeps each job's settings and records every request."""
+    sent = []
+
+    def urlopen(req, timeout):
+        body = json.loads(req.data) if req.data and not req.full_url.endswith("/oidc/v1/token") else None
+        sent.append((req.get_method(), req.full_url.split("example")[1], req.get_header("Authorization"), body))
+        path = req.full_url.split("example")[1]
+        if path == "/oidc/v1/token":
+            return Resp({"access_token": "tok"})
+        if path.startswith("/api/2.1/jobs/get"):
+            return Resp({"settings": jobs[int(path.split("job_id=")[1])]})
+        if path == "/api/2.1/jobs/update":
+            jobs[body["job_id"]].update(body["new_settings"])
+        if path.startswith("/api/2.1/jobs/runs/list"):
+            return Resp({"runs": [{"run_id": 1}]})
+        return Resp({})
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    return sent
 
 
 @pytest.fixture(autouse=True)
@@ -63,9 +99,9 @@ def env(monkeypatch):
     monkeypatch.delenv("DATABRICKS_SSM", raising=False)
 
 
-def run(action, ec2, pipeline=None):
+def run(action, ec2, jobs=None):
     sched = FakeScheduler(ec2.calls)
-    return handler({"action": action}, ec2=ec2, scheduler=sched, pipeline=pipeline), sched
+    return handler({"action": action}, ec2=ec2, scheduler=sched, jobs=jobs), sched
 
 
 def test_open_starts_debezium_then_enables_the_replayer():
@@ -118,57 +154,38 @@ def test_the_notifier_opens_with_the_window_and_closes_after_debezium(monkeypatc
     assert ec2.calls == [("schedule", "DISABLED"), ("stop", ["i-1"]), ("schedule", "DISABLED")]
 
 
-def test_the_pipeline_starts_last_on_open_and_stops_after_debezium_on_close():
+def test_the_jobs_open_last_and_close_after_debezium():
     ec2 = FakeEc2()
-    result, _ = run("open", ec2, FakePipeline(ec2.calls))
-    assert ec2.calls == [("start", ["i-1"]), ("schedule", "ENABLED"), ("pipeline", "start")]
-    assert result["pipeline_state"] == "RUNNING"
+    result, _ = run("open", ec2, FakeJobs(ec2.calls))
+    assert ec2.calls == [("start", ["i-1"]), ("schedule", "ENABLED"), ("jobs", "open")]
+    assert result["streaming_job"] == "UNPAUSED" and result["views_job"] == "UNPAUSED"
     ec2 = FakeEc2(state="running")
-    result, _ = run("close", ec2, FakePipeline(ec2.calls, state="RUNNING"))
-    assert ec2.calls == [("schedule", "DISABLED"), ("stop", ["i-1"]), ("pipeline", "stop")]
-    assert result["pipeline_state"] == "IDLE"
+    result, _ = run("close", ec2, FakeJobs(ec2.calls, paused=False))
+    assert ec2.calls == [("schedule", "DISABLED"), ("stop", ["i-1"]), ("jobs", "close")]
+    assert result["streaming_job"] == "PAUSED"
 
 
-def test_opening_twice_leaves_a_running_pipeline_alone():
-    ec2 = FakeEc2(state="running")
-    run("open", ec2, FakePipeline(ec2.calls, state="RUNNING"))
-    assert ("pipeline", "start") not in ec2.calls
-
-
-def test_status_reports_the_pipeline_without_touching_it():
+def test_status_reports_the_jobs_without_touching_them():
     ec2 = FakeEc2()
-    result, _ = run("status", ec2, FakePipeline(ec2.calls, state="RUNNING"))
-    assert result["pipeline_state"] == "RUNNING" and ec2.calls == []
+    result, _ = run("status", ec2, FakeJobs(ec2.calls, paused=False))
+    assert result["streaming_runs_active"] == 1 and ec2.calls == []
 
 
-def test_the_pipeline_client_gets_one_token_and_calls_the_rest_api(monkeypatch):
-    sent, states = [], iter(["RUNNING", "IDLE"])
-
-    class Resp:
-        def __init__(self, body):
-            self.body = json.dumps(body).encode()
-
-        def read(self):
-            return self.body
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc):
-            return False
-
-    def urlopen(req, timeout):
-        sent.append((req.get_method(), req.full_url, req.get_header("Authorization"), req.data))
-        if req.full_url.endswith("/oidc/v1/token"):
-            return Resp({"access_token": "tok"})
-        return Resp({"state": next(states)} if req.get_method() == "GET" else {})
-
-    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
-    p = Pipeline("https://dbc.example/", "id", "secret", "pipe-1")
-    p.start()   # already running: nothing started
-    p.start()   # idle: one update
-    assert sent[0][:3] == ("POST", "https://dbc.example/oidc/v1/token", "Basic " + base64.b64encode(b"id:secret").decode())
-    assert [s[:2] for s in sent[1:]] == [("GET", "https://dbc.example/api/2.0/pipelines/pipe-1"),
-                                         ("GET", "https://dbc.example/api/2.0/pipelines/pipe-1"),
-                                         ("POST", "https://dbc.example/api/2.0/pipelines/pipe-1/updates")]
-    assert all(s[2] == "Bearer tok" for s in sent[1:]) and json.loads(sent[-1][3]) == {"full_refresh": False}
+def test_the_client_pauses_only_the_trigger_and_cancels_runs_on_close(monkeypatch):
+    jobs = {11: {"name": "streaming", "continuous": {"pause_status": "PAUSED"}},
+            12: {"name": "views", "schedule": {"quartz_cron_expression": "0 0/10 * * * ?", "timezone_id": "UTC",
+                                               "pause_status": "PAUSED"}}}
+    sent = fake_databricks(monkeypatch, jobs)
+    client = Jobs("https://dbc.example/", "id", "secret", "11", "12")
+    client.open()
+    assert jobs[11]["continuous"] == {"pause_status": "UNPAUSED"}
+    assert jobs[12]["schedule"] == {"quartz_cron_expression": "0 0/10 * * * ?", "timezone_id": "UTC", "pause_status": "UNPAUSED"}
+    updates = [s[3] for s in sent if s[1] == "/api/2.1/jobs/update"]
+    assert [set(u["new_settings"]) for u in updates] == [{"continuous"}, {"schedule"}]   # only the trigger, nothing else
+    client.open()   # already open: reads, no more updates
+    assert len([s for s in sent if s[1] == "/api/2.1/jobs/update"]) == 2
+    client.close()
+    assert jobs[11]["continuous"]["pause_status"] == "PAUSED" and jobs[12]["schedule"]["pause_status"] == "PAUSED"
+    assert [s[3] for s in sent if s[1] == "/api/2.1/jobs/runs/cancel-all"] == [{"job_id": 11}, {"job_id": 12}]
+    assert sent[0][2] == "Basic " + base64.b64encode(b"id:secret").decode()
+    assert all(s[2] == "Bearer tok" for s in sent[1:])   # one token for the whole run

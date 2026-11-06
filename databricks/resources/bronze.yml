@@ -1,12 +1,14 @@
-# Kafka -> bronze (#13) -> silver (#16) -> supply and rules (#20) -> the alert sink (#22), one pipeline. Silver shares
-# it with bronze, so the replay watermark and the trip events it covers land together (ADR-0004 §7).
+# Kafka -> bronze (#13) -> silver (#16) -> supply and rules (#20) -> the alert sink (#22), one triggered pipeline.
+# Silver shares each update with bronze, so the replay watermark and the trip events it covers land together
+# (ADR-0004 §7).
 #
-# Continuous (#25): a triggered run every 10 minutes took ~10.5 minutes (3 to start, then every table), so alerts
-# reached email at p95 24 min against SLA-1's 12. Continuous, the streams run in micro-batches of seconds and the
-# views that are recomputed in full refresh on their own every 10 minutes (spark_conf pipelines.trigger.interval).
-# The window Lambda (services/window) starts it when a demo window opens and stops it when it closes, as the
-# ridepulse-window service principal, so nothing reads Kafka or spends quota outside a window. Stg stays triggered:
-# CI deploys it, and nothing would stop a continuous one.
+# How it runs (#25), and why:
+#   - Every 10 minutes, a run took ~10.5 min (3 to start, then every table) and alerts reached email at p95 24 min.
+#   - Continuous mode lost its serverless driver every 18-34 minutes on Free Edition, and once stalled silver for good.
+#   - So: back to back, as a job with a continuous trigger, with the views that are recomputed in full moved out to
+#     views_every_10_min (a job task, not a second pipeline: Free Edition runs one active pipeline per type).
+# Both jobs start paused. The window Lambda (services/window) unpauses them when a demo window opens and pauses them
+# when it closes, as the ridepulse-window service principal, so nothing reads Kafka or spends quota outside a window.
 resources:
   pipelines:
     bronze_ingest:
@@ -26,8 +28,6 @@ resources:
         - file:
             path: ../src/ref/ref.py
         - file:
-            path: ../src/ops/kpis.py
-        - file:
             path: ../src/ops/supply.py
         - file:
             path: ../src/ops/rules.py
@@ -43,3 +43,40 @@ resources:
         ridepulse.ref_dir: ${workspace.file_path}/src/ref
         # Debezium's TIMESTAMP microseconds are read as UTC, so the simulated clock keeps its wall value.
         spark.sql.session.timeZone: UTC
+
+  jobs:
+    streaming_back_to_back:
+      name: streaming_back_to_back
+      # A new run starts as soon as the last one ends; paused outside a window.
+      continuous:
+        pause_status: PAUSED
+      tasks:
+        - task_key: streaming
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.bronze_ingest.id}
+
+    views_every_10_min:
+      name: views_every_10_min
+      schedule:
+        quartz_cron_expression: "0 0/10 * * * ?"
+        timezone_id: UTC
+        pause_status: PAUSED
+      max_concurrent_runs: 1
+      tasks:
+        - task_key: views
+          environment_key: default
+          spark_python_task:
+            python_file: ../src/views/refresh.py
+            parameters:
+              - --catalog
+              - ${var.catalog}
+              - --ref-dir
+              - ${workspace.file_path}/src/ref
+              - --silver-dir
+              - ${workspace.file_path}/src/silver
+      environments:
+        - environment_key: default
+          spec:
+            environment_version: "3"
+            dependencies:
+              - pyyaml==6.0.2

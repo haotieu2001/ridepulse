@@ -27,13 +27,6 @@ targets:
       catalog: ridepulse_dev
     resources:
       pipelines:
-        # Continuous in dev only (#25): the window Lambda starts and stops it as ridepulse-window, which may manage
-        # this pipeline and nothing else (ADR-0002).
-        bronze_ingest:
-          continuous: true
-          permissions:
-            - service_principal_name: 17447026-e680-4550-8b53-23a3b7ac2f13   # ridepulse-window
-              level: CAN_MANAGE
         # S9 / plan path C: daily query-based pull from the Neon dispatch database,
         # incremental on the updated_at cursor. Dev only: the neon_dev connection
         # and its secret belong to this environment.
@@ -57,6 +50,16 @@ targets:
                       cursor_columns:
                         - updated_at
       jobs:
+        # The window Lambda pauses and unpauses these as ridepulse-window, which may manage these two jobs and nothing
+        # else (#25, ADR-0002). In stg nothing unpauses them.
+        streaming_back_to_back:
+          permissions:
+            - service_principal_name: 17447026-e680-4550-8b53-23a3b7ac2f13   # ridepulse-window
+              level: CAN_MANAGE
+        views_every_10_min:
+          permissions:
+            - service_principal_name: 17447026-e680-4550-8b53-23a3b7ac2f13   # ridepulse-window
+              level: CAN_MANAGE
         # S1 + S2: Confluent Cloud -> Databricks, JSON and Schema Registry Avro.
         # Dev only: the Kafka and Schema Registry keys sit in this workspace's
         # `ridepulse` secret scope (copied from SSM by scripts/feasibility/ssm_to_secret.sh).

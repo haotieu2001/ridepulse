@@ -18,8 +18,6 @@ from pyspark.sql import functions as F
 conf = spark.conf  # noqa: F821  (the pipeline's session)
 CATALOG = conf.get("ridepulse.catalog")
 NTZ = {"delta.feature.timestampNtz": "supported"}
-# A continuous pipeline in a demo window (#25): views recomputed in full refresh every 10 minutes, off the alert path.
-VIEW_REFRESH = {"pipelines.trigger.interval": "10 minutes"}
 CLOSED_AFTER = "30 hours"   # ADR-0004 §7, requirements §2
 
 
@@ -40,13 +38,13 @@ dlt.create_auto_cdc_flow(
 
 
 @dlt.table(name=silver("driver_state"), comment="Each driver's current state (the open version of driver_state_history)",
-           table_properties=NTZ, spark_conf=VIEW_REFRESH)
+           table_properties=NTZ)
 def driver_state():
     return (spark.read.table(silver("driver_state_history")).where("__END_AT IS NULL")  # noqa: F821
             .withColumn("state_committed_at", F.col("__START_AT.committed_at")).drop("__START_AT", "__END_AT"))
 
 
-@dlt.table(name=silver("replay_watermark"), table_properties=NTZ, spark_conf=VIEW_REFRESH,
+@dlt.table(name=silver("replay_watermark"), table_properties=NTZ,
            comment="The replay watermark applied in this pipeline update, and the last closed simulated day (D + 30 h)")
 def replay_watermark():
     changes = spark.read.table(silver("replay_state_changes")).where("op <> 'd'")  # noqa: F821

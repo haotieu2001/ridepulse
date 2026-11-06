@@ -175,9 +175,9 @@ data "aws_iam_policy_document" "window" {
     resources = [aws_iam_role.scheduler.arn]
   }
   statement {
-    # The streaming pipeline (#25): ridepulse-window's OAuth credentials and the pipeline id `make deploy` writes.
+    # The Databricks jobs (#25): ridepulse-window's OAuth credentials and the job ids `make deploy` writes.
     actions = ["ssm:GetParameter"]
-    resources = [for p in ["host", "window_client_id", "window_client_secret", "streaming_pipeline_id"] :
+    resources = [for p in ["host", "window_client_id", "window_client_secret", "streaming_job_id", "views_job_id"] :
     "${local.ssm_arn}/ridepulse/${var.env}/databricks/${p}"]
   }
   statement {
