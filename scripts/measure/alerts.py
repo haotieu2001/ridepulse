@@ -28,6 +28,7 @@ import math
 import os
 import pathlib
 import sys
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -330,7 +331,13 @@ def main() -> int:
     sc.add_argument("--to", dest="end", required=True, type=datetime.fromisoformat, help="simulated time")
     a = p.parse_args()
 
-    from scripts.drills.completeness import sql
+    from scripts.drills.completeness import sql as run_sql
+
+    def sql(statement: str) -> list[list]:
+        # A fresh comment per call: the warehouse can answer repeated text from its result cache while a continuous
+        # pipeline is still writing the tables (seen 2026-11-06).
+        return run_sql(f"/* {time.time_ns()} */ {statement}")
+
     if a.command == "latency":
         sent = sent_alerts(a.table, int(a.since.timestamp() * 1000) if a.since.tzinfo else
                            int((a.since - datetime(1970, 1, 1)).total_seconds() * 1000))

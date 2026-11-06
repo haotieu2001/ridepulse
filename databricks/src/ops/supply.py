@@ -19,8 +19,9 @@ conf = spark.conf  # noqa: F821  (the pipeline's session)
 CATALOG = conf.get("ridepulse.catalog")
 NTZ = {"delta.feature.timestampNtz": "supported"}
 # A continuous pipeline in a demo window (#25): the rules join these as they stand at each micro-batch, so they refresh
-# every 10 seconds, well inside the wall minute between ticks. Slower, a rule window could close on supply a tick old.
-SUPPLY_REFRESH = {"pipelines.trigger.interval": "10 seconds"}
+# once a wall minute, the replayer's tick rate. Each refresh recomputes the whole history: every 10 seconds, four of them
+# on the one serverless driver starved the streams and the driver was lost every 20-35 minutes (2026-11-06).
+SUPPLY_REFRESH = {"pipelines.trigger.interval": "1 minute"}
 
 
 def table(schema: str, name: str) -> str:
