@@ -893,3 +893,19 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   JFK stadium in 3 of 5 windows. R2 and R4 kept. Takes effect at the next bundle deploy.
 - A window opened with `make up` stays open until `make down` (the close schedule is only for daily windows): Debezium
   idled from 15:39, when the budget ran out, to 16:27.
+- Continuous mode (2026-11-05/06): built and deployed (window Lambda starting and stopping the pipeline as a new
+  service principal, `ridepulse-window`), but on Free Edition every update lost its serverless driver 18-34 min in
+  ("Communication lost with driver ... not reachable for 120 seconds"), at any load: supply refreshing every 10 s or
+  every minute made no difference. Overnight the rules stalled behind silver and 0 alerts went out; the next day silver
+  stopped committing 5 min before a loss and stayed stuck after the retry. The Free Edition docs say nothing about
+  continuous mode or compute session length. Dropped.
+- Now: the triggered pipeline runs back to back (a job with a continuous trigger), and the views recomputed in full
+  (KPIs, late events, `ops.alerts`, `dq_rates`) are `views/refresh.py`, a job task every 10 minutes (1.2 min a run),
+  not a second pipeline: Free Edition runs one active pipeline per type. Moving them meant dropping the old
+  materialized views by hand; the job rebuilt them as Delta tables. The window Lambda unpauses both jobs on open and
+  pauses them and cancels their runs on close.
+- Not measured yet: the first timed window (2026-11-06 15:46) hit the same driver loss on a triggered update after
+  25 min, though the same pipeline ran 10.5-min triggered updates all of 2026-11-05. Most likely the workspace was
+  throttled after the day's continuous runs (fair-usage policy); unproven. To re-measure on a fresh day.
+- Found on the way: the SQL warehouse answered repeated query text from its result cache while a pipeline was still
+  writing; `scripts/measure/alerts.py` now adds a fresh comment to every query.
