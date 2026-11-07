@@ -28,7 +28,17 @@ import yaml
 from pyspark.sql import Column, DataFrame, SparkSession, Window
 from pyspark.sql import functions as F
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # trip_key.py, the contract's copy, sits beside this
+
+def _here() -> str:
+    """This file's folder, where trip_key.py (the contract's copy) sits. A serverless Python file task runs the file
+    without __file__, so there it's the job's --config-dir, which is this same folder."""
+    try:
+        return os.path.dirname(os.path.abspath(__file__))
+    except NameError:
+        return sys.argv[sys.argv.index("--config-dir") + 1]
+
+
+sys.path.insert(0, _here())
 from trip_key import SPARK_BASE_TRIP_KEY_SQL, spark_in_sample_sql  # noqa: E402
 
 CENTRAL_PARK = "USW00094728"
