@@ -956,3 +956,26 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   only append-only sources, so the next streaming update failed fatally. The sinks now read the rule tables with
   `skipChangeCommits`: a deliberate recompute is skipped, not re-sent or fatal.
 - Left for #29: `dim_weather_day` (with `is_rainy`) from `silver.weather_day`.
+
+### #27 Lakeflow Connect reference pull (path C)
+- `reference_pull` replaces S9's `s9_neon_reference` (deleted, with its 5-row test table): a query-based pull of
+  Neon's `zones`, `fare_rules` and `driver_profiles`, each on its indexed `updated_at` cursor (V001), into
+  `bronze.neon_<table>` as SCD type 2, so every version a pull sees is kept with when it held. Dev only (the
+  `neon_dev` connection). No schedule: the daily job (#33) will run it; `make refpull` by hand. An ingestion pipeline,
+  so the one-active-ETL-pipeline limit doesn't hold it back.
+- Real run: 51 s; 265 zones, 6 fare rules, 2,834 driver profiles, equal to Neon, one open version each. A second
+  pull added nothing. History on a real change is configured but not yet exercised: no reference row has changed
+  since, and editing Neon's reference data only to see it wasn't worth it. What a cursor misses (deletes, two
+  changes between pulls, seen in S9) is #28's ADR-0005.
+
+### #28 ADR-0005: log-based vs query-based CDC, misses measured
+- `scripts/drills/planted_profiles.py`: planted edits to `driver_profiles` (on both paths, V001), picked by a hash of
+  round and driver, with a ledger of every change; `compare` checks each against `silver.driver_profile_changes` (B)
+  and `bronze.neon_driver_profiles` (C). Debezium started alone (no replayer), then per round: plant, the streaming
+  pipeline, `make refpull`.
+- Round 1: 35 profiles edited (12 twice) and one hard delete; round 2: 21 edited (7 twice). B saw 76 of 76 changes;
+  C saw 56 of 76: every final version, none of the 19 intermediates, not the delete (the profile is still current).
+  The rounds also exercised the SCD2 history of #27 on real changes.
+- ADR-0005 (accepted): history or deletes that matter go by B (trip events, driver state, `dim_driver` in #29); C is
+  for reference data that is closed, not deleted (`zones`, `fare_rules`); `driver_profiles` stays on C as the
+  standing comparison, unread by gold. A C table that can lose rows needs a soft delete or a periodic full snapshot.
