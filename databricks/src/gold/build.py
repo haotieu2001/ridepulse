@@ -26,7 +26,7 @@ from __future__ import annotations
 import argparse
 from datetime import date, timedelta
 
-from pyspark.sql import DataFrame, SparkSession, Window
+from pyspark.sql import Column, DataFrame, SparkSession, Window
 from pyspark.sql import functions as F
 
 PROVIDERS = [("HV0002", "Juno"), ("HV0003", "Uber"), ("HV0004", "Via"), ("HV0005", "Lyft")]
@@ -244,9 +244,113 @@ def agg_cbd_impact(trips: DataFrame, cbd_zone_ids: list[int]) -> DataFrame:
         F.try_divide(F.col("trip_miles"), F.col("duration_s") / 3600).cast("decimal(12,1)").alias("avg_mph"), "take_rate")
 
 
+# --- reconciliations (#32, FR-14) ---------------------------------------------------------------------------------
+
+def closed_days(runs: DataFrame, watermark: DataFrame) -> DataFrame:
+    """The simulated days a replay closed, as V002's replayed_days says: each run's days after its warm-up day, up to
+    D + 30 h before its end (or the watermark, for the open run). From CDC: each run's latest version."""
+    latest = Window.partitionBy("run_id").orderBy(F.col("committed_at").desc(), F.col("source_lsn").desc())
+    r = (runs.where("op <> 'd'").withColumn("_n", F.row_number().over(latest)).where("_n = 1")
+         .crossJoin(F.broadcast(watermark.select("watermark"))))
+    last = F.to_date(F.coalesce("ended_at", "watermark") - F.expr("INTERVAL 30 HOURS"))
+    first = F.to_date(F.col("started_from") + F.expr("INTERVAL 1 DAY"))
+    return (r.where(first <= last).select("run_id", F.explode(F.sequence(first, last)).alias("day")).distinct())
+
+
+def recon_completeness(trips: DataFrame, events: DataFrame, days: DataFrame) -> DataFrame:
+    """Per closed day: every sampled trip of the file (in_sample) against the trips the stream carried (real, not a
+    stadium copy). missing_in_stream: in the file's sample, never streamed. not_in_tlc_file: streamed, not in the file.
+    A trip's day is its pickup date: the file's, or for a trip the file lacks, the stream's TripStarted."""
+    sample = trips.where("in_sample").select("trip_key", F.col("pickup_date").alias("day"))
+    # A stadium copy carries incident_id on its TripRequested only (#21), so drop copies by key, not event by event.
+    copies = events.where("incident_id IS NOT NULL").select("trip_key").distinct()
+    real = events.join(copies, "trip_key", "left_anti")
+    streamed = real.select("trip_key").distinct()
+    started = (real.where("event_type = 'TripStarted'")
+               .select("trip_key", F.to_date("picked_up_at").alias("stream_day")).dropDuplicates(["trip_key"]))
+    in_file = trips.select("trip_key", F.lit(True).alias("in_file"))
+    extra = (streamed.join(in_file, "trip_key", "left").where("in_file IS NULL").join(started, "trip_key", "left")
+             .select(F.col("stream_day").alias("day")))
+    missing = sample.join(streamed, "trip_key", "left_anti")
+    d = days.select("day").distinct()
+    expected = sample.join(d, "day").groupBy("day").agg(F.count("*").alias("expected"))
+    got = sample.join(streamed, "trip_key").join(d, "day").groupBy("day").agg(F.count("*").alias("streamed"))
+    miss = missing.join(d, "day").groupBy("day").agg(F.count("*").alias("missing_in_stream"))
+    ext = extra.join(d, "day").groupBy("day").agg(F.count("*").alias("not_in_tlc_file"))
+    out = d.join(expected, "day", "left").join(got, "day", "left").join(miss, "day", "left").join(ext, "day", "left")
+    counts = ["expected", "streamed", "missing_in_stream", "not_in_tlc_file"]
+    out = out.select("day", *[F.coalesce(c, F.lit(0)).cast("bigint").alias(c) for c in counts])
+    return out.withColumn("breaks", F.col("missing_in_stream") + F.col("not_in_tlc_file"))
+
+
+def recon_payouts(shifts: DataFrame, paid: DataFrame) -> DataFrame:
+    """Per driver x paid week: what the driver earned (driver pay + tips, cents) against the payout file's entries.
+    Only weeks a payout file covers are checked. break: missing, duplicate, wrong_amount, unexpected, or null."""
+    weeks = paid.select("week_start").distinct()
+    earned = (shifts.withColumn("week_start", F.date_trunc("WEEK", "shift_date").cast("date")).join(weeks, "week_start")
+              .groupBy("driver_id", "week_start").agg(F.round(F.sum("earnings") * 100).cast("bigint").alias("earned_cents"))
+              .where("earned_cents > 0"))
+    got = paid.groupBy("driver_id", "week_start").agg(F.count("*").alias("entries"), F.sum("amount_cents").alias("paid_cents"))
+    j = earned.join(got, ["driver_id", "week_start"], "full")
+    kind = (F.when(F.col("entries").isNull(), "missing").when(F.col("earned_cents").isNull(), "unexpected")
+            .when(F.col("entries") > 1, "duplicate").when(F.col("paid_cents") != F.col("earned_cents"), "wrong_amount"))
+    return j.select("week_start", "driver_id", F.coalesce("earned_cents", F.lit(0)).alias("earned_cents"),
+                    F.coalesce("paid_cents", F.lit(0)).alias("paid_cents"), F.coalesce("entries", F.lit(0)).alias("entries"),
+                    kind.alias("break"))
+
+
+def recon_fees(trips: DataFrame, rules: DataFrame) -> DataFrame:
+    """Per pickup day x fee: fees collected against the rate fare_rules had in effect that day. A trip is off rule
+    when it was charged something else (BCF: the rate of the base fare, to the cent; a flat fee: 0 or the rate, or
+    the CBD fee anything before it began). Sales tax is taken as reported (the contract), so it isn't checked."""
+    r = rules.select("fee", F.col("amount").cast("double").alias("rate"), "valid_from", "valid_to")
+    # fare_rules says nothing before its first date: those days aren't checked (off_rule_trips null), never "0 breaks"
+    covered = F.lit(r.agg(F.min("valid_from")).first()[0])
+
+    def rate_on(fee: str) -> tuple[DataFrame, Column]:
+        sub = r.where(F.col("fee") == fee)
+        return sub, (F.col("pickup_date") >= sub.valid_from) & (sub.valid_to.isNull() | (F.col("pickup_date") < sub.valid_to))
+
+    out = None
+    for fee, column in [("bcf", "bcf"), ("cbd_fee", "cbd_fee"), ("congestion_surcharge", "congestion_surcharge"),
+                        ("airport_fee", "airport_fee")]:
+        sub, holds = rate_on(fee)
+        t = trips.select("pickup_date", F.coalesce(F.col(column), F.lit(0)).cast("double").alias("charged"), "base_fare")
+        t = t.join(F.broadcast(sub), holds, "left")
+        if fee == "bcf":
+            expected = F.round(F.col("base_fare").cast("double") * F.col("rate"), 2)
+            off = F.abs(F.col("charged") - expected) > 0.011
+        else:
+            expected = F.when(F.col("charged") > 0, F.col("rate")).otherwise(F.lit(0.0))
+            off = (F.col("charged") > 0) & (F.col("rate").isNull() | (F.abs(F.col("charged") - F.col("rate")) > 0.001))
+        off = F.when(F.col("pickup_date") >= covered, off)
+        part = (t.groupBy("pickup_date").agg(
+                    F.lit(fee).alias("fee"), F.sum((F.col("charged") > 0).cast("int")).alias("trips_charged"),
+                    F.round(F.sum("charged"), 2).alias("collected"), F.round(F.sum(F.coalesce(expected, F.lit(0.0))), 2).alias("expected"),
+                    F.sum(off.cast("int")).alias("off_rule_trips")))
+        out = part if out is None else out.unionByName(part)
+    return out.withColumnRenamed("pickup_date", "day")
+
+
+def agg_recon_daily(completeness: DataFrame, payouts: DataFrame | None, fees: DataFrame) -> DataFrame:
+    """One row per period x reconciliation: what was checked, how many breaks (erd.md's agg_recon_daily). Fees on
+    days fare_rules doesn't cover have null breaks: not checked."""
+    c = completeness.select("day", F.lit("completeness").alias("reconciliation"), F.col("expected").alias("checked"), "breaks")
+    f = (fees.groupBy("day").agg(F.sum("trips_charged").alias("checked"), F.sum("off_rule_trips").alias("breaks"))
+         .withColumn("reconciliation", F.lit("fees")))
+    out = c.unionByName(f.select(c.columns))
+    if payouts is not None:
+        p = (payouts.groupBy(F.col("week_start").alias("day"))
+             .agg(F.count("*").alias("checked"), F.sum(F.col("break").isNotNull().cast("int")).alias("breaks"))
+             .withColumn("reconciliation", F.lit("payouts")))
+        out = out.unionByName(p.select(c.columns))
+    return out
+
+
 # --- keys and the metric view -----------------------------------------------------------------------------------
 
-MARTS = ["agg_zone_hourly", "agg_daily_economics", "agg_driver_weekly", "agg_cbd_impact"]
+MARTS = ["agg_zone_hourly", "agg_daily_economics", "agg_driver_weekly", "agg_cbd_impact", "recon_completeness", "recon_payouts",
+         "recon_fees", "agg_recon_daily"]
 OPS_GROUP = "ridepulse-ops"   # the workspace group that may see per-driver rows (NFR-9, #38)
 PRIMARY = {"dim_zone": "zone_id", "dim_provider": "provider_code", "dim_date": "date", "dim_hour": "hour",
            "dim_weather_day": "date", "dim_driver": "driver_sk", "fct_trips": "trip_key", "fct_driver_shifts": "shift_id"}
@@ -389,6 +493,23 @@ class Gold:
                    "The congestion toll per period x CBD relation (per day, ratios of sums)")
         self.spark.sql(f"CREATE OR REPLACE FUNCTION {self.t('gold', 'ops_only')}(driver_id STRING) RETURN is_member('{OPS_GROUP}')")
         self.spark.sql(f"ALTER TABLE {weekly} SET ROW FILTER {self.t('gold', 'ops_only')} ON (driver_id)")
+        self.reconcile()
+
+    def reconcile(self) -> None:
+        """FR-14's three reconciliations, rebuilt whole: per closed day, per paid week, per day and fee."""
+        trips, events = self.read("silver", "tlc_trips"), self.read("silver", "trip_events")
+        days = closed_days(self.read("silver", "replay_runs_changes"), self.read("silver", "replay_watermark"))
+        completeness = recon_completeness(trips, events, days)
+        payouts = (recon_payouts(self.read("gold", "fct_driver_shifts"), self.read("silver", "payouts"))
+                   if self.spark.catalog.tableExists(self.t("silver", "payouts")) else None)
+        fees = recon_fees(trips, self.read("bronze", "neon_fare_rules").where("__END_AT IS NULL"))
+        self.whole(completeness, "recon_completeness", "Per closed day: the file sample against the stream (FR-14, SLA-5)")
+        if payouts is not None:
+            self.whole(payouts, "recon_payouts", "Per driver x paid week: earned against the payout file")
+        self.whole(fees, "recon_fees", "Per day x fee: collected against the fare_rules rate in effect")
+        paid = self.read("gold", "recon_payouts") if payouts is not None else None
+        self.whole(agg_recon_daily(self.read("gold", "recon_completeness"), paid, self.read("gold", "recon_fees")),
+                   "agg_recon_daily", "Per period x reconciliation: checked and breaks")
 
 
 def main() -> None:

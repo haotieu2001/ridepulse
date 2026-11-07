@@ -16,6 +16,7 @@ from build import (  # noqa: E402
     agg_driver_weekly,
     agg_zone_hourly,
     calendar_rows,
+    closed_days,
     daypart,
     dim_driver,
     dim_weather_day,
@@ -23,6 +24,9 @@ from build import (  # noqa: E402
     driver_at,
     fct_driver_shifts,
     federal_holidays,
+    recon_completeness,
+    recon_fees,
+    recon_payouts,
 )
 
 
@@ -157,3 +161,56 @@ def test_a_zone_hour_with_no_fare_has_no_take_rate_rather_than_an_error(spark):
     r = agg_zone_hourly(trips).first()
     assert r.trips == 1 and r.take_rate is None
     assert agg_cbd_impact(trips, [79]).first().avg_mph is None
+
+
+RUNS = "run_id BIGINT, started_from TIMESTAMP_NTZ, ended_at TIMESTAMP_NTZ, op STRING, committed_at TIMESTAMP, source_lsn BIGINT"
+
+
+def test_closed_days_follow_v002(spark):
+    runs = spark.createDataFrame([
+        (1, t("2024-12-31 00:00:00"), None, "c", t("2026-10-30 17:50:00"), 1),
+        (1, t("2024-12-31 00:00:00"), t("2025-01-01 14:30:00"), "u", t("2026-11-05 12:39:00"), 2),   # ended before D+30h
+        (2, t("2025-01-08 00:00:00"), None, "c", t("2026-11-05 12:39:00"), 3)], RUNS)
+    watermark = spark.createDataFrame([(t("2025-01-11 05:30:00"),)], "watermark TIMESTAMP_NTZ")
+    assert [r.day for r in closed_days(runs, watermark).orderBy("day").collect()] == [date(2025, 1, 9)]   # 8 is warm-up
+
+
+def test_completeness_finds_a_missing_and_an_extra_trip(spark):
+    trips = spark.createDataFrame([("k1", True, date(2025, 1, 9)), ("k2", True, date(2025, 1, 9)), ("k3", False, date(2025, 1, 9)),
+                                   ("k4", True, date(2025, 1, 10))], "trip_key STRING, in_sample BOOLEAN, pickup_date DATE")
+    events = spark.createDataFrame([
+        ("k1", "TripRequested", None, None), ("k1", "TripStarted", t("2025-01-09 08:00:00"), None),
+        ("x9", "TripRequested", None, None), ("x9", "TripStarted", t("2025-01-09 09:00:00"), None),   # not in the file
+        ("c1", "TripRequested", None, 11),                                                           # a stadium copy...
+        ("c1", "TripStarted", t("2025-01-09 10:00:00"), None)],                                      # ...whose later events carry none
+        "trip_key STRING, event_type STRING, picked_up_at TIMESTAMP_NTZ, incident_id BIGINT")
+    days = spark.createDataFrame([(2, date(2025, 1, 9))], "run_id BIGINT, day DATE")
+    r = recon_completeness(trips, events, days).first()
+    assert (r.day, r.expected, r.streamed, r.missing_in_stream, r.not_in_tlc_file, r.breaks) == (date(2025, 1, 9), 2, 1, 1, 1, 2)
+
+
+def test_payouts_name_each_kind_of_break(spark):
+    shifts = spark.createDataFrame([("D1", date(2025, 1, 6), 10.0), ("D2", date(2025, 1, 7), 20.0), ("D3", date(2025, 1, 8), 30.0),
+                                    ("D4", date(2025, 1, 8), 40.0), ("D1", date(2025, 1, 20), 99.0)],   # an unpaid week: not checked
+                                   "driver_id STRING, shift_date DATE, earnings DOUBLE")
+    paid = spark.createDataFrame([("D1", date(2025, 1, 6), 1000), ("D2", date(2025, 1, 6), 2000), ("D2", date(2025, 1, 6), 2000),
+                                  ("D3", date(2025, 1, 6), 3500), ("D9", date(2025, 1, 6), 100)],
+                                 "driver_id STRING, week_start DATE, amount_cents BIGINT")
+    got = {r.driver_id: r["break"] for r in recon_payouts(shifts, paid).collect()}
+    assert got == {"D1": None, "D2": "duplicate", "D3": "wrong_amount", "D4": "missing", "D9": "unexpected"}
+
+
+def test_fees_against_the_rule_in_effect_and_days_it_doesnt_cover(spark):
+    rules = spark.createDataFrame([("bcf", 0.0275, date(2025, 1, 1), None), ("cbd_fee", 1.5, date(2025, 1, 5), None),
+                                   ("congestion_surcharge", 2.75, date(2025, 1, 1), None), ("airport_fee", 2.5, date(2025, 1, 1), None)],
+                                  "fee STRING, amount DOUBLE, valid_from DATE, valid_to DATE")
+    trips = spark.createDataFrame([
+        (date(2025, 1, 6), 20.0, 0.55, 1.5, 2.75, 0.0),     # all on rule
+        (date(2025, 1, 6), 20.0, 0.60, 3.0, 2.75, 0.0),     # BCF off by 5 cents, CBD fee doubled
+        (date(2025, 1, 3), 20.0, 0.55, 1.5, 0.0, 0.0),      # a CBD fee before the toll began
+        (date(2024, 12, 9), 20.0, 0.55, None, 2.75, 2.5)],  # before fare_rules says anything: not checked
+        "pickup_date DATE, base_fare DOUBLE, bcf DOUBLE, cbd_fee DOUBLE, congestion_surcharge DOUBLE, airport_fee DOUBLE")
+    got = {(r.day, r.fee): r.off_rule_trips for r in recon_fees(trips, rules).collect()}
+    assert got[(date(2025, 1, 6), "bcf")] == 1 and got[(date(2025, 1, 6), "cbd_fee")] == 1
+    assert got[(date(2025, 1, 6), "congestion_surcharge")] == 0 and got[(date(2025, 1, 3), "cbd_fee")] == 1
+    assert got[(date(2024, 12, 9), "congestion_surcharge")] is None and got[(date(2024, 12, 9), "bcf")] is None
