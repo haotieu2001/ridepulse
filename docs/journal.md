@@ -909,3 +909,18 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   throttled after the day's continuous runs (fair-usage policy); unproven. To re-measure on a fresh day.
 - Found on the way: the SQL warehouse answered repeated query text from its result cache while a pipeline was still
   writing; `scripts/measure/alerts.py` now adds a fresh comment to every query.
+- Found 2026-11-07: a continuous job trigger runs its pipeline as one update that never ends, so it too lost the
+  driver ~20 min in (two updates, 0 alerts). Run directly, the same update completed in 10.7 min with 10 simulated
+  hours of backlog. So the streaming job is on a one-minute schedule, one run at a time and no queue: triggered
+  updates back to back. The limit is per update, not per mode: on Free Edition no update may run ~20 min.
+- Measured back to back (2026-11-07 13:28-14:28 UTC, 2025-01-10 15:40 -> 01:40): every update completed in ~10.5 min.
+  130 alerts: R1 p50 15.2, p95 19.1, max 19.2 min; R3 p95 18.1; R2 p95 27.2 (its join hold-back, 8 wall min).
+  All rules p95 25.2. Better than every 10 minutes (R1 p95 22.1) but not 12: a run is ~10.5 min whatever the trigger.
+  SLA-1 reset for Free Edition to p95 <= 20 min (R1, R3) and <= 30 min (R2); 12 min stays the production target.
+- R4 bug: a borough that sent no pings at all had no window, so a total outage, the worst kind, raised nothing
+  (Brooklyn, 19:00-19:20, all its windows missing). Every tick now adds a heartbeat per borough for each 3-minute
+  window it covers (from its replay_state change through CDC), so a silent window counts 0 pinged. Recomputed R4
+  alone (`full_refresh_selection`): the five windows alert with 195-230 busy and 0 pinged, the first 6 min in; both
+  runs rescored: recall 8/8 (6/6 on 2025-01-08, 2/2 on 2025-01-10), R4 still alarms on 0.1% of clean windows.
+- Moving the views out of the pipeline left the six materialized views behind; they were dropped by hand and the
+  job rebuilt them as Delta tables (1.2 min a run).
