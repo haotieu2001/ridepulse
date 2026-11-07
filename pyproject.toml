@@ -34,6 +34,6 @@ extend-exclude = ["databricks/src/feasibility", "scripts/feasibility", "data", "
 select = ["E", "F", "W", "I", "B", "UP"]
 
 [tool.pytest.ini_options]
-testpaths = ["contracts/tests", "services", "db", "scripts/measure", "databricks/src/files/tests"]
+testpaths = ["contracts/tests", "services", "db", "scripts/measure", "databricks/src/files/tests", "databricks/src/gold/tests"]
 pythonpath = ["."]
 addopts = "-q"
