@@ -967,3 +967,15 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   pull added nothing. History on a real change is configured but not yet exercised: no reference row has changed
   since, and editing Neon's reference data only to see it wasn't worth it. What a cursor misses (deletes, two
   changes between pulls, seen in S9) is #28's ADR-0005.
+
+### #28 ADR-0005: log-based vs query-based CDC, misses measured
+- `scripts/drills/planted_profiles.py`: planted edits to `driver_profiles` (on both paths, V001), picked by a hash of
+  round and driver, with a ledger of every change; `compare` checks each against `silver.driver_profile_changes` (B)
+  and `bronze.neon_driver_profiles` (C). Debezium started alone (no replayer), then per round: plant, the streaming
+  pipeline, `make refpull`.
+- Round 1: 35 profiles edited (12 twice) and one hard delete; round 2: 21 edited (7 twice). B saw 76 of 76 changes;
+  C saw 56 of 76: every final version, none of the 19 intermediates, not the delete (the profile is still current).
+  The rounds also exercised the SCD2 history of #27 on real changes.
+- ADR-0005 (accepted): history or deletes that matter go by B (trip events, driver state, `dim_driver` in #29); C is
+  for reference data that is closed, not deleted (`zones`, `fare_rules`); `driver_profiles` stays on C as the
+  standing comparison, unread by gold. A C table that can lose rows needs a soft delete or a periodic full snapshot.
