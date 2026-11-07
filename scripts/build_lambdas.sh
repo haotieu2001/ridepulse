@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Build the two Lambda zips into build/: the replayer (arm64, Python 3.13 on Amazon Linux 2023, so manylinux_2_28
-# wheels) with only what a tick imports, and the window (boto3 only, which the runtime provides).
+# Build the Lambda zips into build/: the replayer (arm64, Python 3.13 on Amazon Linux 2023, so manylinux_2_28
+# wheels) with only what a tick imports; the window and the forwarder (boto3 only, which the runtime provides).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 out=build
-rm -rf "$out/replayer" "$out/window" "$out/replayer.zip" "$out/window.zip"
-mkdir -p "$out/replayer" "$out/window"
+rm -rf "$out/replayer" "$out/window" "$out/forwarder" "$out/replayer.zip" "$out/window.zip" "$out/forwarder.zip"
+mkdir -p "$out/replayer" "$out/window" "$out/forwarder"
 
 # Pinned like pyproject.toml; uv.lock is the source of these versions.
 uv pip install --quiet --target "$out/replayer" --python-platform aarch64-manylinux_2_28 --python-version 3.13 \
@@ -23,14 +23,18 @@ for f in services/__init__.py services/prep/__init__.py services/prep/store.py s
          services/replayer/pings.py services/notifier/__init__.py services/notifier/notifier.py; do
   copy replayer "$f"
 done
-for f in services/__init__.py services/window/__init__.py services/window/window.py; do
+for f in services/__init__.py services/databricks_api.py services/window/__init__.py services/window/window.py; do
   copy window "$f"
+done
+for f in services/__init__.py services/databricks_api.py services/forwarder/__init__.py services/forwarder/forwarder.py \
+         config/file_sources.json; do
+  copy forwarder "$f"
 done
 
 # Fixed timestamps, order and modes. Python's zipfile rather than the zip tool, which not every laptop has.
 # The zip's bytes still differ between machines (zlib versions), so Terraform compares <name>.contenthash instead:
 # a hash of each file's path and bytes, the same wherever it's built (CI's plan must match a laptop's apply).
-for name in replayer window; do
+for name in replayer window forwarder; do
   python3 -I - "$out/$name" "$out/$name.zip" "$out/$name.contenthash" <<'PY'
 import base64, hashlib, os, pathlib, sys, zipfile
 src, dest, hashfile = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]

@@ -26,6 +26,18 @@ targets:
     variables:
       catalog: ridepulse_dev
     resources:
+      # The forwarder Lambda writes landed files here as ridepulse-forwarder, which may use the raw schema and write
+      # this one volume, nothing else (#26, ADR-0002). USE CATALOG is granted in SQL: catalogs are made with SQL here.
+      schemas:
+        raw:
+          grants:
+            - principal: e3aee6fd-086b-40d1-9916-c46e9611d6d9   # ridepulse-forwarder
+              privileges: [USE_SCHEMA]
+      volumes:
+        landing:
+          grants:
+            - principal: e3aee6fd-086b-40d1-9916-c46e9611d6d9   # ridepulse-forwarder
+              privileges: [READ_VOLUME, WRITE_VOLUME]
       pipelines:
         # S9 / plan path C: daily query-based pull from the Neon dispatch database,
         # incremental on the updated_at cursor. Dev only: the neon_dev connection

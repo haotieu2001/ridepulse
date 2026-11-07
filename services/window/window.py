@@ -18,14 +18,11 @@ DATABRICKS_SSM; without that variable the window leaves Databricks alone.
 """
 from __future__ import annotations
 
-import base64
-import json
 import os
-import urllib.error
-import urllib.parse
-import urllib.request
 
 import boto3
+
+from services.databricks_api import Databricks
 
 UPDATABLE = ("Name", "GroupName", "ScheduleExpression", "ScheduleExpressionTimezone", "Description", "StartDate",
              "EndDate", "FlexibleTimeWindow", "Target", "KmsKeyArn", "ActionAfterCompletion")
@@ -49,38 +46,20 @@ def set_schedule(scheduler, name: str, state: str) -> None:
 
 
 class Jobs:
-    """The two Databricks jobs a window runs, through the REST API as a service principal: the streaming pipeline back
-    to back (a continuous trigger) and the views every 10 minutes (a schedule). Both are paused outside a window."""
+    """The two Databricks jobs a window runs, as the ridepulse-window service principal: the streaming pipeline back
+    to back (every minute, no queue) and the views every 10 minutes. Both are paused outside a window."""
 
-    def __init__(self, host: str, client_id: str, client_secret: str, streaming_job_id: str, views_job_id: str):
-        self.host, self.streaming, self.views = host.rstrip("/"), int(streaming_job_id), int(views_job_id)
-        self._auth = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
-        self._token: str | None = None
+    def __init__(self, api: Databricks, streaming_job_id: str, views_job_id: str):
+        self.api, self.streaming, self.views = api, int(streaming_job_id), int(views_job_id)
 
     @classmethod
     def from_ssm(cls, ssm, prefix: str) -> Jobs:
         def get(name: str) -> str:
             return ssm.get_parameter(Name=f"{prefix}/{name}", WithDecryption=True)["Parameter"]["Value"]
-        return cls(get("host"), get("window_client_id"), get("window_client_secret"), get("streaming_job_id"),
-                   get("views_job_id"))
+        return cls(Databricks.from_ssm(ssm, prefix, "window"), get("streaming_job_id"), get("views_job_id"))
 
-    def _call(self, method: str, path: str, body: dict | None = None, *, form: dict | None = None, auth: str | None = None) -> dict:
-        data = urllib.parse.urlencode(form).encode() if form else (json.dumps(body).encode() if body is not None else None)
-        req = urllib.request.Request(f"{self.host}{path}", data=data, method=method)
-        req.add_header("Authorization", auth or f"Bearer {self.token()}")
-        req.add_header("Content-Type", "application/x-www-form-urlencoded" if form else "application/json")
-        try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                raw = resp.read()
-        except urllib.error.HTTPError as e:   # say what Databricks said, not just the status
-            raise RuntimeError(f"Databricks {method} {path}: {e.code} {e.read().decode(errors='replace')[:500]}") from e
-        return json.loads(raw) if raw else {}
-
-    def token(self) -> str:
-        if self._token is None:
-            self._token = self._call("POST", "/oidc/v1/token", form={"grant_type": "client_credentials", "scope": "all-apis"},
-                                     auth=f"Basic {self._auth}")["access_token"]
-        return self._token
+    def _call(self, method: str, path: str, body: dict | None = None) -> dict:
+        return self.api.call(method, path, body)
 
     def _trigger(self, job_id: int) -> tuple[str, dict]:
         """The job's trigger setting: `continuous` or `schedule`, whichever it has."""
@@ -96,7 +75,7 @@ class Jobs:
             self._call("POST", "/api/2.1/jobs/update", {"job_id": job_id, "new_settings": {key: {**trigger, "pause_status": status}}})
 
     def open(self) -> None:
-        self._set_paused(self.streaming, False)   # a continuous job starts its first run at once
+        self._set_paused(self.streaming, False)   # its first run starts at the next minute
         self._set_paused(self.views, False)
 
     def close(self) -> None:

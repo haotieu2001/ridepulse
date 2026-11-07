@@ -5,6 +5,7 @@ import urllib.request
 
 import pytest
 
+from services.databricks_api import Databricks
 from services.window.window import Jobs, handler
 
 
@@ -176,7 +177,7 @@ def test_the_client_pauses_only_the_trigger_and_cancels_runs_on_close(monkeypatc
             12: {"name": "views", "schedule": {"quartz_cron_expression": "0 0/10 * * * ?", "timezone_id": "UTC",
                                                "pause_status": "PAUSED"}}}
     sent = fake_databricks(monkeypatch, jobs)
-    client = Jobs("https://dbc.example/", "id", "secret", "11", "12")
+    client = Jobs(Databricks("https://dbc.example/", "id", "secret"), "11", "12")
     client.open()
     assert jobs[11]["continuous"] == {"pause_status": "UNPAUSED"}
     assert jobs[12]["schedule"] == {"quartz_cron_expression": "0 0/10 * * * ?", "timezone_id": "UTC", "pause_status": "UNPAUSED"}

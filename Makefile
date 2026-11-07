@@ -14,7 +14,7 @@ YEAR        ?= 2025
 
 export AWS_PROFILE
 
-.PHONY: help bootstrap-plan bootstrap-apply landing-plan landing-apply confluent-plan confluent-apply debezium-plan debezium-up debezium-down build-lambdas replayer-plan replayer-apply up down window-status replay bronze land-month land-zones land-noaa prep db-status db-migrate db-test db-seed catalog deploy s10-upload s10-run s10
+.PHONY: help bootstrap-plan bootstrap-apply landing-plan landing-apply confluent-plan confluent-apply debezium-plan debezium-up debezium-down build-lambdas replayer-plan replayer-apply up down window-status replay bronze land-month forward land-zones land-noaa prep db-status db-migrate db-test db-seed catalog deploy s10-upload s10-run s10
 
 help:
 	@echo "bootstrap-plan / bootstrap-apply  Terraform: state bucket, GitHub OIDC role, budget"
@@ -28,6 +28,7 @@ help:
 	@echo "bronze                            one streaming run, then the views (a window runs both)"
 	@echo "land-month MONTH=2025-01          land one HVFHV month in S3 (pinned to its ETag)"
 	@echo "land-zones / land-noaa YEAR=2025  land the zone files / one NOAA GHCN-Daily year"
+	@echo "forward [PREFIX=raw/...]          copy files already landed into the volume (new ones go by themselves)"
 	@echo "prep MONTH=2025-01 [OUT_DIR=dir]  prep job: contract, sample, event-time slices"
 	@echo "db-status / db-migrate            dispatch migrations on the dev Neon database"
 	@echo "db-test                           migrations + SQL tests in throwaway Neon databases"
@@ -101,6 +102,10 @@ bronze:
 
 land-month:
 	uv run python -m services.tlc_downloader fhvhv $(MONTH) --bucket $(LANDING_BUCKET)
+
+# New raw/ files reach the volume by themselves (the forwarder, #26); this copies ones landed before, or missed.
+forward:
+	LANDING_BUCKET=$(LANDING_BUCKET) scripts/forward_landed.sh $(PREFIX)
 
 land-zones:
 	uv run python -m services.tlc_downloader zones --bucket $(LANDING_BUCKET)
