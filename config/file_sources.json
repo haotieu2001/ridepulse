@@ -1,0 +1,19 @@
+{
+  "_comment": "File sources (#26): every file the downloader lands under s3://<landing>/raw/<source>/ and where it goes. The forwarder copies a source's files into the volume at the same key; ingestion reads each source's prefix with Auto Loader. Onboarding a file source is one entry here. JSON, not YAML: the forwarder Lambda's runtime has no YAML library.",
+  "volume": {"schema": "raw", "name": "landing"},
+  "sources": {
+    "tlc_fhvhv": {
+      "description": "TLC high-volume for-hire trips, one Parquet file a month",
+      "format": "parquet",
+      "bronze": "bronze.tlc_fhvhv",
+      "silver": "silver.tlc_trips",
+      "contract": "contracts/tlc_trips.yaml"
+    },
+    "noaa_ghcnd": {
+      "description": "NOAA GHCN-Daily, one gzipped CSV a year, every station (Central Park is USW00094728)",
+      "format": "csv",
+      "bronze": "bronze.noaa_ghcnd",
+      "silver": "silver.weather_day"
+    }
+  }
+}

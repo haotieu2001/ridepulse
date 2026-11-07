@@ -18,7 +18,7 @@ the record that explains it, or the phase that writes one.
 | Supply | Synthetic pool (~3,100), demand-shaped shifts, zone-level repositioning | Real driver app state and GPS | ADR-0003 |
 | Time | A simulated clock: replay watermark in `replay_state`, days close at D + 30 h | Wall clock; Spark event-time watermarks alone; the daily job runs on the calendar with a late-data allowance | ADR-0004 |
 | Source database | Neon Free Postgres, 0.25 CU, 48 simulated hours hot | Aurora PostgreSQL Multi-AZ; a read replica for query-based loads; migrations checked against contracts in CI | Phase 7 |
-| CDC | Debezium Server on one ephemeral EC2, offsets on disk, demo windows only | HA Kafka Connect (MSK Connect or Confluent's managed Debezium), offsets in Kafka, alerts on slot lag and WAL size | ADR-0005 (Phase 4) |
+| CDC | Debezium Server on one ephemeral EC2, offsets on disk, demo windows only | HA Kafka Connect (MSK Connect or Confluent's managed Debezium), offsets in Kafka, alerts on slot lag and WAL size; reference data by query-based loads from a read replica | ADR-0005 |
 | Kafka and network | Confluent Basic over the public internet, ACLs | MSK or Confluent Dedicated over PrivateLink; RBAC per service; NCC for serverless egress | Phase 7 |
 | Streaming latency | Triggered runs back to back (~10.5 min each, 3 of them starting up); the full-recompute views in a separate 10-minute job. Measured (#25): surge alert p95 19.1 min from request commit to email. Continuous mode ran, but Free Edition lost the serverless driver ~20 min into every update, continuous or not, so no update may run that long | Continuous pipelines or real-time mode for the rules (p95 <= 12 min was the plan's target, and a paid workspace's to meet); surge recomputed every few seconds | Phase 3 |
 | Serving surge | A Delta table and a dashboard tile | A low-latency store (Lakebase synced tables or a cache) read by the pricing service in milliseconds | Phase 7 |
@@ -128,6 +128,6 @@ low-latency surge store, and system tables for cost. Results go into this docume
 
 - [x] Phase 3: measured alert latency (SLA-1), and what production needs and how to set it up (§1, #25).
 - [ ] Pro sprint (§5): continuous and real-time mode measured against the production targets in §1.
-- [ ] Phase 4: ADR-0005, path B (log-based CDC) vs path C (query-based) misses, measured.
+- [x] Phase 4: ADR-0005, path B (log-based CDC) vs path C (query-based) misses, measured (C saw 56 of 76 planted changes).
 - [ ] Phase 7: one ADR per row in §1 still marked with a phase; measured costs; the Pro sprint
       results; a production C4 container diagram.

@@ -1,0 +1,26 @@
+# File ingestion (#26): landed files (the forwarder put them in raw.landing) into bronze with Auto Loader, then
+# silver per file. A job task, not a pipeline: Free Edition runs one active pipeline per type. No schedule of its own:
+# the daily job (#33) runs it before gold; by hand, `make files`.
+resources:
+  jobs:
+    files_ingest:
+      name: files_ingest
+      max_concurrent_runs: 1
+      tasks:
+        - task_key: ingest
+          environment_key: default
+          spark_python_task:
+            python_file: ../src/files/ingest.py
+            parameters:
+              - --catalog
+              - ${var.catalog}
+              - --config-dir
+              - ${workspace.file_path}/src/files
+              - --silver-dir
+              - ${workspace.file_path}/src/silver
+      environments:
+        - environment_key: default
+          spec:
+            environment_version: "3"
+            dependencies:
+              - pyyaml==6.0.2

@@ -28,3 +28,17 @@ resources:
       name: tlc
       volume_type: MANAGED
       comment: TLC monthly Parquet files, pushed through the Files API.
+    landing:
+      catalog_name: ${var.catalog}
+      schema_name: ${resources.schemas.raw.name}
+      name: landing
+      volume_type: MANAGED
+      comment: >-
+        The landing bucket's raw/ files of every registered source (config/file_sources.json), at the same keys,
+        copied by the forwarder Lambda (#26). Free Edition can't read the bucket itself.
+    checkpoints:
+      catalog_name: ${var.catalog}
+      schema_name: ${resources.schemas.raw.name}
+      name: checkpoints
+      volume_type: MANAGED
+      comment: Auto Loader checkpoints and inferred schemas, one folder per file source (#26).

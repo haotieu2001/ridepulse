@@ -924,3 +924,58 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   runs rescored: recall 8/8 (6/6 on 2025-01-08, 2/2 on 2025-01-10), R4 still alarms on 0.1% of clean windows.
 - Moving the views out of the pipeline left the six materialized views behind; they were dropped by hand and the
   job rebuilt them as Delta tables (1.2 min a run).
+
+## Phase 4: batch, reconciliation, BI
+
+### #26 File ingestion: the forwarder, Auto Loader, silver.tlc_trips and the weather
+- `ref.cbd_zones`: the zones inside the Congestion Relief Zone, found from trips (`ref/build_cbd_zones.sql`): a trip
+  that starts and ends in one zone pays the CBD fee only if that zone is inside. On Jan 2025, 38 zones paid on 94-100%
+  of their intra-zone trips, then a gap to six that straddle 60th St (15-47%). The plan says 37; the MTA list
+  (data.ny.gov yfdc-w5jh) answered 403 from here, so the difference is open (Battery Park, 1 trip, is the weakest).
+- Forwarder: a Lambda on the landing bucket's ObjectCreated events streams each registered source's `raw/` file into
+  the volume `raw.landing` at the same key (Files API PUT, the S3 body passed through, never held), as a new service
+  principal `ridepulse-forwarder`: USE SCHEMA on raw and READ/WRITE on that one volume (grants in the bundle, USE
+  CATALOG in SQL), OAuth secret in SSM until 2027-11-07. `make forward` copies files landed before: Jan 2025 (491 MB)
+  and NOAA 2025 (166 MB) in 21 s, sizes equal to S3. The OAuth client is now `services/databricks_api.py`, shared
+  with the window Lambda.
+- `config/file_sources.json`: the source registry. TLC trips and NOAA are its two entries; the forwarder, the ingest
+  job and the tests read it, so onboarding a file source is one entry. JSON: the Lambda runtime has no YAML.
+- `files_ingest` (a job task: one active pipeline per type): Auto Loader per source into bronze (availableNow,
+  checkpoints in `raw.checkpoints`), with each row's file and `_metadata.row_index`; then silver per new file with
+  REPLACE WHERE source_file. `silver.tlc_trips` per the contract: trip_key from the shared key code, the collision
+  suffix in file order, row_group/row_offset from the Parquet footer, touches_cbd, dq_ flags; a fail check stops the
+  file. `silver.weather_day`: Central Park (USW00094728) in units, failed-QC values left out.
+- Real run: 20,405,666 rows, 20,405,666 distinct keys, 3 suffixed (the contract's 3), in_sample 5.00%, CBD fee paid
+  30.87% (the contract's baseline). Every trip the stream replayed from January (125,649) has the same key in
+  silver.tlc_trips, all in_sample. Weather: 365 days, 35 trace days, 37.2 C max, -12.1 C min, 1,006 mm. A second
+  run loaded nothing; bronze and silver counts unchanged. 3.2 min for the first run.
+- Spark tests now run locally and in CI (pyspark 4.0.1, chispa, Java 21): they found trace_precip null for a day
+  with no trace instead of false. On serverless a Python file task has no `__file__`; the job falls back to its
+  `--config-dir`.
+- Found on the way: recomputing R4 for the outage fix (#25) rewrote `ops.r4_app_outage`, and a Kafka sink takes
+  only append-only sources, so the next streaming update failed fatally. The sinks now read the rule tables with
+  `skipChangeCommits`: a deliberate recompute is skipped, not re-sent or fatal.
+- Left for #29: `dim_weather_day` (with `is_rainy`) from `silver.weather_day`.
+
+### #27 Lakeflow Connect reference pull (path C)
+- `reference_pull` replaces S9's `s9_neon_reference` (deleted, with its 5-row test table): a query-based pull of
+  Neon's `zones`, `fare_rules` and `driver_profiles`, each on its indexed `updated_at` cursor (V001), into
+  `bronze.neon_<table>` as SCD type 2, so every version a pull sees is kept with when it held. Dev only (the
+  `neon_dev` connection). No schedule: the daily job (#33) will run it; `make refpull` by hand. An ingestion pipeline,
+  so the one-active-ETL-pipeline limit doesn't hold it back.
+- Real run: 51 s; 265 zones, 6 fare rules, 2,834 driver profiles, equal to Neon, one open version each. A second
+  pull added nothing. History on a real change is configured but not yet exercised: no reference row has changed
+  since, and editing Neon's reference data only to see it wasn't worth it. What a cursor misses (deletes, two
+  changes between pulls, seen in S9) is #28's ADR-0005.
+
+### #28 ADR-0005: log-based vs query-based CDC, misses measured
+- `scripts/drills/planted_profiles.py`: planted edits to `driver_profiles` (on both paths, V001), picked by a hash of
+  round and driver, with a ledger of every change; `compare` checks each against `silver.driver_profile_changes` (B)
+  and `bronze.neon_driver_profiles` (C). Debezium started alone (no replayer), then per round: plant, the streaming
+  pipeline, `make refpull`.
+- Round 1: 35 profiles edited (12 twice) and one hard delete; round 2: 21 edited (7 twice). B saw 76 of 76 changes;
+  C saw 56 of 76: every final version, none of the 19 intermediates, not the delete (the profile is still current).
+  The rounds also exercised the SCD2 history of #27 on real changes.
+- ADR-0005 (accepted): history or deletes that matter go by B (trip events, driver state, `dim_driver` in #29); C is
+  for reference data that is closed, not deleted (`zones`, `fare_rules`); `driver_profiles` stays on C as the
+  standing comparison, unread by gold. A C table that can lose rows needs a soft delete or a periodic full snapshot.

@@ -12,9 +12,20 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 RULES = yaml.safe_load((ROOT / "databricks/src/ref/ops_rules.yml").read_text())
 
 
-@pytest.mark.parametrize("name", ["taxi_zone_lookup.csv", "zone_centroids.csv", "zone_neighbours.csv"])
+@pytest.mark.parametrize("name", ["taxi_zone_lookup.csv", "zone_centroids.csv", "zone_neighbours.csv", "cbd_zones.csv"])
 def test_the_pipelines_copies_are_ref(name):
     assert (ROOT / "databricks/src/ref" / name).read_bytes() == (ROOT / "ref" / name).read_bytes()
+
+
+def test_the_cbd_zones_are_manhattan_south_of_60th_and_clearly_paid():
+    with open(ROOT / "ref/cbd_zones.csv") as f:
+        cbd = list(csv.DictReader(f))
+    with open(ROOT / "ref/taxi_zone_lookup.csv", encoding="utf-8-sig") as f:
+        lookup = {r["LocationID"]: r for r in csv.DictReader(f)}
+    assert len(cbd) == 38 and len({r["zone_id"] for r in cbd}) == 38   # ref/build_cbd_zones.sql; the plan says 37
+    assert all(lookup[r["zone_id"]]["Borough"] == "Manhattan" and lookup[r["zone_id"]]["Zone"] == r["zone"] for r in cbd)
+    assert all(float(r["paid_share"]) > 0.9 for r in cbd)
+    assert not {"142", "143", "43", "237", "140", "141"} & {r["zone_id"] for r in cbd}   # straddle 60th St: left out
 
 
 def test_the_lookup_holds_every_zone_once():
