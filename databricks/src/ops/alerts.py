@@ -47,7 +47,10 @@ dlt.create_sink("alerts_out", "kafka", {**KAFKA, "topic": "ops.alerts.v1"})
 def kafka_flow(rule: str) -> None:
     @dlt.append_flow(name=f"alerts_to_kafka_{rule.lower()}", target="alerts_out")
     def flow():
-        rows = alert_rows(dlt.read_stream(table("ops", RULE_TABLES[rule][0])), rule)
+        # A sink takes only append-only sources. The rule tables only append, except when one is recomputed on
+        # purpose (a full refresh after a fix, as R4's in #25): that rewrite is skipped, not re-sent or fatal.
+        source = spark.readStream.option("skipChangeCommits", "true").table(table("ops", RULE_TABLES[rule][0]))  # noqa: F821
+        rows = alert_rows(source, rule)
         return rows.select(F.col("alert_id").alias("key"), F.to_json(F.struct(*rows.columns)).alias("value"))
 
 
