@@ -144,7 +144,8 @@ def fct_trips(trips: DataFrame, events: DataFrame, drivers: DataFrame) -> DataFr
     t = driver_at(t, "completed_at", drivers)
     return t.select("trip_key", "pickup_zone_id", "dropoff_zone_id", "provider_code", "pickup_date",
                     F.hour("pickup_hour").alias("pickup_hour"), "driver_sk", "duration_s", "trip_miles", "base_fare",
-                    "driver_pay", "tips", "rider_total", "platform_take", "touches_cbd", "shared_match", "in_sample")
+                    "driver_pay", "tips", "rider_total", "platform_take", "cbd_fee", "congestion_surcharge",
+                    "touches_cbd", "shared_match", "in_sample")
 
 
 def fct_driver_shifts(history: DataFrame, events: DataFrame, drivers: DataFrame) -> DataFrame:
@@ -184,8 +185,68 @@ def fct_driver_shifts(history: DataFrame, events: DataFrame, drivers: DataFrame)
                       (F.coalesce(F.col("on_trip_s"), F.lit(0)) / 60).cast("int").alias("on_trip_min"), "earnings")
 
 
+# --- marts (#30): grain in the name ---------------------------------------------------------------------------------
+
+def money_sums(*extra):
+    return [F.count("*").alias("trips"), F.sum("rider_total").alias("gmv"), F.sum("base_fare").alias("base_fare"),
+            F.sum("driver_pay").alias("driver_pay"), F.sum("tips").alias("tips"), F.sum("platform_take").alias("platform_take"),
+            F.sum("duration_s").alias("duration_s"), F.sum("trip_miles").alias("trip_miles"), *extra]
+
+
+def take_rate(df: DataFrame) -> DataFrame:
+    """The take rate as a ratio of sums, kept next to its sums so anything rolling the mart up can recompute it."""
+    return df.withColumn("take_rate", (1 - F.col("driver_pay") / F.col("base_fare")).cast("decimal(6,4)"))
+
+
+def agg_zone_hourly(trips: DataFrame) -> DataFrame:
+    return take_rate(trips.groupBy("pickup_zone_id", "pickup_date", "pickup_hour").agg(*money_sums()))
+
+
+def agg_daily_economics(trips: DataFrame) -> DataFrame:
+    return take_rate(trips.groupBy("pickup_date").agg(*money_sums(
+        F.sum(F.coalesce("cbd_fee", F.lit(0))).alias("cbd_fees"), F.sum("congestion_surcharge").alias("congestion_surcharges"),
+        F.sum(F.col("touches_cbd").cast("int")).alias("cbd_trips"))))
+
+
+def agg_driver_weekly(shifts: DataFrame) -> DataFrame:
+    week = F.date_trunc("WEEK", "shift_date").cast("date")
+    return (shifts.groupBy("driver_id", week.alias("week_start"))
+            .agg(F.count("*").alias("shifts"), F.sum("trips").alias("trips"), F.sum("online_min").alias("online_min"),
+                 F.sum("on_trip_min").alias("on_trip_min"), F.sum("earnings").alias("earnings"))
+            .withColumn("utilization", (F.col("on_trip_min") / F.col("online_min")).cast("decimal(6,4)")))
+
+
+PERIODS = [("jan_2024", date(2024, 1, 1), date(2024, 1, 31)), ("dec_2024", date(2024, 12, 1), date(2024, 12, 31)),
+           ("jan_2025_before_toll", date(2025, 1, 1), date(2025, 1, 4)), ("jan_2025_toll", date(2025, 1, 5), date(2025, 1, 31))]
+
+
+def agg_cbd_impact(trips: DataFrame, cbd_zone_ids: list[int]) -> DataFrame:
+    """The congestion toll's effect, per period x where a trip met the CBD: everything per day, so periods of
+    different lengths compare, and as ratios of sums."""
+    period = F.lit(None).cast("string")
+    for name, start, end in reversed(PERIODS):
+        period = F.when(F.col("pickup_date").between(F.lit(start), F.lit(end)), F.lit(name)).otherwise(period)
+    pu, do = F.col("pickup_zone_id").isin(cbd_zone_ids), F.col("dropoff_zone_id").isin(cbd_zone_ids)
+    relation = (F.when(pu & do, "within_cbd").when(pu, "from_cbd").when(do, "into_cbd").otherwise("outside_cbd"))
+    days = {name: (end - start).days + 1 for name, start, end in PERIODS}
+    out = (trips.withColumn("period", period).where("period IS NOT NULL").withColumn("cbd_relation", relation)
+           .groupBy("period", "cbd_relation").agg(*money_sums(F.sum(F.coalesce("cbd_fee", F.lit(0))).alias("cbd_fees"))))
+    n_days = F.create_map(*[x for name, d in days.items() for x in (F.lit(name), F.lit(d))])[F.col("period")]
+    return take_rate(out).select(
+        "period", n_days.alias("days"), "cbd_relation", "trips", (F.col("trips") / n_days).cast("decimal(12,1)").alias("trips_per_day"),
+        (F.col("base_fare") / F.col("trips")).cast("decimal(8,2)").alias("avg_base_fare"),
+        (F.col("driver_pay") / F.col("trips")).cast("decimal(8,2)").alias("avg_driver_pay"),
+        (F.col("gmv") / F.col("trips")).cast("decimal(8,2)").alias("avg_rider_total"),
+        (F.col("cbd_fees") / F.col("trips")).cast("decimal(8,2)").alias("avg_cbd_fee"),
+        (F.col("trip_miles") / F.col("trips")).cast("decimal(8,2)").alias("avg_miles"),
+        (F.col("duration_s") / F.col("trips") / 60).cast("decimal(8,1)").alias("avg_minutes"),
+        (F.col("trip_miles") / (F.col("duration_s") / 3600)).cast("decimal(6,1)").alias("avg_mph"), "take_rate")
+
+
 # --- keys and the metric view -----------------------------------------------------------------------------------
 
+MARTS = ["agg_zone_hourly", "agg_daily_economics", "agg_driver_weekly", "agg_cbd_impact"]
+OPS_GROUP = "ridepulse-ops"   # the workspace group that may see per-driver rows (NFR-9, #38)
 PRIMARY = {"dim_zone": "zone_id", "dim_provider": "provider_code", "dim_date": "date", "dim_hour": "hour",
            "dim_weather_day": "date", "dim_driver": "driver_sk", "fct_trips": "trip_key", "fct_driver_shifts": "shift_id"}
 FOREIGN = [("fct_trips", "pickup_zone_id", "dim_zone"), ("fct_trips", "dropoff_zone_id", "dim_zone"),
@@ -274,8 +335,9 @@ class Gold:
 
     def dates(self, df: DataFrame, name: str, column: str, start: date, end: date, comment: str) -> None:
         part = df.where(F.col(column).between(F.lit(start), F.lit(end)))
-        if self.exists(name):
-            part.write.mode("overwrite").option("replaceWhere", f"{column} BETWEEN '{start}' AND '{end}'").saveAsTable(self.t("gold", name))
+        if self.exists(name):   # mergeSchema: an additive column (the contract's minor version) lands without a rebuild
+            (part.write.mode("overwrite").option("mergeSchema", "true")
+             .option("replaceWhere", f"{column} BETWEEN '{start}' AND '{end}'").saveAsTable(self.t("gold", name)))
         else:
             part.write.mode("overwrite").saveAsTable(self.t("gold", name))
         self.spark.sql(f"COMMENT ON TABLE {self.t('gold', name)} IS '{comment}'")
@@ -304,8 +366,28 @@ class Gold:
         self.add_keys()
         s.sql(f"CREATE OR REPLACE VIEW {self.t('gold', 'mv_trip_economics')} WITH METRICS LANGUAGE YAML AS $$\n"
               f"{metric_view_yaml(self.catalog)}$$")
-        for name in [*PRIMARY, "mv_trip_economics"]:
-            print(name, s.read.table(self.t("gold", name)).count() if name != "mv_trip_economics" else "view")
+        self.marts()
+        for name in [*PRIMARY, *MARTS]:
+            print(name, s.read.table(self.t("gold", name)).count())
+
+    def marts(self) -> None:
+        """Rebuilt whole from the facts each run. agg_driver_weekly is row-filtered: a driver's own pay is personal,
+        so only the ridepulse-ops group sees driver rows (NFR-9)."""
+        trips, shifts = self.read("gold", "fct_trips"), self.read("gold", "fct_driver_shifts")
+        cbd = [r[0] for r in self.read("ref", "cbd_zones").select("zone_id").collect()]
+        weekly = self.t("gold", "agg_driver_weekly")
+        if self.spark.catalog.tableExists(weekly):   # an overwrite can't replace a filtered table
+            try:
+                self.spark.sql(f"ALTER TABLE {weekly} DROP ROW FILTER")
+            except Exception as e:  # noqa: BLE001   none set yet
+                print(f"{weekly}: no row filter to drop ({type(e).__name__})")
+        self.whole(agg_zone_hourly(trips), "agg_zone_hourly", "Trips and money per pickup zone x date x hour")
+        self.whole(agg_daily_economics(trips), "agg_daily_economics", "Trips, money and fees per pickup date")
+        self.whole(agg_driver_weekly(shifts), "agg_driver_weekly", "Shifts, minutes and earnings per driver x week (row-filtered)")
+        self.whole(agg_cbd_impact(trips, cbd), "agg_cbd_impact",
+                   "The congestion toll per period x CBD relation (per day, ratios of sums)")
+        self.spark.sql(f"CREATE OR REPLACE FUNCTION {self.t('gold', 'ops_only')}(driver_id STRING) RETURN is_member('{OPS_GROUP}')")
+        self.spark.sql(f"ALTER TABLE {weekly} SET ROW FILTER {self.t('gold', 'ops_only')} ON (driver_id)")
 
 
 def main() -> None:

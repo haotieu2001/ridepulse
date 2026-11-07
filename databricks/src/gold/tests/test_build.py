@@ -11,6 +11,8 @@ sys.path.insert(0, str(ROOT / "databricks/src/gold"))
 pyspark = pytest.importorskip("pyspark")
 
 from build import (  # noqa: E402
+    agg_cbd_impact,
+    agg_driver_weekly,
     calendar_rows,
     daypart,
     dim_driver,
@@ -115,3 +117,32 @@ def test_zones_and_weather(spark):
     w = spark.createDataFrame([(date(2025, 1, 1), Decimal("0.0"), None, Decimal("10.6")), (date(2025, 1, 2), Decimal("1.0"), None, None)],
                               "date DATE, precip_mm DECIMAL(6,1), snow_mm DECIMAL(6,1), tmax_c DECIMAL(5,1)")
     assert [r.is_rainy for r in dim_weather_day(w).orderBy("date").collect()] == [False, True]
+
+
+TRIPS = ("pickup_zone_id INT, dropoff_zone_id INT, pickup_date DATE, rider_total DOUBLE, base_fare DOUBLE, driver_pay DOUBLE, "
+         "tips DOUBLE, platform_take DOUBLE, duration_s INT, trip_miles DOUBLE, cbd_fee DOUBLE")
+
+
+def test_cbd_impact_is_per_day_and_per_relation(spark):
+    rows = [(161, 230, date(2025, 1, 6), 30.0, 20.0, 15.0, 0.0, 5.0, 1200, 2.0, 1.5),   # both ends in the CBD
+            (161, 74, date(2025, 1, 6), 40.0, 30.0, 24.0, 0.0, 6.0, 1800, 6.0, 1.5),     # leaves it
+            (74, 161, date(2025, 1, 7), 40.0, 30.0, 21.0, 0.0, 9.0, 1800, 6.0, 1.5),     # enters it
+            (74, 75, date(2025, 1, 6), 20.0, 10.0, 8.0, 0.0, 2.0, 600, 2.0, None),       # never touches it
+            (161, 230, date(2024, 12, 9), 25.0, 18.0, 14.0, 0.0, 4.0, 1500, 2.0, None)]  # before the toll
+    out = {(r.period, r.cbd_relation): r for r in agg_cbd_impact(spark.createDataFrame(rows, TRIPS), [161, 230]).collect()}
+    within = out[("jan_2025_toll", "within_cbd")]
+    assert (within.days, within.trips, float(within.trips_per_day), float(within.avg_cbd_fee)) == (27, 1, 0.0, 1.5)
+    assert {k[1] for k in out if k[0] == "jan_2025_toll"} == {"within_cbd", "from_cbd", "into_cbd", "outside_cbd"}
+    assert out[("dec_2024", "within_cbd")].days == 31 and float(out[("dec_2024", "within_cbd")].avg_cbd_fee) == 0.0
+    assert float(out[("jan_2025_toll", "into_cbd")].take_rate) == 0.3   # 1 - 21 / 30
+    assert float(out[("jan_2025_toll", "outside_cbd")].avg_mph) == 12.0  # 2 miles in 10 minutes
+
+
+def test_a_drivers_week_sums_its_shifts(spark):
+    shifts = spark.createDataFrame([("D1", date(2025, 1, 6), 3, 120, 60, 40.0), ("D1", date(2025, 1, 8), 2, 60, 15, 20.0),
+                                    ("D1", date(2025, 1, 13), 1, 30, 30, 10.0)],
+                                   "driver_id STRING, shift_date DATE, trips INT, online_min INT, on_trip_min INT, earnings DOUBLE")
+    weeks = {r.week_start: r for r in agg_driver_weekly(shifts).collect()}
+    w = weeks[date(2025, 1, 6)]
+    assert (w.shifts, w.trips, w.online_min, w.on_trip_min, float(w.earnings), float(w.utilization)) == (2, 5, 180, 75, 60.0, 0.4167)
+    assert weeks[date(2025, 1, 13)].shifts == 1
