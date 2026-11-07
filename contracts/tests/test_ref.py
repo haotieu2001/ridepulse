@@ -35,6 +35,7 @@ def test_neighbours_are_symmetric_and_known_zones():
 def test_the_rules_fixed_by_the_requirements():
     r1 = RULES["R1_surge"]
     assert (r1["window_minutes"], r1["min_requests"], r1["surge_ratio"], r1["alert_ratio"]) == (15, 10, 1.5, 3.0)   # FR-10
+    assert r1["alert_min_requests"] >= r1["min_requests"]   # #25: only alerts need more evidence than a surge band
     assert RULES["R2_long_waits"]["p90_wait_minutes"] == 15
     assert RULES["R4_app_outage"]["silence_minutes"] == 3
     assert (RULES["late_events"]["grace_minutes"], RULES["late_events"]["alert_share"]) == (2, 0.005)   # FR-12

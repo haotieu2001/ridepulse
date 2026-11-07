@@ -8,7 +8,7 @@ record is kept in silver.quarantine with its reason and source offset. Runs in t
     silver.driver_profile_changes, silver.replay_state_changes, silver.replay_runs_changes   the same per table
     silver.locations          valid driver pings, once per (driver, device time)
     silver.quarantine         what failed: source, offset, reason, raw value
-    silver.dq_rates           flag/warn rates per provider and day, against the contract's baselines
+    silver.dq_rates           flag/warn rates per provider and day: recomputed by the views job (views/refresh.py, #25)
 
 Duplicates come from Debezium redelivering after a restart (at-least-once, S8 saw 2,009) and from a retried or
 repeated tick re-producing pings with the same ids. Streams drop them within a watermark, which bounds the state;
@@ -27,7 +27,6 @@ SILVER_DIR = conf.get("ridepulse.silver_dir")
 EXPECT = yaml.safe_load(open(f"{SILVER_DIR}/expectations.yml"))
 CONTRACT = yaml.safe_load(open(f"{SILVER_DIR}/tlc_trips.yaml"))
 SEVERITY = {e["name"]: e["severity"] for e in CONTRACT["expectations"]}
-MONTH_ROWS = 20_405_666   # the January 2025 file the contract's rows_failing baselines were measured on
 
 
 def bronze(name: str) -> DataFrame:
@@ -227,36 +226,3 @@ def locations():
 
 
 quarantine_flow("locations", "driver.locations.v1", "locations_checked", F.col("driver_id"))
-
-
-# --- DQ rates per provider ------------------------------------------------------------------------------------
-
-def baseline_rate(name: str, provider: str) -> float | None:
-    b = next(e["baseline"] for e in CONTRACT["expectations"] if e["name"] == name)
-    rate = b.get("rate_failing")
-    if isinstance(rate, dict):
-        return rate.get(provider)
-    if rate is not None:
-        return float(rate)
-    return b["rows_failing"] / MONTH_ROWS if "rows_failing" in b else None
-
-
-@dlt.table(name=silver("dq_rates"), comment="Flag and warn rates per provider and simulated day, against the contract's baselines")
-def dq_rates():
-    events = spark.read.table(silver("trip_events"))  # noqa: F821
-    provider = events.where("event_type = 'TripRequested'").select("trip_key", "provider_code").dropDuplicates(["trip_key"])
-    names = [name for _, name, _ in CHECKED if SEVERITY[name] != "fail"]
-    stacked = F.expr("stack({n}, {pairs}) AS (expectation, failed)".format(
-        n=len(names), pairs=", ".join(f"'{n}', dq_{n}" for n in names)))
-    long = (events.drop("provider_code").join(provider, "trip_key", "left")
-            .select("provider_code", F.to_date("occurred_at").alias("event_date"), stacked)
-            .where("failed IS NOT NULL"))
-    rates = (long.groupBy("provider_code", "event_date", "expectation")
-             .agg(F.sum(F.col("failed").cast("int")).alias("failing"), F.count("*").alias("evaluated"))
-             .withColumn("rate", F.col("failing") / F.col("evaluated")))
-    providers = ["HV0002", "HV0003", "HV0004", "HV0005"]
-    base = spark.createDataFrame(  # noqa: F821
-        [(p, n, SEVERITY[n], baseline_rate(n, p)) for p in providers for n in names],
-        "provider_code STRING, expectation STRING, severity STRING, baseline_rate DOUBLE")
-    return (rates.join(base, ["provider_code", "expectation"], "left")
-            .withColumn("rate_vs_baseline", F.when(F.col("baseline_rate") > 0, F.col("rate") / F.col("baseline_rate"))))

@@ -67,7 +67,8 @@ def r1_surge():
             .select("window_start", "window_end", "area_id", "requests", F.coalesce("idle", F.lit(0)).alias("idle"),
                     ratio.alias("ratio"), evaluated.alias("evaluated"),
                     (evaluated & (ratio > r["surge_ratio"])).alias("surge"),
-                    (evaluated & (ratio > r["alert_ratio"])).alias("alert"), "supply_lsn"))
+                    (evaluated & (F.col("requests") >= r["alert_min_requests"]) & (ratio > r["alert_ratio"])).alias("alert"),
+                    "supply_lsn"))
 
 
 # --- R2 long waits -------------------------------------------------------------------------------------------
@@ -139,9 +140,22 @@ def r3_airport_queue():
 @dlt.view
 def r4_pinged():
     r = RULES["R4_app_outage"]
+    minutes = r["silence_minutes"]
     zones = spark.read.table(table("ref", "zones")).select("zone_id", "borough")  # noqa: F821
-    pings = dlt.read_stream(table("silver", "locations")).join(zones, "zone_id")
-    return (windowed(pings, "device_ts")
+    pings = (dlt.read_stream(table("silver", "locations")).join(zones, "zone_id")
+             .select("borough", "driver_id", "device_ts"))
+    # A heartbeat per borough for every window a tick covered, with no driver: a borough with no pings at all still
+    # gets its window, with 0 pinged. Without it a total outage, the worst case, had no window and raised nothing
+    # (Brooklyn, 2026-11-07 run, #25). The tick's replay_state change arrives through CDC with its watermark and length.
+    boroughs = zones.select("borough").distinct()
+    ticks = dlt.read_stream(table("silver", "replay_state_changes")).where("op IN ('c', 'u')")
+    slots = F.expr(f"sequence(timestamp_seconds(floor(unix_timestamp(CAST(watermark AS TIMESTAMP) - make_dt_interval(0, 0, "
+                   f"CAST(speed AS INT), 0)) / {minutes * 60}) * {minutes * 60}), CAST(watermark AS TIMESTAMP), "
+                   f"INTERVAL {minutes} MINUTES)")
+    heartbeats = (ticks.select(F.explode(slots).alias("slot")).crossJoin(boroughs)
+                  .select("borough", F.lit(None).cast("string").alias("driver_id"),
+                          F.col("slot").cast("timestamp_ntz").alias("device_ts")))
+    return (windowed(pings.unionByName(heartbeats), "device_ts")
             .groupBy(F.window("_wm", f"{r['silence_minutes']} minutes"), "borough")
             .agg(F.approx_count_distinct("driver_id", 0.01).alias("pinged"))
             .select(F.col("window.start").cast("timestamp_ntz").alias("window_start"),

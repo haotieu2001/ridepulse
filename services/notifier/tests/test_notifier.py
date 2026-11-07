@@ -27,6 +27,10 @@ class FakeDynamo:
     def delete_item(self, TableName, Key):
         self.items.pop(Key["alert_id"]["S"], None)
 
+    def update_item(self, TableName, Key, UpdateExpression, ExpressionAttributeValues):
+        assert UpdateExpression == "SET sent_at = :t"
+        self.items[Key["alert_id"]["S"]]["sent_at"] = ExpressionAttributeValues[":t"]
+
 
 class FakeSns:
     def __init__(self, fail_on=None):
@@ -39,11 +43,14 @@ class FakeSns:
 
 
 class Msg:
-    def __init__(self, value):
-        self._value = json.dumps(value).encode()
+    def __init__(self, value, ts=1_767_225_600_000):
+        self._value, self._ts = json.dumps(value).encode(), ts
 
     def value(self):
         return self._value
+
+    def timestamp(self):
+        return (1, self._ts)   # TIMESTAMP_CREATE_TIME
 
     def error(self):
         return None
@@ -97,6 +104,21 @@ def test_a_failed_publish_releases_the_claim_and_commits_nothing():
     assert set(dynamo.items) == {"id-1"}          # id-2 can be sent by the next run
     result, _ = run([alert(1), alert(2)], dynamo, FakeSns())   # the retry: id-1 already sent, id-2 now
     assert (result["sent"], result["skipped"]) == (1, 1)
+
+
+def test_a_sent_alert_records_its_window_and_both_times_for_the_latency():
+    dynamo = FakeDynamo()
+    run([alert(1)], dynamo, FakeSns())
+    item = dynamo.items["id-1"]
+    assert item["kafka_ts_ms"] == {"N": "1767225600000"} and item["window_start"] == {"S": "2025-01-01T00:00:00"}
+    assert item["area"] == {"S": "161"} and int(item["sent_at"]["N"]) >= int(item["claimed_at"]["N"]) * 1000
+
+
+def test_only_a_sent_alert_has_sent_at():
+    dynamo = FakeDynamo()
+    with pytest.raises(RuntimeError):
+        run([alert(1), alert(2)], dynamo, FakeSns(fail_on="id-2"))
+    assert "sent_at" in dynamo.items["id-1"] and "id-2" not in dynamo.items
 
 
 def test_nothing_to_read_commits_nothing():
