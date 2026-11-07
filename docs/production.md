@@ -30,8 +30,8 @@ the record that explains it, or the phase that writes one.
 | Infrastructure as code | Workspace-level Terraform + Asset Bundles; catalogs created with SQL (Default Storage only) | Account-level Terraform as well: workspaces, metastore, network, storage credentials | Phase 7 |
 | Alerting | SNS email, sent once (DynamoDB conditional put) | PagerDuty or Opsgenie with escalation; SLA alerts on the platform itself | Phase 7 |
 | Regulatory reporting | The TLC file is an input | The platform produces the monthly TLC submission, with a contract, completeness checks and an audit trail | Phase 7 |
-| Privacy | No identities exist; synthetic driver ids are still masked and row-filtered | Precise location is sensitive: retention limits, aggregation, tokenized ids, access audits | Phase 7 |
-| Quality, security, cost | Expectations, grants, masks; AWS budget alerts at $5 | Plus data quality monitoring, audit logs, ABAC, budget policies, `system.billing` dashboards | Phase 7 |
+| Privacy | No identities exist; synthetic driver ids are to be masked and row-filtered all the same (#38, not built yet) | Precise location is sensitive: retention limits, aggregation, tokenized ids, access audits | Phase 7 |
+| Quality, security, cost | Contract checks with quarantine and DQ rates per provider (built); grants, masks and row filters (#38, not built yet); AWS budget alerts at $5 | Plus data quality monitoring, audit logs, ABAC, budget policies, `system.billing` dashboards | Phase 7 |
 | GenAI | Not in RidePulse: the support copilot is RideDesk (project 2), reading RidePulse's silver and gold | Same split; AI Gateway in front of models | RideDesk plan |
 
 ### Alert latency in production (SLA-1)
@@ -98,12 +98,12 @@ status column is checked in Phase 7.
 
 | Rule | Status now |
 |---|---|
-| Contracts don't depend on the source: the same Avro and JSON contracts whether the replayer or a real app produces an event | `contracts/` holds the trip contract and key; event contracts come in Phase 2 |
-| No hard-coded environment: trigger, catalog, storage path, sample rate and replay speed are bundle variables | catalogs per target already; the rest arrives with the pipelines |
-| Debezium config is one file per environment | Phase 2 |
+| Contracts don't depend on the source: the same Avro and JSON contracts whether the replayer or a real app produces an event | done: `contracts/events/` (JSON Schema), the ping Avro in Schema Registry, `tlc_trips.yaml` |
+| No hard-coded environment: trigger, catalog, storage path, sample rate and replay speed are bundle variables | partly: catalog per target, replay speed a replayer argument; the sample rate is still a constant in `contracts/trip_key.py` (#80) |
+| Debezium config is one file per environment | done: `infra/terraform/debezium/env/dev.properties` |
 | Secrets only from SSM and secret scopes | done (ADR-0002) |
-| Terraform modules take an edition flag (`free` / `paid`) | Phase 2 |
-| Every write is a `MERGE` or `REPLACE WHERE`, so backfills and reruns are safe | requirements FR-15 |
+| Terraform modules take an edition flag (`free` / `paid`) | not yet (#80) |
+| Every write is a `MERGE` or `REPLACE WHERE`, so backfills and reruns are safe | silver done (FR-15); gold in Phase 4 (#29, #33) |
 
 ## 4. What it costs
 
@@ -121,10 +121,28 @@ Phase 7. Treat **$1k+/month** as a rough floor.
 ## 5. Rehearsal: the Pro sprint (stretch S-A)
 
 A 14-day paid Databricks on AWS trial to rehearse the rows above that Free Edition can't show:
-external locations on our own bucket, a workspace per environment, continuous pipelines, a
+external locations on our own bucket, a workspace per environment, pipelines running around the
+clock (Free Edition runs a continuous pipeline, but the daily quota keeps it to demo windows, #25), a
 low-latency surge store, and system tables for cost. Results go into this document.
 
-## 6. To fill in later
+## 6. Where this build stops short of production
+
+From a review against enterprise data-engineering patterns (2026-11-05). What can be built here is an issue;
+what can't is said here, with the reason, so the gap is a known decision and not an oversight.
+
+| Pattern | This project | Why it can't go further here | Production |
+|---|---|---|---|
+| Tests for pipeline code | Spark unit tests and a Postgres-Kafka-Debezium container test in CI (#76) | Lakeflow-only behaviour (AUTO CDC, Kafka sinks, continuous triggers) runs only on Databricks, and one Free Edition workspace leaves no throwaway test workspace: those keep a smoke run on stg | A test workspace per PR or per day, full end-to-end runs before promotion |
+| Governance | Workspace groups, grants, a mask on `driver_id`, row filters, all as code (#38, #77) | No account console: groups are workspace-local, with no SCIM from an identity provider. ABAC tag policies and audit system tables are to be checked on Free Edition (#38) | IdP groups through SCIM, ABAC from tags, audit logs reviewed |
+| Platform monitoring | Failure emails on the pipeline and jobs, platform alerts, an ops dashboard (#36) | Email is the only channel in budget. Data quality monitoring is to be checked on Free Edition (#36) | PagerDuty or Opsgenie with escalation; data quality monitors on every gold table |
+| Security scanning | Secret scanning, `gitleaks`, a Terraform scan, Dependabot, Python audit (#38) | Nothing: all free on a public repo | Plus SAST and signed build artifacts |
+| Environments and promotion | stg on merge, an end-to-end smoke, then dev and Terraform applies behind a GitHub environment approval (#78) | One workspace and one Confluent cluster: no separate prod. dev is the live environment, so promotion is stg to dev | A workspace and a Kafka cluster per environment; stg to prod with approval |
+| Identity as code | Service principals, entitlements and grants in Terraform (#77) | Catalogs are created with SQL (Default Storage only, ADR-0001); no account-level resources or workload identity federation (ADR-0002) | Account-level Terraform: workspaces, metastore, catalogs on our own storage, federation instead of secrets |
+| Onboarding sources | One registry each for CDC tables (#79) and file sources (#26); new gold tables filled by a full-range backfill (#33) | Nothing | Same |
+| Streaming uptime | Continuous only inside a demo window, started and stopped by the window Lambda (#25) | The Free Edition daily quota, and the replayer budget (requirements §9) | 24/7, with real-time mode for surge |
+| Paid switch | An edition flag in Terraform and the sample rate as config (#80) | Nothing | Same |
+
+## 7. To fill in later
 
 - [x] Phase 3: measured alert latency (SLA-1), and what production needs and how to set it up (§1, #25).
 - [ ] Pro sprint (§5): continuous and real-time mode measured against the production targets in §1.

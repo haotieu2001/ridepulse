@@ -925,6 +925,17 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
 - Moving the views out of the pipeline left the six materialized views behind; they were dropped by hand and the
   job rebuilt them as Delta tables (1.2 min a run).
 
+### Review against enterprise data-engineering patterns (2026-11-05)
+- Strong already: contracts, outbox + log-based CDC, effectively-once with drills, event-time watermarks and late
+  events, quarantine and DLQ, SCD2, IaC, OIDC and pinned actions, SSM secrets, measured SLAs, ADRs and runbooks.
+- Gaps that can be built became issues: pipeline tests with a CDC container test (#76, Phase 4), Databricks
+  identities and grants in Terraform (#77), gated deploys (#78), a CDC table registry with incremental snapshots (#79),
+  the edition flag and sample rate as config (#80); #26 (one file-source registry), #33 (a new gold table filled by
+  a backfill), #36 (failure emails, platform alerts) and #38 (concrete grants, masks, scanning) gained items.
+- What Free Edition or one workspace rules out is in `docs/production.md` §6, with the reason. Found on the way:
+  production.md claimed grants and masks this build doesn't have yet (corrected), and §3's status column was stale
+  (two rules unmet, now #80).
+
 ## Phase 4: batch, reconciliation, BI
 
 ### #26 File ingestion: the forwarder, Auto Loader, silver.tlc_trips and the weather
