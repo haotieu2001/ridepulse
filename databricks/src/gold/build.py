@@ -195,7 +195,8 @@ def money_sums(*extra):
 
 def take_rate(df: DataFrame) -> DataFrame:
     """The take rate as a ratio of sums, kept next to its sums so anything rolling the mart up can recompute it."""
-    return df.withColumn("take_rate", (1 - F.col("driver_pay") / F.col("base_fare")).cast("decimal(6,4)"))
+    # try_divide: a zone-hour can have no fare at all (null, not an error); decimal(12,4): a tiny fare makes a huge ratio
+    return df.withColumn("take_rate", (1 - F.try_divide(F.col("driver_pay"), F.col("base_fare"))).cast("decimal(12,4)"))
 
 
 def agg_zone_hourly(trips: DataFrame) -> DataFrame:
@@ -213,7 +214,7 @@ def agg_driver_weekly(shifts: DataFrame) -> DataFrame:
     return (shifts.groupBy("driver_id", week.alias("week_start"))
             .agg(F.count("*").alias("shifts"), F.sum("trips").alias("trips"), F.sum("online_min").alias("online_min"),
                  F.sum("on_trip_min").alias("on_trip_min"), F.sum("earnings").alias("earnings"))
-            .withColumn("utilization", (F.col("on_trip_min") / F.col("online_min")).cast("decimal(6,4)")))
+            .withColumn("utilization", F.try_divide(F.col("on_trip_min"), F.col("online_min")).cast("decimal(12,4)")))
 
 
 PERIODS = [("jan_2024", date(2024, 1, 1), date(2024, 1, 31)), ("dec_2024", date(2024, 12, 1), date(2024, 12, 31)),
@@ -240,7 +241,7 @@ def agg_cbd_impact(trips: DataFrame, cbd_zone_ids: list[int]) -> DataFrame:
         (F.col("cbd_fees") / F.col("trips")).cast("decimal(8,2)").alias("avg_cbd_fee"),
         (F.col("trip_miles") / F.col("trips")).cast("decimal(8,2)").alias("avg_miles"),
         (F.col("duration_s") / F.col("trips") / 60).cast("decimal(8,1)").alias("avg_minutes"),
-        (F.col("trip_miles") / (F.col("duration_s") / 3600)).cast("decimal(6,1)").alias("avg_mph"), "take_rate")
+        F.try_divide(F.col("trip_miles"), F.col("duration_s") / 3600).cast("decimal(12,1)").alias("avg_mph"), "take_rate")
 
 
 # --- keys and the metric view -----------------------------------------------------------------------------------

@@ -5,6 +5,7 @@ import sys
 from datetime import date, datetime
 
 import pytest
+from pyspark.sql import functions as F
 
 ROOT = pathlib.Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(ROOT / "databricks/src/gold"))
@@ -13,6 +14,7 @@ pyspark = pytest.importorskip("pyspark")
 from build import (  # noqa: E402
     agg_cbd_impact,
     agg_driver_weekly,
+    agg_zone_hourly,
     calendar_rows,
     daypart,
     dim_driver,
@@ -146,3 +148,12 @@ def test_a_drivers_week_sums_its_shifts(spark):
     w = weeks[date(2025, 1, 6)]
     assert (w.shifts, w.trips, w.online_min, w.on_trip_min, float(w.earnings), float(w.utilization)) == (2, 5, 180, 75, 60.0, 0.4167)
     assert weeks[date(2025, 1, 13)].shifts == 1
+
+
+def test_a_zone_hour_with_no_fare_has_no_take_rate_rather_than_an_error(spark):
+    rows = [(4, 79, date(2025, 1, 6), 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0.0, None)]   # a zero-fare, zero-second trip
+    trips = spark.createDataFrame(rows, TRIPS).withColumn("pickup_hour", F.lit(3))
+    spark.conf.set("spark.sql.ansi.enabled", "true")   # as on Databricks serverless
+    r = agg_zone_hourly(trips).first()
+    assert r.trips == 1 and r.take_rate is None
+    assert agg_cbd_impact(trips, [79]).first().avg_mph is None
