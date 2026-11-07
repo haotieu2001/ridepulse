@@ -956,3 +956,14 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   only append-only sources, so the next streaming update failed fatally. The sinks now read the rule tables with
   `skipChangeCommits`: a deliberate recompute is skipped, not re-sent or fatal.
 - Left for #29: `dim_weather_day` (with `is_rainy`) from `silver.weather_day`.
+
+### #27 Lakeflow Connect reference pull (path C)
+- `reference_pull` replaces S9's `s9_neon_reference` (deleted, with its 5-row test table): a query-based pull of
+  Neon's `zones`, `fare_rules` and `driver_profiles`, each on its indexed `updated_at` cursor (V001), into
+  `bronze.neon_<table>` as SCD type 2, so every version a pull sees is kept with when it held. Dev only (the
+  `neon_dev` connection). No schedule: the daily job (#33) will run it; `make refpull` by hand. An ingestion pipeline,
+  so the one-active-ETL-pipeline limit doesn't hold it back.
+- Real run: 51 s; 265 zones, 6 fare rules, 2,834 driver profiles, equal to Neon, one open version each. A second
+  pull added nothing. History on a real change is configured but not yet exercised: no reference row has changed
+  since, and editing Neon's reference data only to see it wasn't worth it. What a cursor misses (deletes, two
+  changes between pulls, seen in S9) is #28's ADR-0005.
