@@ -4,6 +4,8 @@
     ref.zone_neighbours zones that share a border (ADR-0003, ref/build_zone_geo.py)
     ref.surge_areas    each zone's surge area: the zone itself plus its neighbours (FR-10)
     ref.ops_rules      every rule threshold, from ops_rules.yml
+    ref.cbd_zones      the 38 zones inside the Congestion Relief Zone, for silver.tlc_trips.touches_cbd and the
+                       congestion-pricing analysis (#26, #30; how they were found: ref/build_cbd_zones.sql)
 
 The CSVs are copies of the repository's ref/ (the bundle can't reach outside databricks/); a test keeps them identical.
 """
@@ -67,3 +69,11 @@ def ops_rules():
             out.append((rule, name, str(value), params.get("status"), params.get("description")))
     return spark.createDataFrame(  # noqa: F821
         out, "rule STRING, param STRING, value STRING, status STRING, description STRING")
+
+
+@dlt.table(name=ref("cbd_zones"),
+           comment="TLC zones inside the Congestion Relief Zone (Manhattan south of 60th St), from trips: ref/build_cbd_zones.sql")
+def cbd_zones():
+    return spark.createDataFrame(  # noqa: F821
+        [(int(r["zone_id"]), r["zone"], int(r["intra_zone_trips"]), float(r["paid_share"])) for r in rows("cbd_zones.csv")],
+        "zone_id INT, zone STRING, intra_zone_trips INT, paid_share DOUBLE")
