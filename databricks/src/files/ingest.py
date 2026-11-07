@@ -157,6 +157,37 @@ def weather_day(raw: DataFrame) -> DataFrame:
                  F.first("_source_file").alias("source_file")))
 
 
+# --- silver.payouts ----------------------------------------------------------------------------------------------
+
+def _cut(start: int, length: int) -> Column:
+    """NACHA positions are 1-based, fixed width."""
+    return F.substring("value", start, length)
+
+
+def payouts(raw: DataFrame) -> DataFrame:
+    """One row per entry detail record (type 6) of a payout file. The week comes from the landed key."""
+    entries = raw.where(F.col("value").startswith("6"))
+    return entries.select(
+        F.to_date(F.regexp_extract("_source_file", r"/raw/payouts_ach/(\d{4}-\d{2}-\d{2})/", 1)).alias("week_start"),
+        F.trim(_cut(40, 15)).alias("driver_id"), _cut(30, 10).cast("bigint").alias("amount_cents"),
+        (_cut(30, 10).cast("bigint") / 100).cast("decimal(12,2)").alias("amount"),
+        _cut(2, 2).alias("transaction_code"), _cut(4, 9).alias("routing"), F.trim(_cut(13, 17)).alias("account"),
+        _cut(80, 15).alias("trace_number"), F.col("_source_file").alias("source_file"))
+
+
+def control_mismatches(raw: DataFrame) -> dict[str, tuple[int, int]]:
+    """The file's batch (8) and file (9) controls against its entries: count and total credit. A file whose own
+    totals are wrong is corrupt, and stops; one whose entries are wrong against earnings is #32's to find."""
+    entries = (raw.where(F.col("value").startswith("6"))
+               .agg(F.count("*").alias("n"), F.sum(_cut(30, 10).cast("bigint")).alias("total")).first())
+    batch = raw.where(F.col("value").startswith("8")).first()
+    file_ = raw.where(F.col("value").startswith("9") & (F.col("value") != F.lit("9" * 94))).first()
+    found = {"entries": int(entries.n), "credit": int(entries.total or 0)}
+    claimed = {"batch.entries": int(batch.value[4:10]), "batch.credit": int(batch.value[32:44]),
+               "file.entries": int(file_.value[13:21]), "file.credit": int(file_.value[43:55])}
+    return {k: (v, found[k.split(".")[1]]) for k, v in claimed.items() if v != found[k.split(".")[1]]}
+
+
 # --- the run ----------------------------------------------------------------------------------------------------
 
 class Ingest:
@@ -176,8 +207,9 @@ class Ingest:
                   .option("cloudFiles.schemaLocation", f"{self.checkpoints}/{source}/schema"))
         if s["format"] == "csv":
             reader = reader.option("header", "false").schema(NOAA_COLUMNS)
-        else:
+        elif s["format"] == "parquet":
             reader = reader.option("cloudFiles.schemaEvolutionMode", "addNewColumns")
+        # text: one `value` row per line, as published (a NACHA record is a 94-character line)
         df = reader.load(f"{self.landing}/raw/{source}/")
         meta = [F.col("_metadata.file_path").alias("_source_file"), F.current_timestamp().alias("_ingested_at")]
         if s["format"] == "parquet":
@@ -223,6 +255,16 @@ class Ingest:
             self.replace(weather_day(raw), s["silver"], file)
             print(f"{s['silver']}: {file}")
 
+    def silver_payouts(self) -> None:
+        s = self.sources["sources"]["payouts_ach"]
+        for file in self.new_files(s["bronze"], s["silver"]):
+            raw = self.spark.read.table(self.table(s["bronze"])).where(F.col("_source_file") == file)
+            bad = control_mismatches(raw)
+            if bad:
+                raise RuntimeError(f"{file}: the file's own controls don't add up, nothing loaded: {bad}")
+            self.replace(payouts(raw), s["silver"], file)
+            print(f"{s['silver']}: {file}")
+
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -238,6 +280,7 @@ def main() -> None:
         run.bronze(source)
     run.silver_tlc()
     run.silver_weather()
+    run.silver_payouts()
 
 
 if __name__ == "__main__":

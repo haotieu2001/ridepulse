@@ -1024,3 +1024,15 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   -1.9%) while the rest grew 7.2%; CBD trips 2-5% faster, the rest slightly slower; within the CBD the rider paid
   12% more, the driver 1.1% less per trip, the take rose 4.9 points to 37.7%. With its limits: one month after, no
   control, 2024 weather not loaded, Jan 1-4 and Dec 2024 unusable as baselines.
+
+### #31 Payout generator: synthetic ACH files with planted errors
+- `services/payouts` (`python -m services.payouts generate --week MONDAY`): the processor's weekly NACHA file from
+  `gold.fct_driver_shifts` earnings (driver pay + tips, in cents): one PPD credit batch, an entry per driver, fictional
+  banks (9xxx routing numbers with a valid ABA check digit). One missing driver, one paid twice, one off by $5,
+  picked by a hash of week and driver, ledgered in `derived/payouts/<week>/planted.json`. The file stays valid:
+  counts, entry hash and total credit in both controls match what was written, so only earnings can expose it.
+- Onboarded as a file source with one registry entry, `payouts_ach` (format text), as #26 promised: the forwarder
+  copied both files by itself, the ingest job reads them as lines and parses entries into `silver.payouts`. A file
+  whose own controls don't add up stops, nothing loaded (a test tampers one amount).
+- Real: weeks of 2024-12-30 and 2025-01-06, 2,834 earners each: 2,834 entries for 2,833 drivers (one missing, one
+  twice), $558,620.95 and $2,017,929.11.
