@@ -50,7 +50,7 @@ data "aws_iam_policy_document" "notifier" {
     "${local.ssm_arn}/ridepulse/confluent/${var.env}/${p}"]
   }
   statement {
-    actions   = ["dynamodb:PutItem", "dynamodb:DeleteItem"]
+    actions   = ["dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:DeleteItem"]
     resources = [aws_dynamodb_table.alerts_sent.arn]
   }
   statement {

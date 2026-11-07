@@ -1,0 +1,39 @@
+zone_id,zone,intra_zone_trips,paid_share
+4,Alphabet City,487,0.9795
+12,Battery Park,1,1.0000
+13,Battery Park City,1303,0.9801
+45,Chinatown,455,0.9824
+48,Clinton East,4130,0.9872
+50,Clinton West,1337,0.9873
+68,East Chelsea,4893,0.9875
+79,East Village,6709,0.9908
+87,Financial District North,1124,0.9831
+88,Financial District South,168,0.9464
+90,Flatiron,1840,0.9859
+100,Garment District,852,0.9707
+107,Gramercy,2466,0.9854
+113,Greenwich Village North,1585,0.9943
+114,Greenwich Village South,1179,0.9805
+125,Hudson Sq,586,0.9881
+137,Kips Bay,1143,0.9834
+144,Little Italy/NoLiTa,1397,0.9893
+148,Lower East Side,3023,0.9901
+158,Meatpacking/West Village West,1788,0.9871
+161,Midtown Center,3717,0.9903
+162,Midtown East,1808,0.9856
+163,Midtown North,2146,0.9846
+164,Midtown South,2363,0.9860
+170,Murray Hill,2980,0.9866
+186,Penn Station/Madison Sq West,751,0.9747
+209,Seaport,198,0.9798
+211,SoHo,1118,0.9893
+224,Stuy Town/Peter Cooper Village,162,0.9691
+229,Sutton Place/Turtle Bay North,1425,0.9909
+230,Times Sq/Theatre District,4315,0.9873
+231,TriBeCa/Civic Center,10138,0.9930
+232,Two Bridges/Seward Park,2016,0.9772
+233,UN/Turtle Bay South,1234,0.9846
+234,Union Sq,3545,0.9882
+246,West Chelsea/Hudson Yards,5486,0.9849
+249,West Village,3153,0.9854
+261,World Trade Center,678,0.9690

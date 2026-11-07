@@ -26,12 +26,26 @@ targets:
     variables:
       catalog: ridepulse_dev
     resources:
+      # The forwarder Lambda writes landed files here as ridepulse-forwarder, which may use the raw schema and write
+      # this one volume, nothing else (#26, ADR-0002). USE CATALOG is granted in SQL: catalogs are made with SQL here.
+      schemas:
+        raw:
+          grants:
+            - principal: e3aee6fd-086b-40d1-9916-c46e9611d6d9   # ridepulse-forwarder
+              privileges: [USE_SCHEMA]
+      volumes:
+        landing:
+          grants:
+            - principal: e3aee6fd-086b-40d1-9916-c46e9611d6d9   # ridepulse-forwarder
+              privileges: [READ_VOLUME, WRITE_VOLUME]
       pipelines:
-        # S9 / plan path C: daily query-based pull from the Neon dispatch database,
-        # incremental on the updated_at cursor. Dev only: the neon_dev connection
-        # and its secret belong to this environment.
-        s9_neon_reference:
-          name: s9_neon_reference
+        # Plan path C (#27): a daily query-based pull of the dispatch database's reference tables, incremental on
+        # each table's indexed updated_at cursor (V001), into bronze.neon_*. SCD type 2, so every version a pull
+        # saw is kept with when it held: history per pull. What a cursor can't see (a delete, a row changed twice
+        # between pulls) is ADR-0005's measurement (#28). Dev only: the neon_dev connection and its secret belong to
+        # this environment. No schedule of its own: the daily job (#33) runs it; by hand, `make refpull`.
+        reference_pull:
+          name: reference_pull
           catalog: ${var.catalog}
           schema: bronze
           ingestion_definition:
@@ -40,16 +54,47 @@ targets:
               - table:
                   source_catalog: neondb
                   source_schema: dispatch
+                  source_table: zones
+                  destination_catalog: ${var.catalog}
+                  destination_schema: bronze
+                  destination_table: neon_zones
+                  table_configuration:
+                    scd_type: SCD_TYPE_2
+                    query_based_connector_config:
+                      cursor_columns: [updated_at]
+              - table:
+                  source_catalog: neondb
+                  source_schema: dispatch
+                  source_table: fare_rules
+                  destination_catalog: ${var.catalog}
+                  destination_schema: bronze
+                  destination_table: neon_fare_rules
+                  table_configuration:
+                    scd_type: SCD_TYPE_2
+                    query_based_connector_config:
+                      cursor_columns: [updated_at]
+              - table:
+                  source_catalog: neondb
+                  source_schema: dispatch
                   source_table: driver_profiles
                   destination_catalog: ${var.catalog}
                   destination_schema: bronze
-                  destination_table: ref_driver_profiles
+                  destination_table: neon_driver_profiles
                   table_configuration:
-                    scd_type: SCD_TYPE_1
+                    scd_type: SCD_TYPE_2
                     query_based_connector_config:
-                      cursor_columns:
-                        - updated_at
+                      cursor_columns: [updated_at]
       jobs:
+        # The window Lambda pauses and unpauses these as ridepulse-window, which may manage these two jobs and nothing
+        # else (#25, ADR-0002). In stg nothing unpauses them.
+        streaming_back_to_back:
+          permissions:
+            - service_principal_name: 17447026-e680-4550-8b53-23a3b7ac2f13   # ridepulse-window
+              level: CAN_MANAGE
+        views_every_10_min:
+          permissions:
+            - service_principal_name: 17447026-e680-4550-8b53-23a3b7ac2f13   # ridepulse-window
+              level: CAN_MANAGE
         # S1 + S2: Confluent Cloud -> Databricks, JSON and Schema Registry Avro.
         # Dev only: the Kafka and Schema Registry keys sit in this workspace's
         # `ridepulse` secret scope (copied from SSM by scripts/feasibility/ssm_to_secret.sh).

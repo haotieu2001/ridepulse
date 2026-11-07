@@ -861,6 +861,70 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
 - Runbooks: `docs/runbooks/debezium-killed.md`, `docs/runbooks/slot-dropped.md`. The drill's 43 alerts were skipped
   for the notifier (R2 isn't calibrated yet, #25).
 
+### #25 SLA-1 latency and the rules' precision and recall
+- Notifier: the claim now keeps the alert's window, area and Kafka timestamp, and `sent_at` (ms) is set once SNS takes
+  the email (`dynamodb:UpdateItem` added). A failed stamp loses the measurement, not the email.
+- `scripts/measure/alerts.py latency`: per emailed R1-R3 alert, from the Postgres commit of the last event its window
+  counted to `sent_at`. No new column: a tick writes its events and the watermark in one transaction and simulated time
+  never goes back, so an event's commit is the Debezium source time of the first watermark that reached it
+  (`silver.replay_state_changes`). `score`: each `dispatch.incidents` row against the alerts it should raise (stadium ->
+  R1 in any area sharing a zone with its own, R3 at an airport; outage -> R4 in its borough; tunnel pings -> late
+  events), precision per rule, and the alarm rate on windows no incident touched.
+- The run (2026-11-05, 12:40-15:39 UTC): `make replay DATE=2025-01-08`, eight incidents (#7-#14: 5% duplicate and 0.5%
+  malformed pings all day, tunnel pings 08:00, outages Manhattan 11:00 and Brooklyn 17:30, stadiums at Flushing Meadows
+  13:00 x4, JFK 15:00 x3, Madison Square Garden 19:00 x3), the window opened by hand and the Databricks schedule
+  unpaused for it. 30 simulated hours, the day's whole budget.
+- SLA-1, 1,132 alerts: p50 16.1, p95 24.2, max 29.1 min (R1 p95 22.1, R2 28.1, R3 20.1). **Missed.** Stage medians
+  for R1: commit -> Kafka 0.0 min, Kafka -> alert in Kafka 14.5, alert -> email 0.6. A pipeline run takes ~10.5 min,
+  not the 1.5 the estimate used: ~3 min to start, ~4.5 min for bronze, silver and the rules (R1's Kafka sink flow is
+  done ~7.5 min in), then ~2 min more for the views recomputed every run (`ops.alerts`, `late_events`, KPIs). With
+  `max_concurrent_runs: 1` the 10-minute triggers queue, so runs go back to back. R2 adds its 75-minute join hold-back
+  (8 wall min at 10x). Fixing it is a design decision, left open (requirements §10, question 4).
+- Recall 6/6, each in its first window: tunnel pings (20 late-event alerts, 3,924 of 206,418 pings = 1.9% late, in their
+  own windows), both outages (R4 within 6 min), all three stadiums (R1; JFK also R3). Duplicate and malformed pings
+  raised nothing.
+- Noise, before calibration: 1,219 emails in three hours. R1 alarmed on 8.2% of clean windows (precision 27%): most at
+  3 or fewer idle drivers, where 10 requests already make a ratio over 3. One stadium sets off ~18 overlapping surge
+  areas per window (149 R1 alerts for Flushing Meadows), so an incident is many emails: grouping is a gap. R3 alarmed on
+  52%, all from its shortage side, because JFK has 0 idle drivers in 39% of windows (the supply has no holding lot).
+- Calibration, recomputed exactly from `ops.r1_surge` and `ops.r3_airport_queue` (they keep requests and idle):
+  R1 `alert_min_requests: 20` (new; the surge band keeps 10): clean alarms 710 -> 106 (1.2%), all three stadiums still
+  alert at their own area. An idle floor of 3 changed nothing. R3 `min_requests` 10 and shortage ratio 4: 52% -> 20%,
+  JFK stadium in 3 of 5 windows. R2 and R4 kept. Takes effect at the next bundle deploy.
+- A window opened with `make up` stays open until `make down` (the close schedule is only for daily windows): Debezium
+  idled from 15:39, when the budget ran out, to 16:27.
+- Continuous mode (2026-11-05/06): built and deployed (window Lambda starting and stopping the pipeline as a new
+  service principal, `ridepulse-window`), but on Free Edition every update lost its serverless driver 18-34 min in
+  ("Communication lost with driver ... not reachable for 120 seconds"), at any load: supply refreshing every 10 s or
+  every minute made no difference. Overnight the rules stalled behind silver and 0 alerts went out; the next day silver
+  stopped committing 5 min before a loss and stayed stuck after the retry. The Free Edition docs say nothing about
+  continuous mode or compute session length. Dropped.
+- Now: the triggered pipeline runs back to back (a job with a continuous trigger), and the views recomputed in full
+  (KPIs, late events, `ops.alerts`, `dq_rates`) are `views/refresh.py`, a job task every 10 minutes (1.2 min a run),
+  not a second pipeline: Free Edition runs one active pipeline per type. Moving them meant dropping the old
+  materialized views by hand; the job rebuilt them as Delta tables. The window Lambda unpauses both jobs on open and
+  pauses them and cancels their runs on close.
+- Not measured yet: the first timed window (2026-11-06 15:46) hit the same driver loss on a triggered update after
+  25 min, though the same pipeline ran 10.5-min triggered updates all of 2026-11-05. Most likely the workspace was
+  throttled after the day's continuous runs (fair-usage policy); unproven. To re-measure on a fresh day.
+- Found on the way: the SQL warehouse answered repeated query text from its result cache while a pipeline was still
+  writing; `scripts/measure/alerts.py` now adds a fresh comment to every query.
+- Found 2026-11-07: a continuous job trigger runs its pipeline as one update that never ends, so it too lost the
+  driver ~20 min in (two updates, 0 alerts). Run directly, the same update completed in 10.7 min with 10 simulated
+  hours of backlog. So the streaming job is on a one-minute schedule, one run at a time and no queue: triggered
+  updates back to back. The limit is per update, not per mode: on Free Edition no update may run ~20 min.
+- Measured back to back (2026-11-07 13:28-14:28 UTC, 2025-01-10 15:40 -> 01:40): every update completed in ~10.5 min.
+  130 alerts: R1 p50 15.2, p95 19.1, max 19.2 min; R3 p95 18.1; R2 p95 27.2 (its join hold-back, 8 wall min).
+  All rules p95 25.2. Better than every 10 minutes (R1 p95 22.1) but not 12: a run is ~10.5 min whatever the trigger.
+  SLA-1 reset for Free Edition to p95 <= 20 min (R1, R3) and <= 30 min (R2); 12 min stays the production target.
+- R4 bug: a borough that sent no pings at all had no window, so a total outage, the worst kind, raised nothing
+  (Brooklyn, 19:00-19:20, all its windows missing). Every tick now adds a heartbeat per borough for each 3-minute
+  window it covers (from its replay_state change through CDC), so a silent window counts 0 pinged. Recomputed R4
+  alone (`full_refresh_selection`): the five windows alert with 195-230 busy and 0 pinged, the first 6 min in; both
+  runs rescored: recall 8/8 (6/6 on 2025-01-08, 2/2 on 2025-01-10), R4 still alarms on 0.1% of clean windows.
+- Moving the views out of the pipeline left the six materialized views behind; they were dropped by hand and the
+  job rebuilt them as Delta tables (1.2 min a run).
+
 ### Review against enterprise data-engineering patterns (2026-11-05)
 - Strong already: contracts, outbox + log-based CDC, effectively-once with drills, event-time watermarks and late
   events, quarantine and DLQ, SCD2, IaC, OIDC and pinned actions, SSM secrets, measured SLAs, ADRs and runbooks.
@@ -871,3 +935,58 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
 - What Free Edition or one workspace rules out is in `docs/production.md` §6, with the reason. Found on the way:
   production.md claimed grants and masks this build doesn't have yet (corrected), and §3's status column was stale
   (two rules unmet, now #80).
+
+## Phase 4: batch, reconciliation, BI
+
+### #26 File ingestion: the forwarder, Auto Loader, silver.tlc_trips and the weather
+- `ref.cbd_zones`: the zones inside the Congestion Relief Zone, found from trips (`ref/build_cbd_zones.sql`): a trip
+  that starts and ends in one zone pays the CBD fee only if that zone is inside. On Jan 2025, 38 zones paid on 94-100%
+  of their intra-zone trips, then a gap to six that straddle 60th St (15-47%). The plan says 37; the MTA list
+  (data.ny.gov yfdc-w5jh) answered 403 from here, so the difference is open (Battery Park, 1 trip, is the weakest).
+- Forwarder: a Lambda on the landing bucket's ObjectCreated events streams each registered source's `raw/` file into
+  the volume `raw.landing` at the same key (Files API PUT, the S3 body passed through, never held), as a new service
+  principal `ridepulse-forwarder`: USE SCHEMA on raw and READ/WRITE on that one volume (grants in the bundle, USE
+  CATALOG in SQL), OAuth secret in SSM until 2027-11-07. `make forward` copies files landed before: Jan 2025 (491 MB)
+  and NOAA 2025 (166 MB) in 21 s, sizes equal to S3. The OAuth client is now `services/databricks_api.py`, shared
+  with the window Lambda.
+- `config/file_sources.json`: the source registry. TLC trips and NOAA are its two entries; the forwarder, the ingest
+  job and the tests read it, so onboarding a file source is one entry. JSON: the Lambda runtime has no YAML.
+- `files_ingest` (a job task: one active pipeline per type): Auto Loader per source into bronze (availableNow,
+  checkpoints in `raw.checkpoints`), with each row's file and `_metadata.row_index`; then silver per new file with
+  REPLACE WHERE source_file. `silver.tlc_trips` per the contract: trip_key from the shared key code, the collision
+  suffix in file order, row_group/row_offset from the Parquet footer, touches_cbd, dq_ flags; a fail check stops the
+  file. `silver.weather_day`: Central Park (USW00094728) in units, failed-QC values left out.
+- Real run: 20,405,666 rows, 20,405,666 distinct keys, 3 suffixed (the contract's 3), in_sample 5.00%, CBD fee paid
+  30.87% (the contract's baseline). Every trip the stream replayed from January (125,649) has the same key in
+  silver.tlc_trips, all in_sample. Weather: 365 days, 35 trace days, 37.2 C max, -12.1 C min, 1,006 mm. A second
+  run loaded nothing; bronze and silver counts unchanged. 3.2 min for the first run.
+- Spark tests now run locally and in CI (pyspark 4.0.1, chispa, Java 21): they found trace_precip null for a day
+  with no trace instead of false. On serverless a Python file task has no `__file__`; the job falls back to its
+  `--config-dir`.
+- Found on the way: recomputing R4 for the outage fix (#25) rewrote `ops.r4_app_outage`, and a Kafka sink takes
+  only append-only sources, so the next streaming update failed fatally. The sinks now read the rule tables with
+  `skipChangeCommits`: a deliberate recompute is skipped, not re-sent or fatal.
+- Left for #29: `dim_weather_day` (with `is_rainy`) from `silver.weather_day`.
+
+### #27 Lakeflow Connect reference pull (path C)
+- `reference_pull` replaces S9's `s9_neon_reference` (deleted, with its 5-row test table): a query-based pull of
+  Neon's `zones`, `fare_rules` and `driver_profiles`, each on its indexed `updated_at` cursor (V001), into
+  `bronze.neon_<table>` as SCD type 2, so every version a pull sees is kept with when it held. Dev only (the
+  `neon_dev` connection). No schedule: the daily job (#33) will run it; `make refpull` by hand. An ingestion pipeline,
+  so the one-active-ETL-pipeline limit doesn't hold it back.
+- Real run: 51 s; 265 zones, 6 fare rules, 2,834 driver profiles, equal to Neon, one open version each. A second
+  pull added nothing. History on a real change is configured but not yet exercised: no reference row has changed
+  since, and editing Neon's reference data only to see it wasn't worth it. What a cursor misses (deletes, two
+  changes between pulls, seen in S9) is #28's ADR-0005.
+
+### #28 ADR-0005: log-based vs query-based CDC, misses measured
+- `scripts/drills/planted_profiles.py`: planted edits to `driver_profiles` (on both paths, V001), picked by a hash of
+  round and driver, with a ledger of every change; `compare` checks each against `silver.driver_profile_changes` (B)
+  and `bronze.neon_driver_profiles` (C). Debezium started alone (no replayer), then per round: plant, the streaming
+  pipeline, `make refpull`.
+- Round 1: 35 profiles edited (12 twice) and one hard delete; round 2: 21 edited (7 twice). B saw 76 of 76 changes;
+  C saw 56 of 76: every final version, none of the 19 intermediates, not the delete (the profile is still current).
+  The rounds also exercised the SCD2 history of #27 on real changes.
+- ADR-0005 (accepted): history or deletes that matter go by B (trip events, driver state, `dim_driver` in #29); C is
+  for reference data that is closed, not deleted (`zones`, `fare_rules`); `driver_profiles` stays on C as the
+  standing comparison, unread by gold. A C table that can lose rows needs a soft delete or a periodic full snapshot.

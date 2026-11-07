@@ -13,7 +13,9 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+  "chispa==0.11.1",
   "jsonschema==4.26.0",
+  "pyspark==4.0.1",
   "pytest>=8.3",
   "pyyaml>=6.0",
   "ruff==0.17.1",
@@ -32,6 +34,6 @@ extend-exclude = ["databricks/src/feasibility", "scripts/feasibility", "data", "
 select = ["E", "F", "W", "I", "B", "UP"]
 
 [tool.pytest.ini_options]
-testpaths = ["contracts/tests", "services", "db"]
+testpaths = ["contracts/tests", "services", "db", "scripts/measure", "databricks/src/files/tests"]
 pythonpath = ["."]
 addopts = "-q"

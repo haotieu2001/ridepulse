@@ -14,7 +14,7 @@ YEAR        ?= 2025
 
 export AWS_PROFILE
 
-.PHONY: help bootstrap-plan bootstrap-apply landing-plan landing-apply confluent-plan confluent-apply debezium-plan debezium-up debezium-down build-lambdas replayer-plan replayer-apply up down window-status replay bronze land-month land-zones land-noaa prep db-status db-migrate db-test db-seed catalog deploy s10-upload s10-run s10
+.PHONY: help bootstrap-plan bootstrap-apply landing-plan landing-apply confluent-plan confluent-apply debezium-plan debezium-up debezium-down build-lambdas replayer-plan replayer-apply up down window-status replay bronze land-month forward files refpull land-zones land-noaa prep db-status db-migrate db-test db-seed catalog deploy s10-upload s10-run s10
 
 help:
 	@echo "bootstrap-plan / bootstrap-apply  Terraform: state bucket, GitHub OIDC role, budget"
@@ -25,9 +25,12 @@ help:
 	@echo "replayer-plan / replayer-apply    Terraform: replayer Lambda, schedules, demo window"
 	@echo "up / down / window-status         open or close a demo window now (Debezium + replayer)"
 	@echo "replay DATE=2025-01-06 SPEED=10   start the replay, or jump forward, at a day boundary"
-	@echo "bronze                            run the bronze pipeline once"
+	@echo "bronze                            one streaming run, then the views (a window runs both)"
 	@echo "land-month MONTH=2025-01          land one HVFHV month in S3 (pinned to its ETag)"
 	@echo "land-zones / land-noaa YEAR=2025  land the zone files / one NOAA GHCN-Daily year"
+	@echo "forward [PREFIX=raw/...]          copy files already landed into the volume (new ones go by themselves)"
+	@echo "files                             landed files into bronze and silver (silver.tlc_trips, weather_day)"
+	@echo "refpull                           Neon reference tables into bronze.neon_* (query-based, SCD2)"
 	@echo "prep MONTH=2025-01 [OUT_DIR=dir]  prep job: contract, sample, event-time slices"
 	@echo "db-status / db-migrate            dispatch migrations on the dev Neon database"
 	@echo "db-test                           migrations + SQL tests in throwaway Neon databases"
@@ -95,12 +98,24 @@ replay:
 	@test -n "$(DATE)" || { echo "usage: make replay DATE=2025-01-06 [SPEED=10]"; exit 2; }
 	scripts/db.sh uv run python -m services.replayer start $(DATE) --speed $(or $(SPEED),10)
 
-# Bronze once now: the job runs it every 10 minutes only during the daily window's hours.
+# One streaming run now, and the views after it: in a window the jobs run them back to back and every 10 minutes (#25).
 bronze:
-	cd databricks && databricks bundle run -t dev bronze_ingest
+	cd databricks && databricks bundle run -t dev bronze_ingest && databricks bundle run -t dev views_every_10_min
 
 land-month:
 	uv run python -m services.tlc_downloader fhvhv $(MONTH) --bucket $(LANDING_BUCKET)
+
+# New raw/ files reach the volume by themselves (the forwarder, #26); this copies ones landed before, or missed.
+forward:
+	LANDING_BUCKET=$(LANDING_BUCKET) scripts/forward_landed.sh $(PREFIX)
+
+# Landed files into bronze and silver now (#26): the daily job (#33) will run the same job.
+files:
+	cd databricks && databricks bundle run -t dev files_ingest
+
+# Neon's reference tables into bronze.neon_* now (#27, path C): the daily job (#33) will run the same pipeline.
+refpull:
+	cd databricks && databricks bundle run -t dev reference_pull
 
 land-zones:
 	uv run python -m services.tlc_downloader zones --bucket $(LANDING_BUCKET)
@@ -137,8 +152,16 @@ catalog:
 	    --json "{\"warehouse_id\":\"$$wh\",\"statement\":\"CREATE CATALOG IF NOT EXISTS $(CATALOG)\",\"wait_timeout\":\"50s\"}" \
 	    | jq -e '.status.state == "SUCCEEDED"' >/dev/null && echo "created catalog $(CATALOG)"; }
 
+# The window Lambda finds the two jobs by the ids published here (#25). A deploy resets both to the bundle's PAUSED,
+# so if a window is open (the replayer's schedule on) it's opened again, which unpauses them.
 deploy:
 	cd databricks && databricks bundle deploy -t dev
+	cd databricks && databricks bundle summary -t dev -o json | jq -r '.resources.jobs | "\(.streaming_back_to_back.id) \(.views_every_10_min.id)"' | \
+	  { read streaming views; \
+	    aws ssm put-parameter --name /ridepulse/dev/databricks/streaming_job_id --type String --value "$$streaming" --overwrite --query Version --output text; \
+	    aws ssm put-parameter --name /ridepulse/dev/databricks/views_job_id --type String --value "$$views" --overwrite --query Version --output text; }
+	if [ "$$(aws scheduler get-schedule --name ridepulse-replayer --query State --output text)" = ENABLED ]; then \
+	  echo "a window is open: opening it again so the jobs run"; $(MAKE) up; fi
 
 # TLC's CloudFront answers 403 after bursts of downloads, so retry with a pause.
 s10-upload:

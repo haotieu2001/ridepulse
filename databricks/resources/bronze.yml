@@ -1,7 +1,14 @@
-# Kafka -> bronze (#13) -> silver (#16), one triggered pipeline: each run reads what arrived since the last one
-# and stops, so the job below makes it "availableNow every 10 minutes". Silver shares the update with bronze, so
-# the replay watermark and the trip events it covers land together (ADR-0004 §7). The schedule starts paused: demo windows (#12)
-# unpause it, so nothing reads Kafka or spends quota outside them.
+# Kafka -> bronze (#13) -> silver (#16) -> supply and rules (#20) -> the alert sink (#22), one triggered pipeline.
+# Silver shares each update with bronze, so the replay watermark and the trip events it covers land together
+# (ADR-0004 §7).
+#
+# How it runs (#25), and why:
+#   - Every 10 minutes, a run took ~10.5 min (3 to start, then every table) and alerts reached email at p95 24 min.
+#   - Continuous mode lost its serverless driver every 18-34 minutes on Free Edition, and once stalled silver for good.
+#   - So: back to back, as a job on a one-minute schedule, with the views that are recomputed in full moved out to
+#     views_every_10_min (a job task, not a second pipeline: Free Edition runs one active pipeline per type).
+# Both jobs start paused. The window Lambda (services/window) unpauses them when a demo window opens and pauses them
+# when it closes, as the ridepulse-window service principal, so nothing reads Kafka or spends quota outside a window.
 resources:
   pipelines:
     bronze_ingest:
@@ -21,8 +28,6 @@ resources:
         - file:
             path: ../src/ref/ref.py
         - file:
-            path: ../src/ops/kpis.py
-        - file:
             path: ../src/ops/supply.py
         - file:
             path: ../src/ops/rules.py
@@ -40,15 +45,45 @@ resources:
         spark.sql.session.timeZone: UTC
 
   jobs:
-    bronze_every_10_min:
-      name: bronze_every_10_min
+    streaming_back_to_back:
+      name: streaming_back_to_back
+      # Every minute, one run at a time and no queue: a trigger that finds a run going is skipped, so a new run starts
+      # within a minute of the last one ending. Not a continuous trigger: that ran the pipeline as one update that
+      # never ended, and Free Edition loses a driver ~20 minutes into an update (2026-11-07). Paused outside a window.
       schedule:
-        # The window hours from config/window.json, plus the hour after it to read the last ticks (a test checks).
-        quartz_cron_expression: "0 0/10 12-15 * * ?"
+        quartz_cron_expression: "0 * * * * ?"
+        timezone_id: UTC
+        pause_status: PAUSED
+      max_concurrent_runs: 1
+      queue:
+        enabled: false
+      tasks:
+        - task_key: streaming
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.bronze_ingest.id}
+
+    views_every_10_min:
+      name: views_every_10_min
+      schedule:
+        quartz_cron_expression: "0 0/10 * * * ?"
         timezone_id: UTC
         pause_status: PAUSED
       max_concurrent_runs: 1
       tasks:
-        - task_key: bronze
-          pipeline_task:
-            pipeline_id: ${resources.pipelines.bronze_ingest.id}
+        - task_key: views
+          environment_key: default
+          spark_python_task:
+            python_file: ../src/views/refresh.py
+            parameters:
+              - --catalog
+              - ${var.catalog}
+              - --ref-dir
+              - ${workspace.file_path}/src/ref
+              - --silver-dir
+              - ${workspace.file_path}/src/silver
+      environments:
+        - environment_key: default
+          spec:
+            environment_version: "3"
+            dependencies:
+              - pyyaml==6.0.2
