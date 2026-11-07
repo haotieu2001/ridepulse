@@ -15,7 +15,10 @@ WINDOW_SP = "17447026-e680-4550-8b53-23a3b7ac2f13"   # ridepulse-window
 def test_the_pipeline_is_triggered_and_runs_back_to_back_only_through_its_job():
     assert STREAMING["pipelines"]["bronze_ingest"]["continuous"] is False   # continuous lost its driver on Free Edition
     job = STREAMING["jobs"]["streaming_back_to_back"]
-    assert job["continuous"] == {"pause_status": "PAUSED"}
+    # Not a continuous trigger: it ran the pipeline as one never-ending update, past Free Edition's ~20-minute driver.
+    assert "continuous" not in job
+    assert job["schedule"] == {"quartz_cron_expression": "0 * * * * ?", "timezone_id": "UTC", "pause_status": "PAUSED"}
+    assert job["max_concurrent_runs"] == 1 and job["queue"] == {"enabled": False}   # a busy minute is skipped, not queued
     assert job["tasks"][0]["pipeline_task"]["pipeline_id"] == "${resources.pipelines.bronze_ingest.id}"
 
 

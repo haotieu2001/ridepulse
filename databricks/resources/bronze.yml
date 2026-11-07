@@ -5,7 +5,7 @@
 # How it runs (#25), and why:
 #   - Every 10 minutes, a run took ~10.5 min (3 to start, then every table) and alerts reached email at p95 24 min.
 #   - Continuous mode lost its serverless driver every 18-34 minutes on Free Edition, and once stalled silver for good.
-#   - So: back to back, as a job with a continuous trigger, with the views that are recomputed in full moved out to
+#   - So: back to back, as a job on a one-minute schedule, with the views that are recomputed in full moved out to
 #     views_every_10_min (a job task, not a second pipeline: Free Edition runs one active pipeline per type).
 # Both jobs start paused. The window Lambda (services/window) unpauses them when a demo window opens and pauses them
 # when it closes, as the ridepulse-window service principal, so nothing reads Kafka or spends quota outside a window.
@@ -47,9 +47,16 @@ resources:
   jobs:
     streaming_back_to_back:
       name: streaming_back_to_back
-      # A new run starts as soon as the last one ends; paused outside a window.
-      continuous:
+      # Every minute, one run at a time and no queue: a trigger that finds a run going is skipped, so a new run starts
+      # within a minute of the last one ending. Not a continuous trigger: that ran the pipeline as one update that
+      # never ended, and Free Edition loses a driver ~20 minutes into an update (2026-11-07). Paused outside a window.
+      schedule:
+        quartz_cron_expression: "0 * * * * ?"
+        timezone_id: UTC
         pause_status: PAUSED
+      max_concurrent_runs: 1
+      queue:
+        enabled: false
       tasks:
         - task_key: streaming
           pipeline_task:
