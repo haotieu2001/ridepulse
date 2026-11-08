@@ -375,7 +375,6 @@ MARTS = ["agg_zone_hourly", "agg_daily_economics", "agg_driver_weekly", "agg_cbd
 # Account-level groups: Unity Catalog grants only to those, and Free Edition makes them through the workspace's
 # /api/2.0/account/scim/v2 (no account console). docs/security.md has how they were made.
 OPS_GROUP = "ridepulse-ops"   # may see per-driver rows (NFR-9, #38)
-READERS = ["ridepulse-finance", "ridedesk"]   # read gold, and only gold
 PII = ["dim_driver", "fct_driver_shifts", "recon_payouts"]   # driver_id tagged pii: NULL outside ops; agg_driver_weekly is row-filtered
 PRIMARY = {"dim_zone": "zone_id", "dim_provider": "provider_code", "dim_date": "date", "dim_hour": "hour",
            "dim_weather_day": "date", "dim_driver": "driver_sk", "fct_trips": "trip_key", "fct_driver_shifts": "shift_id"}
@@ -532,8 +531,8 @@ class Gold:
           tag policy made once through /api/2.1/tag-policies (docs/security.md).
         - agg_driver_weekly shows a driver only their own rows, through ops.driver_accounts (user -> driver; empty here,
           the drivers are synthetic). Its driver_id isn't tagged: a driver sees their own id.
-        - Consumers read gold only (READERS): finance for the economics and reconciliations, RideDesk (project 2) for
-          its support answers. SELECT on the schema covers every gold table and view, not the functions.
+        - Consumers read gold only: finance for the economics and reconciliations, RideDesk (project 2) for its support
+          answers. Those grants are Terraform's (infra/terraform/databricks, #77): long-lived access, not part of a build.
 
         Tags, the policy and the row filter survive the overwrites (checked 2026-11-08); setting them each build is for
         a new table, and costs nothing when they're already there."""
@@ -554,9 +553,6 @@ class Gold:
               "COMMENT 'Driver ids are ops-only (NFR-9)' "
               f"COLUMN MASK {self.t('gold', 'driver_id_mask')} TO `account users` EXCEPT `{OPS_GROUP}` "
               "FOR TABLES MATCH COLUMNS has_tag_value('pii', 'driver_id') AS c ON COLUMN c")
-        for group in READERS:
-            s.sql(f"GRANT USE CATALOG ON CATALOG {self.catalog} TO `{group}`")
-            s.sql(f"GRANT USE SCHEMA, SELECT ON SCHEMA {self.catalog}.gold TO `{group}`")
 
     def refresh_monitors(self) -> None:
         """Refresh the data quality monitors on gold (#36), where they exist: a missing one is skipped, not a failure."""

@@ -41,8 +41,9 @@ OAuth token, deleted afterwards:
 
 The owner, an ops member, still reads every id (2,909 drivers, 5,668 weekly rows).
 
-**Set up by hand** (#77 moves these into Terraform). Free Edition has no account console, but the workspace
-exposes the account API:
+**In Terraform since #77** (`infra/terraform/databricks`): the groups, their workspace assignment and entitlements,
+warehouse `CAN_USE`, the reader grants and the `pii` tag policy, imported with no changes. How they were first made,
+since Free Edition has no account console but the workspace exposes the account API:
 
 - **Account groups:** `POST /api/2.0/account/scim/v2/Groups`. Unity Catalog grants only to account groups: workspace
   groups (the first `ridepulse-ops`) fail with `PRINCIPAL_DOES_NOT_EXIST`.
@@ -50,6 +51,14 @@ exposes the account API:
 - **Entitlements and warehouse:** `databricks-sql-access` for the two reader groups, and `CAN_USE` on the SQL warehouse.
 - **Governed tag:** `pii`, made with `POST /api/2.1/tag-policies`. ABAC conditions only accept governed tags, and
   only principals the tag policy allows may change its assignments.
+
+**Still by hand**, because neither the provider nor the rule-set API (it needs the account id) can reach them; both
+calls are written out in `infra/terraform/databricks/main.tf`:
+- **Account group membership:** "can only be managed in account". `ridepulse-ops` holds the owner and
+  `ridepulse-jobs`.
+- **`ASSIGN` on the `pii` tag** for `ridepulse-jobs`, in SQL (`GRANT ASSIGN ON GOVERNED TAG pii TO ...`).
+- **"Service principal: User" on `ridepulse-jobs`** for the owner, in the workspace UI. Binding a principal as a
+  job's `run_as` needs it.
 
 **Not covered yet.**
 
@@ -76,8 +85,18 @@ Catalog reads. Nothing alerts on it yet.
 ## 3. Databricks identities
 
 - `ridepulse-window` holds `CAN_MANAGE` on the three jobs it pauses and unpauses, which is the lowest level that can
-  edit a schedule. But it can also edit their tasks, and the jobs run as the owner, a workspace admin: a leaked
-  window secret could run code as admin. **Follow-up #77:** run the jobs as a dedicated non-admin principal.
+  edit a schedule. It can also edit their tasks, and they ran as the owner, a workspace admin: a leaked window secret
+  could have run code as admin.
+  - **Fixed in #77:** the streaming, views and daily jobs, and the `files_ingest` and `gold_build` jobs the daily one
+    starts, run as `ridepulse-jobs`.
+  - **What `ridepulse-jobs` holds:** all privileges and `MANAGE` on `ridepulse_dev`; membership of `ridepulse-ops`
+    (the gold build needs it); `CAN_RUN` on the two pipelines those jobs start; `CAN_VIEW` on the rest of the bundle.
+    Nothing at the workspace level.
+  - **Verified:** each job ran as it, the daily one as a full backfill of 2025-01-09, and gold came out whole (5,668
+    weekly rows, every driver id present).
+- OAuth secrets for `ridepulse-window`, `ridepulse-forwarder` and `ridepulse-ci` are made by Terraform and written
+  to SSM. Each has a one-year lifetime, is replaced by an apply after 330 days, and has its expiry as an output.
+  `make ci-secret` copies CI's into the repository secret.
 - `ridepulse-forwarder`: `USE SCHEMA` on `raw` and read/write on one volume. Kept.
 
 ## 4. Kafka
