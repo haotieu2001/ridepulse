@@ -1064,3 +1064,15 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   a literal `${...}`. Moved into the dev target.
 - Not measured yet: SLA-3 (a day's gold within 30 min of closing) needs a demo window; `daily_runs.built_at` and the
   watermark's commit time give it.
+
+### #34 AI/BI dashboard and Genie space
+- Dashboard `RidePulse` (dev target; `src/bi/build_dashboard.py` writes the `.lvdash.json` the bundle ships): pages
+  for daily economics (counters, trips and take rate per day, CBD fees, trips by hour per borough), the congestion
+  toll (trips/day, rider total, driver pay, take rate, speed per CBD relation x period) and reconciliations (breaks and
+  checks per reconciliation, the fee table, the payout breaks). One measure per chart. All six dataset queries run.
+  Not yet looked at in the browser.
+- Genie space `RidePulse trip economics` over `mv_trip_economics`, `agg_cbd_impact`, `agg_daily_economics`,
+  `dim_zone` (`scripts/bi/genie_space.py apply`); `check` asks its five sample questions and compares Genie's numbers
+  with each question's own SQL. First check 4/5: Uber's take rate came back null, because the instructions said
+  "HV0003 is Uber" and the metric view's provider dimension holds names. Instruction fixed: 5/5. The check is
+  lenient (every expected value among Genie's): the CBD question passed while Genie returned every relation.

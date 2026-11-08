@@ -33,7 +33,11 @@ extend-exclude = ["databricks/src/feasibility", "scripts/feasibility", "data", "
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP"]
 
+[tool.ruff.lint.per-file-ignores]
+# The dashboard's widget table reads better one widget a line.
+"databricks/src/bi/build_dashboard.py" = ["E501"]
+
 [tool.pytest.ini_options]
-testpaths = ["contracts/tests", "services", "db", "scripts/measure", "databricks/src/files/tests", "databricks/src/gold/tests"]
+testpaths = ["contracts/tests", "services", "db", "scripts/measure", "databricks/src/files/tests", "databricks/src/gold/tests", "scripts/bi"]
 pythonpath = ["."]
 addopts = "-q"

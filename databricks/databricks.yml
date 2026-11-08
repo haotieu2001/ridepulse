@@ -38,6 +38,12 @@ targets:
           grants:
             - principal: e3aee6fd-086b-40d1-9916-c46e9611d6d9   # ridepulse-forwarder
               privileges: [READ_VOLUME, WRITE_VOLUME]
+      # The AI/BI dashboard (#34): written by src/bi/build_dashboard.py. Dev only: its queries name ridepulse_dev.
+      dashboards:
+        ridepulse:
+          display_name: RidePulse
+          file_path: ./src/bi/ridepulse.lvdash.json
+          warehouse_id: ccb41dc830068dc3
       pipelines:
         # Plan path C (#27): a daily query-based pull of the dispatch database's reference tables, incremental on
         # each table's indexed updated_at cursor (V001), into bronze.neon_*. SCD type 2, so every version a pull

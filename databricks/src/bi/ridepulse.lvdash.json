@@ -1,0 +1,1000 @@
+{
+  "datasets": [
+    {
+      "name": "daily",
+      "displayName": "Daily economics",
+      "queryLines": [
+        "SELECT pickup_date, trips, gmv, driver_pay, take_rate, cbd_fees, cbd_trips FROM ridepulse_dev.gold.agg_daily_economics\n"
+      ]
+    },
+    {
+      "name": "hourly",
+      "displayName": "Trips by hour and borough",
+      "queryLines": [
+        "SELECT z.borough, h.pickup_hour, sum(h.trips) AS trips\n",
+        "FROM ridepulse_dev.gold.agg_zone_hourly h JOIN ridepulse_dev.gold.dim_zone z ON h.pickup_zone_id = z.zone_id GROUP BY ALL\n"
+      ]
+    },
+    {
+      "name": "cbd",
+      "displayName": "Congestion toll impact",
+      "queryLines": [
+        "SELECT period, cbd_relation, trips_per_day, avg_rider_total, avg_driver_pay, take_rate, avg_mph\n",
+        "FROM ridepulse_dev.gold.agg_cbd_impact\n"
+      ]
+    },
+    {
+      "name": "recon",
+      "displayName": "Reconciliations",
+      "queryLines": [
+        "SELECT reconciliation, day, checked, breaks FROM ridepulse_dev.gold.agg_recon_daily\n"
+      ]
+    },
+    {
+      "name": "fees",
+      "displayName": "Fee checks",
+      "queryLines": [
+        "SELECT fee, sum(trips_charged) AS trips_charged, sum(collected) AS collected, sum(expected) AS expected,\n",
+        "sum(breaks) AS breaks FROM ridepulse_dev.gold.recon_fees WHERE breaks IS NOT NULL GROUP BY fee\n"
+      ]
+    },
+    {
+      "name": "payout_breaks",
+      "displayName": "Payout breaks",
+      "queryLines": [
+        "SELECT week_start, driver_id, break, earned_cents, paid_cents FROM ridepulse_dev.gold.recon_payouts WHERE break IS NOT NULL\n"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "economics",
+      "displayName": "Daily economics",
+      "layout": [
+        {
+          "widget": {
+            "name": "trips_total",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "daily",
+                  "fields": [
+                    {
+                      "name": "sum(trips)",
+                      "expression": "SUM(`trips`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(trips)",
+                  "displayName": "Trips"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Trips"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "gmv_total",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "daily",
+                  "fields": [
+                    {
+                      "name": "sum(gmv)",
+                      "expression": "SUM(`gmv`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(gmv)",
+                  "displayName": "Gross bookings ($)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Gross bookings ($)"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "pay_total",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "daily",
+                  "fields": [
+                    {
+                      "name": "sum(driver_pay)",
+                      "expression": "SUM(`driver_pay`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(driver_pay)",
+                  "displayName": "Driver pay ($)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Driver pay ($)"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "trips_per_day",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "daily",
+                  "fields": [
+                    {
+                      "name": "pickup_date",
+                      "expression": "`pickup_date`"
+                    },
+                    {
+                      "name": "sum(trips)",
+                      "expression": "SUM(`trips`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "pickup_date",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "pickup date"
+                },
+                "y": {
+                  "fieldName": "sum(trips)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "trips"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Trips per day"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "take_rate_per_day",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "daily",
+                  "fields": [
+                    {
+                      "name": "pickup_date",
+                      "expression": "`pickup_date`"
+                    },
+                    {
+                      "name": "avg(take_rate)",
+                      "expression": "AVG(`take_rate`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "pickup_date",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "pickup date"
+                },
+                "y": {
+                  "fieldName": "avg(take_rate)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "take rate"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Take rate per day (1 - driver pay / base fare)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 9,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "cbd_fees_per_day",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "daily",
+                  "fields": [
+                    {
+                      "name": "pickup_date",
+                      "expression": "`pickup_date`"
+                    },
+                    {
+                      "name": "sum(cbd_fees)",
+                      "expression": "SUM(`cbd_fees`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "pickup_date",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "pickup date"
+                },
+                "y": {
+                  "fieldName": "sum(cbd_fees)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "cbd fees"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "CBD fees collected per day ($)"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 9,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "hourly_by_borough",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "hourly",
+                  "fields": [
+                    {
+                      "name": "pickup_hour",
+                      "expression": "`pickup_hour`"
+                    },
+                    {
+                      "name": "sum(trips)",
+                      "expression": "SUM(`trips`)"
+                    },
+                    {
+                      "name": "borough",
+                      "expression": "`borough`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "pickup_hour",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "pickup hour"
+                },
+                "y": {
+                  "fieldName": "sum(trips)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "trips"
+                },
+                "color": {
+                  "fieldName": "borough",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "borough"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Trips by hour of day, per borough"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 15,
+            "width": 6,
+            "height": 7
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS"
+    },
+    {
+      "name": "congestion",
+      "displayName": "Congestion toll",
+      "layout": [
+        {
+          "widget": {
+            "name": "cbd_trips",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "cbd",
+                  "fields": [
+                    {
+                      "name": "cbd_relation",
+                      "expression": "`cbd_relation`"
+                    },
+                    {
+                      "name": "sum(trips_per_day)",
+                      "expression": "SUM(`trips_per_day`)"
+                    },
+                    {
+                      "name": "period",
+                      "expression": "`period`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "cbd_relation",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "cbd relation"
+                },
+                "y": {
+                  "fieldName": "sum(trips_per_day)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "trips per day"
+                },
+                "color": {
+                  "fieldName": "period",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "period"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Trips per day, by where they meet the CBD"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "cbd_rider",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "cbd",
+                  "fields": [
+                    {
+                      "name": "cbd_relation",
+                      "expression": "`cbd_relation`"
+                    },
+                    {
+                      "name": "sum(avg_rider_total)",
+                      "expression": "SUM(`avg_rider_total`)"
+                    },
+                    {
+                      "name": "period",
+                      "expression": "`period`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "cbd_relation",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "cbd relation"
+                },
+                "y": {
+                  "fieldName": "sum(avg_rider_total)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "avg rider total"
+                },
+                "color": {
+                  "fieldName": "period",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "period"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Rider total per trip ($)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 7,
+            "width": 3,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "cbd_driver",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "cbd",
+                  "fields": [
+                    {
+                      "name": "cbd_relation",
+                      "expression": "`cbd_relation`"
+                    },
+                    {
+                      "name": "sum(avg_driver_pay)",
+                      "expression": "SUM(`avg_driver_pay`)"
+                    },
+                    {
+                      "name": "period",
+                      "expression": "`period`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "cbd_relation",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "cbd relation"
+                },
+                "y": {
+                  "fieldName": "sum(avg_driver_pay)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "avg driver pay"
+                },
+                "color": {
+                  "fieldName": "period",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "period"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Driver pay per trip ($)"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 7,
+            "width": 3,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "cbd_take",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "cbd",
+                  "fields": [
+                    {
+                      "name": "cbd_relation",
+                      "expression": "`cbd_relation`"
+                    },
+                    {
+                      "name": "sum(take_rate)",
+                      "expression": "SUM(`take_rate`)"
+                    },
+                    {
+                      "name": "period",
+                      "expression": "`period`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "cbd_relation",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "cbd relation"
+                },
+                "y": {
+                  "fieldName": "sum(take_rate)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "take rate"
+                },
+                "color": {
+                  "fieldName": "period",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "period"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Take rate"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 14,
+            "width": 3,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "cbd_speed",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "cbd",
+                  "fields": [
+                    {
+                      "name": "cbd_relation",
+                      "expression": "`cbd_relation`"
+                    },
+                    {
+                      "name": "sum(avg_mph)",
+                      "expression": "SUM(`avg_mph`)"
+                    },
+                    {
+                      "name": "period",
+                      "expression": "`period`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "cbd_relation",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "cbd relation"
+                },
+                "y": {
+                  "fieldName": "sum(avg_mph)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "avg mph"
+                },
+                "color": {
+                  "fieldName": "period",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "period"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Average trip speed (mph)"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 14,
+            "width": 3,
+            "height": 7
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS"
+    },
+    {
+      "name": "reconciliation",
+      "displayName": "Reconciliations",
+      "layout": [
+        {
+          "widget": {
+            "name": "recon_breaks",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "recon",
+                  "fields": [
+                    {
+                      "name": "reconciliation",
+                      "expression": "`reconciliation`"
+                    },
+                    {
+                      "name": "sum(breaks)",
+                      "expression": "SUM(`breaks`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "reconciliation",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "reconciliation"
+                },
+                "y": {
+                  "fieldName": "sum(breaks)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "breaks"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Breaks per reconciliation"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "recon_checked",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "recon",
+                  "fields": [
+                    {
+                      "name": "reconciliation",
+                      "expression": "`reconciliation`"
+                    },
+                    {
+                      "name": "sum(checked)",
+                      "expression": "SUM(`checked`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "reconciliation",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "reconciliation"
+                },
+                "y": {
+                  "fieldName": "sum(checked)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "checked"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Checked per reconciliation"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 0,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "fee_checks",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "fees",
+                  "fields": [
+                    {
+                      "name": "fee",
+                      "expression": "`fee`"
+                    },
+                    {
+                      "name": "trips_charged",
+                      "expression": "`trips_charged`"
+                    },
+                    {
+                      "name": "collected",
+                      "expression": "`collected`"
+                    },
+                    {
+                      "name": "expected",
+                      "expression": "`expected`"
+                    },
+                    {
+                      "name": "breaks",
+                      "expression": "`breaks`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "fee",
+                    "displayName": "fee"
+                  },
+                  {
+                    "fieldName": "trips_charged",
+                    "displayName": "trips charged"
+                  },
+                  {
+                    "fieldName": "collected",
+                    "displayName": "collected"
+                  },
+                  {
+                    "fieldName": "expected",
+                    "displayName": "expected"
+                  },
+                  {
+                    "fieldName": "breaks",
+                    "displayName": "breaks"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Fees against fare_rules"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 6,
+            "width": 6,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "payout_breaks_t",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "payout_breaks",
+                  "fields": [
+                    {
+                      "name": "week_start",
+                      "expression": "`week_start`"
+                    },
+                    {
+                      "name": "driver_id",
+                      "expression": "`driver_id`"
+                    },
+                    {
+                      "name": "break",
+                      "expression": "`break`"
+                    },
+                    {
+                      "name": "earned_cents",
+                      "expression": "`earned_cents`"
+                    },
+                    {
+                      "name": "paid_cents",
+                      "expression": "`paid_cents`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "week_start",
+                    "displayName": "week start"
+                  },
+                  {
+                    "fieldName": "driver_id",
+                    "displayName": "driver id"
+                  },
+                  {
+                    "fieldName": "break",
+                    "displayName": "break"
+                  },
+                  {
+                    "fieldName": "earned_cents",
+                    "displayName": "earned cents"
+                  },
+                  {
+                    "fieldName": "paid_cents",
+                    "displayName": "paid cents"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Payout breaks"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 11,
+            "width": 6,
+            "height": 6
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS"
+    }
+  ]
+}
