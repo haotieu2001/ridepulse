@@ -28,4 +28,5 @@ scripts/db.sh psql -X -q -v ON_ERROR_STOP=1 -c \
   "SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots WHERE slot_name = '$SLOT'"
 echo "slots now: $(scripts/db.sh psql -X -A -t -c "SELECT string_agg(slot_name, ', ') FROM pg_replication_slots")"
 
-terraform -chdir="$TF" destroy -input=false
+# AUTO_APPROVE=1 for an unattended run (the SLA-8 drill, #39); by hand it asks first.
+terraform -chdir="$TF" destroy -input=false ${AUTO_APPROVE:+-auto-approve}

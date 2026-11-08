@@ -1133,3 +1133,21 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
 - Follow-ups: per-workload Kafka identities (#102); jobs run as a non-admin principal, and the groups in Terraform (#77).
 - Noticed: the budget emails haotieukim2001@gmail.com, while SSM `/ridepulse/dev/alerts/email` holds another address.
   Left as it is; for the owner to pick one.
+### #39 Cost report and the 30-minute rebuild
+- Cost (`docs/cost.md`): billed $0.38 in October and $0.95 in November 1-8, all AWS; within NFR-10 only because the
+  Confluent trial credit pays for Kafka. Confluent usage was $10.34 in November 1-8, almost all eCKU-hours (75 at
+  $0.135) on demo days, for a load of ~24 requests/s and 0.05 MB/s; uncapped that is ~$50/month after the credit.
+  Capped with `max_ecku = 1` (the free eCKU), applied with -target: a full plan also replaced the Schema Registry keys
+  and the ping schema (its data source re-reads when the cluster changes), which would have changed the schema id the
+  pipeline pins. After the targeted apply a full plan shows no changes.
+- Databricks at list price (`system.billing.usage` x `list_prices`): ~$24 October, ~$72 November 1-8, billed $0.
+- SLA-8 drill (`docs/runbooks/rebuild.md`): make down, Debezium destroyed with its slot, recreated from Terraform,
+  make up: healthy end to end in 12.5 minutes (slot active 4.0, ticking 4.9, silver 12.4, health 12.5). The first try
+  stopped at `terraform destroy`'s prompt after the slot was dropped: `debezium_down.sh` takes `AUTO_APPROVE=1` now.
+- Job failure emails no longer fire for skipped runs (`no_alert_for_skipped_runs`): the owner got one per minute
+  while an update ran, as the 1-minute trigger was skipped.
+- The first pipeline update after a deploy failed twice more today: pings flow `DUPLICATED_MAP_KEY` (13:49) and R4
+  `DUPLICATE_SOURCE_NAMES` (14:04), each passing on the next update. Four times in two days, on flows reading two
+  streams or decoding Avro: a fix is the next PR.
+- After the drill, completeness: silver equals Neon (293,213 events, 2,834 drivers). The check had outgrown the
+  25 MB inline result limit; it now narrows to Neon's window, counts repeats in the warehouse, and reads external links.

@@ -159,6 +159,7 @@ targets:
                              "--start={{tasks.gate.values.start}}", "--end={{tasks.gate.values.end}}"]
           email_notifications:
             on_failure: ["${var.alert_email}"]
+            no_alert_for_skipped_runs: true   # a 1-minute trigger skipped while a run is going is not a failure
           environments:
             - environment_key: default
               spec:

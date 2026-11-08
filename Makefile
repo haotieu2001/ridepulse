@@ -21,7 +21,7 @@ help:
 	@echo "landing-plan / landing-apply      Terraform: the S3 landing bucket"
 	@echo "confluent-plan / confluent-apply  Terraform: Confluent topics, ACLs and schemas"
 	@echo "debezium-plan / debezium-up       Terraform: the Debezium instance for a demo window"
-	@echo "debezium-down                     stop Debezium, drop its slot, destroy the instance"
+	@echo "debezium-down                     stop Debezium, drop its slot, destroy the instance (AUTO_APPROVE=1: no prompt)"
 	@echo "replayer-plan / replayer-apply    Terraform: replayer Lambda, schedules, demo window"
 	@echo "up / down / window-status         open or close a demo window now (Debezium + replayer)"
 	@echo "replay DATE=2025-01-06 SPEED=10   start the replay, or jump forward, at a day boundary"

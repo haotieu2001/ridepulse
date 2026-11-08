@@ -19,6 +19,7 @@ import pathlib
 import subprocess
 import sys
 import time
+import urllib.request
 from datetime import datetime, timedelta
 
 import psycopg
@@ -49,18 +50,25 @@ def dbx(*args: str, body: dict | None = None) -> dict:
 def sql(statement: str) -> list[list]:
     """All rows of a statement on the workspace's SQL warehouse, through every result chunk."""
     warehouse = cli("warehouses", "list", "-o", "json")[0]["id"]
+    # EXTERNAL_LINKS: an inline result stops at 25 MB, and Neon's 48-hour window alone is ~300k event ids (~40 MB).
+    # Each chunk is a presigned URL, fetched without the workspace token.
     r = dbx("post", "/api/2.0/sql/statements", body={"warehouse_id": warehouse, "statement": statement,
-                                                     "wait_timeout": "50s", "on_wait_timeout": "CONTINUE"})
+                                                     "wait_timeout": "50s", "on_wait_timeout": "CONTINUE",
+                                                     "disposition": "EXTERNAL_LINKS", "format": "JSON_ARRAY"})
     while r["status"]["state"] in ("PENDING", "RUNNING"):
         time.sleep(3)
         r = dbx("get", f"/api/2.0/sql/statements/{r['statement_id']}")
     if r["status"]["state"] != "SUCCEEDED":
         raise SystemExit(f"silver query failed: {r['status'].get('error', {}).get('message')}")
-    rows, chunk = list(r.get("result", {}).get("data_array", [])), r.get("result", {}).get("next_chunk_index")
-    while chunk is not None:
-        c = dbx("get", f"/api/2.0/sql/statements/{r['statement_id']}/result/chunks/{chunk}")
-        rows += c.get("data_array", [])
-        chunk = c.get("next_chunk_index")
+    rows: list[list] = []
+    links = r.get("result", {}).get("external_links", [])
+    while links:
+        link = links[0]
+        with urllib.request.urlopen(link["external_link"]) as f:
+            rows += json.loads(f.read())
+        nxt = link.get("next_chunk_index")
+        links = dbx("get", f"/api/2.0/sql/statements/{r['statement_id']}/result/chunks/{nxt}").get("external_links", []) \
+            if nxt is not None else []
     return rows
 
 
@@ -93,9 +101,15 @@ def main() -> int:
         neon_drivers = driver_rows(cur)
     keys = {k for k, _, _ in expected.values()}
 
-    events = sql(f"SELECT event_id, trip_key, event_type, count(*) OVER (PARTITION BY event_id) FROM {a.catalog}.silver.trip_events")
-    silver = {e for e, k, _, _ in events if k in keys}
-    repeated = sorted({e for e, k, _, n in events if int(n) > 1})
+    # Only the events of the trips Neon still holds can be compared, so only those come back: everything since Neon's
+    # oldest trip, less an hour. Pulling the whole table passed the 25 MB a statement may return inline (2026-11-08).
+    since = min(t for _, _, t in expected.values()) - timedelta(hours=1) if expected else watermark
+    events = sql(f"SELECT event_id, trip_key FROM {a.catalog}.silver.trip_events "
+                 f"WHERE occurred_at >= TIMESTAMP_NTZ '{since.isoformat(sep=' ')}'")
+    silver = {e for e, k in events if k in keys}
+    # Repeats anywhere in silver, counted by the warehouse.
+    repeated = sorted(e for (e,) in sql(f"SELECT event_id FROM {a.catalog}.silver.trip_events GROUP BY event_id "
+                                        "HAVING count(*) > 1 LIMIT 1000"))
     missing = sorted(set(expected) - silver, key=lambda e: expected[e][2])
     extra = sorted(silver - set(expected))
     stamp = "yyyy-MM-dd'T'HH:mm:ss"
