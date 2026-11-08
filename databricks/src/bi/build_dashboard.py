@@ -59,11 +59,36 @@ def counter(name, dataset, value, title, agg="SUM"):
                      "frame": {"showTitle": True, "title": title}}}
 
 
+# A table column's type; anything not listed is text. The table widget (version 1) rejects a column without its full
+# definition ("Invalid widget definition"), so table_column() writes every attribute, as Databricks' own dashboards do.
+COLUMN_TYPES = {"trips_charged": "integer", "breaks": "integer", "earned_cents": "integer", "paid_cents": "integer",
+                "collected": "float", "expected": "float", "value": "float", "limit_value": "float", "percent_null": "float",
+                "percent_zeros": "float", "week_start": "datetime", "checked_at": "datetime", "ok": "boolean"}
+DISPLAY_AS = {"integer": "number", "float": "number", "date": "datetime", "datetime": "datetime", "boolean": "boolean",
+              "string": "string"}
+
+
+def table_column(name: str, order: int) -> dict:
+    kind = COLUMN_TYPES.get(name, "string")
+    column = {"fieldName": name, "displayName": name.replace("_", " "), "title": name.replace("_", " "), "type": kind,
+              "displayAs": DISPLAY_AS[kind], "order": order, "visible": True, "alignContent": "left" if kind == "string" else "right",
+              "allowHTML": False, "allowSearch": False, "highlightLinks": False, "preserveWhitespace": False, "useMonospaceFont": False,
+              "booleanValues": ["false", "true"], "imageUrlTemplate": "{{ @ }}", "imageTitleTemplate": "{{ @ }}", "imageWidth": "",
+              "imageHeight": "", "linkUrlTemplate": "{{ @ }}", "linkTextTemplate": "{{ @ }}", "linkTitleTemplate": "{{ @ }}",
+              "linkOpenInNewTab": True}
+    if kind in ("integer", "float"):
+        column["numberFormat"] = "0" if kind == "integer" else "0.00"
+    if kind in ("date", "datetime"):
+        column["dateTimeFormat"] = "YYYY-MM-DD HH:mm:ss.SSS"
+    return column
+
+
 def table(name, dataset, columns, title):
     return {"name": name, "queries": [{"name": "main_query", "query": {"datasetName": dataset,
                                                                        "fields": [field(c, f"`{c}`") for c in columns], "disaggregated": True}}],
-            "spec": {"version": 1, "widgetType": "table",
-                     "encodings": {"columns": [{"fieldName": c, "displayName": c.replace("_", " ")} for c in columns]},
+            "spec": {"version": 1, "widgetType": "table", "allowHTMLByDefault": False, "condensed": True, "withRowNumber": False,
+                     "itemsPerPage": 25, "paginationSize": "default", "invisibleColumns": [],
+                     "encodings": {"columns": [table_column(c, i) for i, c in enumerate(columns)]},
                      "frame": {"showTitle": True, "title": title}}}
 
 
