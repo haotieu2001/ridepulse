@@ -88,11 +88,17 @@ data "aws_iam_policy_document" "github_ci_state" {
     resources = [for s in local.ci_planned_stacks : "${aws_s3_bucket.tfstate.arn}/${s}/terraform.tfstate"]
   }
   # ReadOnlyAccess would read the other states (state.tf's bucket policy denies them) and every secret: SSM decrypts a
-  # SecureString with its default key for any principal allowed to read the parameter.
+  # SecureString with its default key for any principal allowed to read the parameter. So every parameter is denied
+  # except the ones the planned stacks read, none of them secret: the alert email (replayer) and AWS's public AMI ids
+  # (debezium). A secret added later is denied without anyone remembering to.
   statement {
-    effect    = "Deny"
-    actions   = ["ssm:GetParameter", "ssm:GetParameters", "ssm:GetParametersByPath", "ssm:GetParameterHistory"]
-    resources = ["arn:aws:ssm:*:${data.aws_caller_identity.current.account_id}:parameter/ridepulse/*"]
+    effect  = "Deny"
+    actions = ["ssm:GetParameter", "ssm:GetParameters", "ssm:GetParametersByPath", "ssm:GetParameterHistory"]
+    not_resources = [
+      "arn:aws:ssm:*:${data.aws_caller_identity.current.account_id}:parameter/ridepulse/*/alerts",
+      "arn:aws:ssm:*:${data.aws_caller_identity.current.account_id}:parameter/ridepulse/*/alerts/*",
+      "arn:aws:ssm:*::parameter/aws/service/*",
+    ]
   }
   statement {
     effect    = "Deny"
