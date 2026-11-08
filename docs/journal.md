@@ -1219,3 +1219,13 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
 - Now: `pipelines.maxFlowRetryAttempts: "0"` (fail the update at once), `max_retries: 1` on the streaming job's task
   (a fresh update at once), and pipeline emails only on fatal failures. An update that fails twice running still
   emails. Deployed; an update ran clean on it. The retry path shows the next time the failure happens.
+
+### Dependencies: pyspark follows the runtime
+- Dependabot (on since #38) proposed pyspark 4.0.1 -> 4.2.0. The pipelines run Databricks Runtime 18, Spark 4.1.0 (the
+  SQL warehouse reports 4.2.0), so the local Spark tests were a minor version behind production and 4.2 would have
+  put them one ahead. Pinned 4.1.3, the newest 4.1 at least two weeks old (4.1.4 was 12 days); all 32 Spark tests
+  pass on it. Dependabot now proposes pyspark patches only. chispa 0.12.0 and ruff 0.17.2 from the same PR.
+- Every Dependabot PR failed `bundle`: Dependabot runs get no repository secrets. The step now says it was skipped;
+  main validates on merge (#111). The Confluent provider bump (2.91.0) was planned locally first: no changes.
+- Found while checking: the SLA-8 drill (run from a branch made before #103) had put Debezium's allow-all egress
+  back. Restored from main; all five stacks now plan clean against main.
