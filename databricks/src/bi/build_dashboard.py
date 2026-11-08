@@ -24,6 +24,13 @@ FROM {G}.agg_cbd_impact"""),
     "fees": ("Fee checks", f"""SELECT fee, sum(trips_charged) AS trips_charged, sum(collected) AS collected, sum(expected) AS expected,
 sum(breaks) AS breaks FROM {G}.recon_fees WHERE breaks IS NOT NULL GROUP BY fee"""),
     "health": ("Platform health", "SELECT checked_at, metric, value, limit_value, ok FROM ridepulse_dev.ops.platform_health"),
+    # Data quality (#36): the monitor's profile of the daily economics mart, one snapshot per gold build.
+    "dq_rows": ("DQ: rows per snapshot", """SELECT window.start AS snapshot_at, count AS row_count
+FROM ridepulse_dev.ops.agg_daily_economics_profile_metrics WHERE column_name = ':table'"""),
+    "dq_latest": ("DQ: latest snapshot per column", """SELECT column_name, round(percent_null, 1) AS percent_null,
+round(percent_zeros, 1) AS percent_zeros, CASE WHEN column_name = 'cbd_fees' THEN 'expected: no CBD fee before 2025-01-05' END AS note
+FROM ridepulse_dev.ops.agg_daily_economics_profile_metrics
+WHERE column_name <> ':table' AND window.start = (SELECT max(window.start) FROM ridepulse_dev.ops.agg_daily_economics_profile_metrics)"""),
     "payout_breaks": ("Payout breaks", f"SELECT week_start, driver_id, break, earned_cents, paid_cents FROM {G}.recon_payouts WHERE break IS NOT NULL"),
 }
 
@@ -98,6 +105,10 @@ PAGES = [
         at(chart("health_value", "health", "line", "checked_at", "value", "Each check over time (limits: silver lag 20 min, rules lag 45 "
                  "simulated min, streaming run 17 min, completeness 0)", color="metric", agg="MAX"), 0, 0, 6, 7),
         at(table("health_rows", "health", ["checked_at", "metric", "value", "limit_value", "ok"], "Checks"), 0, 7, 6, 7),
+        at(counter("dq_row_count", "dq_rows", "row_count", "Data quality: days in agg_daily_economics (last snapshot)", agg="MAX"), 0, 14, 2, 4),
+        at(chart("dq_rows_over_time", "dq_rows", "line", "snapshot_at", "row_count", "Rows per data quality snapshot", agg="MAX"), 2, 14, 4, 4),
+        at(table("dq_columns", "dq_latest", ["column_name", "percent_null", "percent_zeros", "note"],
+                 "Data quality: % null and % zero per column, last snapshot"), 0, 18, 6, 7),
     ]),
 ]
 
