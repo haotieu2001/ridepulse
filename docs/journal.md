@@ -1115,6 +1115,20 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   the driver. One was a real bug: prep's `--out-dir` store had no `get_bytes`, so that mode could crash.
 - Left on #76: silver and supply logic as plain functions with tests, and a Postgres-Kafka-Debezium container test.
 
+### #76 Supply and silver checks as testable functions (rest of #76)
+- `ops/supply_logic.py` (ticks, per-zone supply intervals, supply at window ends, per area and borough) and
+  `silver/silver_logic.py` (the trip-event and ping contract checks) hold the logic as plain DataFrame functions; the
+  pipeline files only read tables and call them. Moved verbatim, not rewritten.
+- Local Spark tests: a tick is its transaction with its last watermark; a driver inserted and signed on in one tick
+  counts once; a snapshot row takes the watermark read with it; supply at W is the interval holding W. Silver, with
+  the shipped expectations.yml and contract: `fail` checks quarantine with their name, `flag` checks set dq_<name>,
+  bad and missing values are named, and pings outside NYC / zone range / without a time are rejected.
+- Deployed and run: the first update after the deploy failed only R4 with STREAMING_QUERY_EVOLUTION_ERROR.
+  DUPLICATE_SOURCE_NAMES (three attempts), then the pipeline's own retry and a further update completed every flow on
+  the same code, runtime and data. Source naming is an opt-in feature (source evolution, offset log V2) this pipeline
+  does not enable, and `name()` is not allowed on a view-backed source like R4's; left as a platform transient the
+  retry absorbs. Not the first time: the event log shows R2 failing the same way on 2026-11-07 14:15, also right
+  after a deploy (#37's runbook covers it). Revisit if it ever fails two updates in a row.
 ### #76 A real Postgres -> Debezium -> Kafka test in CI
 - CI job `cdc`: Postgres 18 with logical WAL, Redpanda v26.2.5 as Kafka and Debezium Server 3.7.0 (downloaded with
   production's SHA-512), run with `dev.properties` followed by `ci/cdc/local.properties`, so the routing under test is
