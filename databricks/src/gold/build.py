@@ -372,7 +372,11 @@ def agg_recon_daily(completeness: DataFrame, payouts: DataFrame | None, fees: Da
 
 MARTS = ["agg_zone_hourly", "agg_daily_economics", "agg_driver_weekly", "agg_cbd_impact", "recon_completeness", "recon_payouts",
          "recon_fees", "agg_recon_daily"]
-OPS_GROUP = "ridepulse-ops"   # the workspace group that may see per-driver rows (NFR-9, #38)
+# Account-level groups: Unity Catalog grants only to those, and Free Edition makes them through the workspace's
+# /api/2.0/account/scim/v2 (no account console). docs/security.md has how they were made.
+OPS_GROUP = "ridepulse-ops"   # may see per-driver rows (NFR-9, #38)
+READERS = ["ridepulse-finance", "ridedesk"]   # read gold, and only gold
+PII = ["dim_driver", "fct_driver_shifts", "recon_payouts"]   # driver_id tagged pii: NULL outside ops; agg_driver_weekly is row-filtered
 PRIMARY = {"dim_zone": "zone_id", "dim_provider": "provider_code", "dim_date": "date", "dim_hour": "hour",
            "dim_weather_day": "date", "dim_driver": "driver_sk", "fct_trips": "trip_key", "fct_driver_shifts": "shift_id"}
 FOREIGN = [("fct_trips", "pickup_zone_id", "dim_zone"), ("fct_trips", "dropoff_zone_id", "dim_zone"),
@@ -469,6 +473,10 @@ class Gold:
         self.spark.sql(f"COMMENT ON TABLE {self.t('gold', name)} IS '{comment}'")
 
     def build(self, start: date, end: date) -> None:
+        # The masks apply to whoever reads, the build included: outside ridepulse-ops it would read NULL driver ids and
+        # write marts grouped on NULL without an error (it did, 2026-11-08, before the group had propagated).
+        if not self.spark.sql(f"SELECT is_account_group_member('{OPS_GROUP}')").first()[0]:
+            raise SystemExit(f"the gold build must run as a member of {OPS_GROUP}: it would read masked driver ids")
         self.drop_keys()
         s = self.spark
         self.whole(s.createDataFrame(PROVIDERS, "provider_code STRING, company STRING"), "dim_provider", "The four HVFHV licences")
@@ -512,10 +520,43 @@ class Gold:
         self.whole(agg_driver_weekly(shifts), "agg_driver_weekly", "Shifts, minutes and earnings per driver x week (row-filtered)")
         self.whole(agg_cbd_impact(trips, cbd), "agg_cbd_impact",
                    "The congestion toll per period x CBD relation (per day, ratios of sums)")
-        self.spark.sql(f"CREATE OR REPLACE FUNCTION {self.t('gold', 'ops_only')}(driver_id STRING) RETURN is_member('{OPS_GROUP}')")
-        self.spark.sql(f"ALTER TABLE {weekly} SET ROW FILTER {self.t('gold', 'ops_only')} ON (driver_id)")
         self.reconcile()
+        self.secure()
         self.refresh_monitors()
+
+    def secure(self) -> None:
+        """NFR-9 (#38): per-driver data is ops' to see.
+
+        - Columns tagged pii = driver_id read as NULL outside ridepulse-ops: one ABAC policy on the gold schema, so a new
+          table is covered by tagging its column (consumers group by driver_sk instead). The governed tag `pii` is a
+          tag policy made once through /api/2.1/tag-policies (docs/security.md).
+        - agg_driver_weekly shows a driver only their own rows, through ops.driver_accounts (user -> driver; empty here,
+          the drivers are synthetic). Its driver_id isn't tagged: a driver sees their own id.
+        - Consumers read gold only (READERS): finance for the economics and reconciliations, RideDesk (project 2) for
+          its support answers. SELECT on the schema covers every gold table and view, not the functions.
+
+        Tags, the policy and the row filter survive the overwrites (checked 2026-11-08); setting them each build is for
+        a new table, and costs nothing when they're already there."""
+        accounts, s = self.t("ops", "driver_accounts"), self.spark   # in ops: consumers never get that schema
+        s.sql(f"CREATE TABLE IF NOT EXISTS {accounts} (user_name STRING NOT NULL, driver_id STRING NOT NULL) "
+              "COMMENT 'Which workspace user is which driver: the row filter on agg_driver_weekly reads it (NFR-9)'")
+        s.sql(f"CREATE OR REPLACE FUNCTION {self.t('gold', 'driver_id_mask')}(driver_id STRING) RETURNS STRING "
+              "COMMENT 'NULL: the pii policy applies it to everyone outside ridepulse-ops (NFR-9)' "
+              "RETURN CAST(NULL AS STRING)")
+        s.sql(f"CREATE OR REPLACE FUNCTION {self.t('gold', 'ops_only')}(driver_id STRING) RETURNS BOOLEAN "
+              f"COMMENT 'All rows for ridepulse-ops; a driver their own rows (NFR-9)' "
+              f"RETURN is_account_group_member('{OPS_GROUP}') OR EXISTS "
+              f"(SELECT 1 FROM {accounts} a WHERE a.user_name = current_user() AND a.driver_id = ops_only.driver_id)")
+        s.sql(f"ALTER TABLE {self.t('gold', 'agg_driver_weekly')} SET ROW FILTER {self.t('gold', 'ops_only')} ON (driver_id)")
+        for name in PII:
+            s.sql(f"ALTER TABLE {self.t('gold', name)} ALTER COLUMN driver_id SET TAGS ('pii' = 'driver_id')")
+        s.sql(f"CREATE OR REPLACE POLICY pii_driver_id ON SCHEMA {self.catalog}.gold "
+              "COMMENT 'Driver ids are ops-only (NFR-9)' "
+              f"COLUMN MASK {self.t('gold', 'driver_id_mask')} TO `account users` EXCEPT `{OPS_GROUP}` "
+              "FOR TABLES MATCH COLUMNS has_tag_value('pii', 'driver_id') AS c ON COLUMN c")
+        for group in READERS:
+            s.sql(f"GRANT USE CATALOG ON CATALOG {self.catalog} TO `{group}`")
+            s.sql(f"GRANT USE SCHEMA, SELECT ON SCHEMA {self.catalog}.gold TO `{group}`")
 
     def refresh_monitors(self) -> None:
         """Refresh the data quality monitors on gold (#36), where they exist: a missing one is skipped, not a failure."""
