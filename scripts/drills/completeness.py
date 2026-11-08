@@ -41,7 +41,9 @@ def cli(*args: str) -> dict | list:
 
 
 def dbx(*args: str, body: dict | None = None) -> dict:
-    return cli("api", *args, *(["--json", json.dumps(body)] if body else []))
+    out = cli("api", *args, *(["--json", json.dumps(body)] if body else []))
+    assert isinstance(out, dict), f"expected an object from {args}"
+    return out
 
 
 def sql(statement: str) -> list[list]:

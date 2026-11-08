@@ -11,6 +11,7 @@ import io
 import json
 import struct
 import urllib.request
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -87,7 +88,7 @@ class KafkaSink:
                                  "compression.type": "lz4"})
         self.producer, self.encoder = producer, encoder
 
-    def send(self, pings: list[Ping], raw: list[tuple[str, bytes]] = ()) -> None:
+    def send(self, pings: list[Ping], raw: Sequence[tuple[str, bytes]] = ()) -> None:
         """`raw`: (key, bytes) sent as they are, for injected malformed messages (#21)."""
         errors = []
 

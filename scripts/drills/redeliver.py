@@ -30,7 +30,8 @@ for topic, (partitions, total) in plan.items():
     copies = []
     while len(copies) < sum(ends[p] - want[p] for p in range(partitions)):
         for m in consumer.consume(1000, timeout=5):
-            if not m.error() and m.offset() < ends[m.partition()]:
+            offset, partition = m.offset(), m.partition()
+            if not m.error() and offset is not None and partition is not None and offset < ends[partition]:
                 copies.append(m)
     for m in copies:
         producer.produce(topic, key=m.key(), value=m.value(), headers=m.headers(), partition=m.partition())

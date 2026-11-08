@@ -146,7 +146,7 @@ def latency_report(ts: list[Timing]) -> list[str]:
             stages = [stage_minutes(t) for t in group]
             parts = []
             for stage in stages[0]:
-                vals = [s[stage] for s in stages if s[stage] is not None]
+                vals = [v for s in stages if (v := s[stage]) is not None]
                 parts.append(f"{stage} {percentile(vals, .5):.1f}" if vals else f"{stage} n/a")
             out.append(f"  {name}: " + "; ".join(parts))
     return out
@@ -261,7 +261,7 @@ def score(incidents: list[Incident], alerts: list[Window], evaluated: list[Windo
     for a in alerts:
         if not any(lab.matches(a) for lab in ls):
             clean.setdefault(a.rule, [0, 0])[0] += 1
-    return Score(detected, {k: tuple(v) for k, v in precision.items()}, {k: tuple(v) for k, v in clean.items()})
+    return Score(detected, {k: (v[0], v[1]) for k, v in precision.items()}, {k: (v[0], v[1]) for k, v in clean.items()})
 
 
 def score_report(incidents: list[Incident], s: Score) -> list[str]:

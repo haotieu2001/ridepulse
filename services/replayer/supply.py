@@ -67,6 +67,23 @@ class Driver:
     online_since: datetime | None
     leaving: bool                     # past the shift limit while busy: signs off at dropoff
 
+    # The invariants the supply relies on, stated once: an online driver has a zone and a shift start, a busy one a
+    # trip (V001 enforces them in Postgres). A breach names the driver instead of failing on None somewhere later.
+    @property
+    def zone(self) -> int:
+        assert self.zone_id is not None, f"{self.driver_id} is {self.status} with no zone"
+        return self.zone_id
+
+    @property
+    def trip(self) -> str:
+        assert self.current_trip_key is not None, f"{self.driver_id} is {self.status} with no trip"
+        return self.current_trip_key
+
+    @property
+    def shift_start(self) -> datetime:
+        assert self.online_since is not None, f"{self.driver_id} is {self.status} with no shift start"
+        return self.online_since
+
 
 COLUMNS = "driver_id, status, zone_id, current_trip_key, status_changed_at, online_since, leaving"
 
@@ -89,7 +106,7 @@ class Supply:
             d = Driver(*r)
             self.drivers[d.driver_id] = d
             if d.status == "idle":
-                self.idle[d.zone_id][d.driver_id] = d.status_changed_at
+                self.idle[d.zone][d.driver_id] = d.status_changed_at
             if d.current_trip_key:
                 self.on_trip[d.current_trip_key] = d.driver_id
         self.loaded = dict(self.drivers)
@@ -114,7 +131,7 @@ class Supply:
 
     def _sign_off(self, driver: str, now: datetime) -> None:
         d = self.drivers[driver]
-        self.idle[d.zone_id].pop(driver, None)
+        self.idle[d.zone].pop(driver, None)
         self.drivers[driver] = replace(d, status="offline", current_trip_key=None, status_changed_at=now,
                                        online_since=None, leaving=False)
 
@@ -145,7 +162,7 @@ class Supply:
             driver = self._next_driver()
             self._sign_on(driver, origin or sign_on_zone(self._weights_at(at.hour), driver, at), at)
         d = self.drivers[driver]
-        del self.idle[d.zone_id][driver]
+        del self.idle[d.zone][driver]
         heading = origin if origin is not None else d.zone_id
         self.drivers[driver] = replace(d, status="en_route", zone_id=heading, current_trip_key=trip_key, status_changed_at=at)
         self.on_trip[trip_key] = driver
@@ -175,9 +192,9 @@ class Supply:
         """One ping for every busy driver, in driver order: the state after that second's events."""
         for driver in sorted(self.on_trip.values()):
             d = self.drivers[driver]
-            lat, lon = self.geo.latlon[d.zone_id]
+            lat, lon = self.geo.latlon[d.zone]
             dlat, dlon = jitter(driver, at)
-            self.pings.append(Ping(driver, at, d.current_trip_key, d.status, d.zone_id, lat + dlat, lon + dlon))
+            self.pings.append(Ping(driver, at, d.trip, d.status, d.zone, lat + dlat, lon + dlon))
 
     # --- boundaries -----------------------------------------------------------------------------
 
@@ -189,7 +206,7 @@ class Supply:
 
     def _staff(self, now: datetime) -> None:
         for d in list(self.drivers.values()):
-            if d.status != "offline" and not d.leaving and now - d.online_since >= MAX_SHIFT:
+            if d.status != "offline" and not d.leaving and now - d.shift_start >= MAX_SHIFT:
                 if d.status == "idle":
                     self._sign_off(d.driver_id, now)
                 else:
@@ -197,8 +214,8 @@ class Supply:
         target = self.online_target(now)
         excess = self._online_count() - target
         if excess > 0:
-            idle = sorted((d.online_since, d.driver_id) for d in self.drivers.values()
-                          if d.status == "idle" and now - d.online_since >= MIN_SHIFT)
+            idle = sorted((d.shift_start, d.driver_id) for d in self.drivers.values()
+                          if d.status == "idle" and now - d.shift_start >= MIN_SHIFT)
             for _, driver in idle[:excess]:
                 self._sign_off(driver, now)
         rested = sorted((d.status_changed_at, d.driver_id) for d in self.drivers.values()
@@ -212,7 +229,7 @@ class Supply:
         f = self.heat
         movers = sorted((s, d) for ds in self.idle.values() for d, s in ds.items() if now - s >= REPOSITION_AFTER)
         for since, driver in movers:
-            z = self.drivers[driver].zone_id
+            z = self.drivers[driver].zone
             best, score = None, f.get((z, how), 0) / len(self.idle[z]) * REPOSITION_GAIN
             for c in self.geo.nearby.get(z, ()):
                 s = f.get((c, how), 0) / (len(self.idle[c]) + 1)

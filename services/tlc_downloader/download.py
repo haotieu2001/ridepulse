@@ -19,7 +19,12 @@ import time
 import urllib.parse
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
-from typing import BinaryIO, Protocol
+from typing import Protocol
+
+
+class Readable(Protocol):
+    """What the downloader streams through: anything with read(n), an HTTP response or a hashing wrapper."""
+    def read(self, n: int = -1) -> bytes: ...
 
 TLC = "https://d37ci6vzurychx.cloudfront.net"
 NOAA = "https://noaa-ghcn-pds.s3.amazonaws.com"
@@ -47,6 +52,7 @@ class Source:
 def sources(kind: str, arg: str | None = None) -> list[Source]:
     if kind == "fhvhv":
         datetime.strptime(arg or "", "%Y-%m")   # validates YYYY-MM
+        assert arg is not None
         return [Source("tlc_fhvhv", arg, f"{TLC}/trip-data/fhvhv_tripdata_{arg}.parquet")]
     if kind == "zones":
         return [Source("tlc_zones", "current", f"{TLC}/misc/taxi_zone_lookup.csv"),
@@ -54,6 +60,7 @@ def sources(kind: str, arg: str | None = None) -> list[Source]:
     if kind == "noaa":
         if not (arg or "").isdigit():
             raise ValueError("noaa needs a year, e.g. 2025")
+        assert arg is not None
         return [Source("noaa_ghcnd", arg, f"{NOAA}/csv.gz/by_year/{arg}.csv.gz")]
     raise ValueError(f"unknown source kind {kind!r}")
 
@@ -64,7 +71,7 @@ class Store(Protocol):
     def get_json(self, key: str) -> dict | None: ...
     def put_json(self, key: str, value: dict) -> None: ...
     def exists(self, key: str) -> bool: ...
-    def upload(self, key: str, stream: BinaryIO, metadata: dict[str, str]) -> None: ...
+    def upload(self, key: str, stream: Readable, metadata: dict[str, str]) -> None: ...
 
 
 class S3Store:
@@ -156,7 +163,7 @@ def _request(url: str, method: str, attempts: int = 6, pause_s: float = 30.0) ->
 
 class _Hashing:
     """A read-through wrapper that hashes and counts the bytes as S3 consumes them."""
-    def __init__(self, raw: BinaryIO):
+    def __init__(self, raw: Readable):
         self.raw, self.sha256, self.size = raw, hashlib.sha256(), 0
 
     def read(self, n: int = -1) -> bytes:

@@ -1103,3 +1103,14 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
 - The dashboard has a fourth page, Platform health.
 - Not done: Neon egress against its budget (Neon's usage API isn't wired) and alert latency as a live metric (it
   needs the notifier's sent_at from DynamoDB in Databricks). Both stay on #36.
+
+### #76 Pipeline tests and type checking (part)
+- The rules R1-R4 moved into `ops/rule_logic.py`: plain DataFrame functions (thresholds and grace passed in); `rules.py`
+  only reads the pipeline's streams and tables and calls them. The same streaming update ran in the real pipeline
+  afterwards: r1-r4 all completed. Local Spark tests with the configured thresholds: R1 surges and alerts only with
+  enough requests, R2 alerts on a long p90, R3 sees a shortage and a queue, R4 alerts on a borough with no pings at all.
+- pyright (basic, pinned 1.1.408) in CI over services, contracts and scripts: 131 errors first, 49 once pyarrow's
+  generated compute functions (unknown to its stubs) were set aside, 0 after fixing. Most were unstated invariants
+  (an online driver has a zone, a busy one a trip): now `Driver.zone` / `.trip` / `.shift_start` assert them, naming
+  the driver. One was a real bug: prep's `--out-dir` store had no `get_bytes`, so that mode could crash.
+- Left on #76: silver and supply logic as plain functions with tests, and a Postgres-Kafka-Debezium container test.

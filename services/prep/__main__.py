@@ -5,7 +5,7 @@ import pathlib
 import sys
 
 from . import prep as job
-from .prep import DirStore, S3Store, prep
+from .prep import DirStore, S3Store, Store, prep
 from .supply import DEFAULT_TARGET_UTILISATION
 
 
@@ -16,6 +16,9 @@ class LocalOutputs:
 
     def get_json(self, key):
         return self.s3.get_json(key) if key.startswith("manifests/tlc_fhvhv/") else self.local.get_json(key)
+
+    def get_bytes(self, key):   # Store needs it; outputs read back come from the directory, like get_json
+        return self.s3.get_bytes(key) if key.startswith("manifests/tlc_fhvhv/") else self.local.get_bytes(key)
 
     def put_bytes(self, key, body, content_type):
         self.local.put_bytes(key, body, content_type)
@@ -39,7 +42,7 @@ def main() -> int:
     a = p.parse_args()
     if not a.bucket:
         p.error("--bucket or LANDING_BUCKET is required")
-    store = S3Store(a.bucket)
+    store: Store = S3Store(a.bucket)
     if a.out_dir:
         store = LocalOutputs(store, DirStore(a.out_dir))
     status, m = prep(a.month, store, source_file=a.source_file, force=a.force,

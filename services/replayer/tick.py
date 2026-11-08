@@ -26,6 +26,7 @@ from collections import Counter
 from dataclasses import astuple, dataclass, field
 from datetime import datetime, timedelta
 from decimal import Decimal
+from typing import LiteralString
 
 import psycopg
 
@@ -50,6 +51,21 @@ class NotPrepared(RuntimeError):
 
 MONEY = {"base_fare", "tolls", "bcf", "sales_tax", "congestion_surcharge", "airport_fee", "cbd_fee", "tips", "driver_pay"}
 
+
+
+def one(cur):
+    """The single value of a query that always returns one row."""
+    row = cur.fetchone()
+    assert row is not None, "expected one row"
+    return row[0]
+
+
+def must_json(store: Store, key: str) -> dict:
+    """A prepared file the replay can't run without: missing means the month wasn't prepared (or was half-written)."""
+    value = store.get_json(key)
+    if value is None:
+        raise NotPrepared(f"{key} is missing")
+    return value
 
 def exact_payload(payload: dict) -> dict:
     """Money and miles as exact strings (NFR-3), as Debezium sends NUMERIC on the CDC path. Slices hold
@@ -96,7 +112,7 @@ class Slices:
             if pointer is None:
                 self.manifests[month] = None
             else:
-                manifest = self.store.get_json(f"{pointer['current']['prefix']}/_manifest.json")
+                manifest = must_json(self.store, f"{pointer['current']['prefix']}/_manifest.json")
                 self.manifests[month] = {s["hour"]: s["key"] for s in manifest["slices"]}
         return self.manifests[month]
 
@@ -135,11 +151,11 @@ def load_supply(store: Store, slices: Slices, hour: datetime, geography: Geograp
     prepared = [p for p in prefixes.values() if p]
     if not prepared:
         raise NotPrepared(f"no prepared month covers {hour}")
-    heat = {(int(z), int(how)): v for how, zones in store.get_json(f"{prepared[0]}/heat_map.json").items()
+    heat = {(int(z), int(how)): v for how, zones in must_json(store, f"{prepared[0]}/heat_map.json").items()
             for z, v in zones.items()}
     weights = {int(h): {int(z): c for z, c in zones.items()}
-               for h, zones in store.get_json(f"{prepared[0]}/sign_on_zones.json").items()}
-    hours = [store.get_json(f"{p}/staffing.json")["hours"] for p in prepared]
+               for h, zones in must_json(store, f"{prepared[0]}/sign_on_zones.json").items()}
+    hours = [must_json(store, f"{p}/staffing.json")["hours"] for p in prepared]
 
     def online_target(at: datetime) -> int:
         name = at.isoformat(timespec="seconds")
@@ -153,7 +169,7 @@ def load_supply(store: Store, slices: Slices, hour: datetime, geography: Geograp
 _OUTBOX = """INSERT INTO outbox (id, aggregateid, type, payload, occurred_at)
 SELECT %(id)s::uuid, trip_key, %(type)s, %(payload)s::jsonb, %(occurred_at)s::timestamp FROM t"""
 
-SQL = {
+SQL: dict[str, LiteralString] = {
     "TripRequested": """WITH t AS (
   INSERT INTO trips (trip_key, provider_code, pickup_zone_id, dropoff_zone_id, requested_at, incident_id)
   VALUES (%(trip_key)s, %(provider_code)s, %(pickup_zone_id)s::integer, %(dropoff_zone_id)s::integer, %(requested_at)s::timestamp,
@@ -219,6 +235,9 @@ def _plan(events: list[dict], known: dict[str, tuple[str, int, int]], supply: Su
             continue
         if kind == "TripRequested":
             pickup, dropoff = payload["pickup_zone_id"], payload["dropoff_zone_id"]
+        assert pickup is not None and dropoff is not None, f"{key}: {kind} with no zones known"
+        if kind == "TripRequested":
+            pass
         elif kind == "DriverAssigned":
             payload["driver_id"] = supply.assign(key, pickup, dropoff, due)
         elif kind == "TripStarted":
@@ -277,6 +296,7 @@ def _injected_pings(pings, incidents: Incidents, cur, until: datetime, injected:
         elif fate == "malformed":
             raw.append((p.driver_id, malformed_bytes(p)))
         elif fate == "late":
+            assert inc is not None
             held.append((p.driver_id, p.device_ts, p.device_ts + timedelta(minutes=float(inc.params["delay_minutes"])), ping_row(p)))
     for row in held:
         cur.execute("INSERT INTO late_pings (driver_id, device_ts, release_at, ping) VALUES (%s, %s, %s, %s::jsonb) "
@@ -377,7 +397,7 @@ def tick(conn: psycopg.Connection, store: Store, *, sink=None, ping_every: int =
                             "online_since = %(online_since)s::timestamp, leaving = %(leaving)s WHERE driver_id = %(driver_id)s",
                             vars(d))
         cur.execute("WITH gone AS (DELETE FROM outbox RETURNING 1) SELECT count(*) FROM gone")
-        applied = cur.fetchone()[0]
+        applied = one(cur)
         outgoing, raw = _injected_pings(supply.pings, incidents, cur, until, injected) if sink else ([], [])
 
         cur.execute("UPDATE replay_state SET budget_used_min = %s + %s, budget_day = current_date WHERE id = 1", (used, speed))
@@ -466,7 +486,7 @@ def start(conn: psycopg.Connection, from_ts: datetime | None, speed: float) -> i
         cur.execute("SELECT watermark FROM replay_state WHERE id = 1")
         row = cur.fetchone()
         cur.execute("SELECT start_replay(%s::timestamp, %s::numeric)", (from_ts, speed))
-        run = cur.fetchone()[0]
+        run = one(cur)
         if row is not None and from_ts is not None and from_ts != row[0]:
             cur.execute("UPDATE drivers SET status = 'offline', current_trip_key = NULL, online_since = NULL, leaving = false, "
                         "status_changed_at = %s::timestamp WHERE current_trip_key IS NOT NULL", (from_ts,))
