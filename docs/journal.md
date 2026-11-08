@@ -1133,3 +1133,14 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   streams or decoding Avro: a fix is the next PR.
 - After the drill, completeness: silver equals Neon (293,213 events, 2,834 drivers). The check had outgrown the
   25 MB inline result limit; it now narrows to Neon's window, counts repeats in the warehouse, and reads external links.
+
+### The first update after some deploys fails: limit the damage
+- Four failures in two days (R2 and R4 `DUPLICATE_SOURCE_NAMES`, the pings flow `DUPLICATED_MAP_KEY`), each the first
+  update after a deploy and each passing on the next update. Not reproducible on demand: three deploy-then-update
+  cycles today (no change, a comment in rules.py, the new settings) all passed. One of the four reads a single stream,
+  so restructuring the two-stream rules would not have covered it: the cause is on the Databricks side.
+- What it cost: Lakeflow retried the failing flow inside the same update (failing identically) for ~7 minutes, and
+  every flow failure emailed on its own, before the job's failure email.
+- Now: `pipelines.maxFlowRetryAttempts: "0"` (fail the update at once), `max_retries: 1` on the streaming job's task
+  (a fresh update at once), and pipeline emails only on fatal failures. An update that fails twice running still
+  emails. Deployed; an update ran clean on it. The retry path shows the next time the failure happens.
