@@ -25,3 +25,24 @@ def test_the_build_copies_every_module_the_handler_imports():
                    "ref/zone_neighbours.csv", "ref/taxi_zone_lookup.csv", "services/replayer/incidents.py",
                    "services/notifier/notifier.py"):
         assert module in script, module
+
+
+def test_the_slot_metric_is_an_embedded_metric_line(capsys):
+    from services.replayer.handler import slot_metric
+
+    class Conn:
+        def __init__(self, row):
+            self.row = row
+
+        def execute(self, sql, params):
+            assert "pg_replication_slots" in sql and params == ("ridepulse_debezium",)
+            return self
+
+        def fetchone(self):
+            return self.row
+
+    line = slot_metric(Conn((123456, False)), "ridepulse_debezium")
+    printed = json.loads(capsys.readouterr().out)
+    assert printed == line and line["SlotRetainedWalBytes"] == 123456 and line["SlotActive"] == 0
+    assert line["_aws"]["CloudWatchMetrics"][0]["Namespace"] == "RidePulse"
+    assert slot_metric(Conn(None), "ridepulse_debezium") is None   # no slot: nothing to report

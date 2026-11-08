@@ -515,6 +515,23 @@ class Gold:
         self.spark.sql(f"CREATE OR REPLACE FUNCTION {self.t('gold', 'ops_only')}(driver_id STRING) RETURN is_member('{OPS_GROUP}')")
         self.spark.sql(f"ALTER TABLE {weekly} SET ROW FILTER {self.t('gold', 'ops_only')} ON (driver_id)")
         self.reconcile()
+        self.refresh_monitors()
+
+    def refresh_monitors(self) -> None:
+        """Refresh the data quality monitors on gold (#36), where they exist: a missing one is skipped, not a failure."""
+        try:
+            from databricks.sdk import WorkspaceClient
+            w = WorkspaceClient()
+        except Exception as e:  # noqa: BLE001   outside Databricks (tests)
+            print(f"no workspace client ({type(e).__name__}): monitors not refreshed")
+            return
+        for table in ["agg_daily_economics"]:
+            name = self.t("gold", table)
+            try:
+                run = w.quality_monitors.run_refresh(table_name=name)
+                print(f"monitor refresh {name}: {run.refresh_id}")
+            except Exception as e:  # noqa: BLE001
+                print(f"monitor refresh {name} skipped: {type(e).__name__}: {str(e)[:120]}")
 
     def reconcile(self) -> None:
         """FR-14's three reconciliations, rebuilt whole: per closed day, per paid week, per day and fee."""
