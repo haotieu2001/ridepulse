@@ -45,9 +45,16 @@ resources:
         ridepulse.ref_dir: ${workspace.file_path}/src/ref
         # Debezium's TIMESTAMP microseconds are read as UTC, so the simulated clock keeps its wall value.
         spark.sql.session.timeZone: UTC
+        # A failing flow fails the update at once. The first update after some deploys fails at its start
+        # (DUPLICATE_SOURCE_NAMES, DUPLICATED_MAP_KEY: four times on 2026-11-07/08) and retrying inside that update
+        # failed the same way each time, for ~7 minutes, while a fresh update passed every time. The job's task retry
+        # (below) starts that fresh update, and covers real transient errors too.
+        pipelines.maxFlowRetryAttempts: "0"
+      # Fatal failures only: an ordinary failed update reaches the owner once, as the job's failure email after its
+      # retry also failed. Every flow failure emailed on its own before, several per bad update.
       notifications:
         - email_recipients: ["${var.alert_email}"]
-          alerts: [on-update-fatal-failure, on-flow-failure]
+          alerts: [on-update-fatal-failure]
 
   jobs:
     streaming_back_to_back:
@@ -69,6 +76,11 @@ resources:
         - task_key: streaming
           pipeline_task:
             pipeline_id: ${resources.pipelines.bronze_ingest.id}
+          # One fresh update straight away when an update fails (see pipelines.maxFlowRetryAttempts above). The run
+          # fails, and emails, only if that one fails too.
+          max_retries: 1
+          min_retry_interval_millis: 0
+          retry_on_timeout: false
 
     views_every_10_min:
       name: views_every_10_min
