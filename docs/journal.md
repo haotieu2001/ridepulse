@@ -1103,3 +1103,12 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
 - The dashboard has a fourth page, Platform health.
 - Not done: Neon egress against its budget (Neon's usage API isn't wired) and alert latency as a live metric (it
   needs the notifier's sent_at from DynamoDB in Databricks). Both stay on #36.
+
+### #43 Confluent after the trial credit: keep Basic (decided 2026-11-08)
+- Kept on Confluent Basic, paid by card once the $400 trial credit ends (~2026-11-27): usage-priced, about $1.5-2 a
+  month at demo volumes (requirements §9 sizing), free when idle (NFR-11), and the whole stack (topics, ACLs, schemas
+  in Terraform, the bronze reader, the alert sink, the notifier) already runs on it. Rejected: self-hosted Kafka or
+  Redpanda on the Debezium EC2, which would run 24/7 or lose topics between windows, and the EC2 free trial ends
+  2026-12-31 too (#45).
+- To do by the owner: a payment method in Confluent Cloud before the credit ends, or the cluster is suspended.
+  Confluent's spend isn't in the AWS budget alert: the cost report (#39) adds it.
