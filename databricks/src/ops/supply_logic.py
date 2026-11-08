@@ -1,0 +1,76 @@
+"""Supply in simulated time (#20) as plain DataFrame functions (#76): supply.py reads the pipeline's tables and passes
+them in; tests pass small DataFrames. Nothing here touches dlt or the pipeline's session.
+
+A tick commits its driver changes and advance_watermark() in one transaction (ADR-0004 §2), so a driver change and the
+tick's replay_state change share a transaction id: that gives every driver version a simulated time. Supply at a window
+end W is the state after the last tick ending at or before W, and each row keeps that tick's LSN. A Debezium snapshot
+(`op = r`, from a new instance) carries no tick, so it takes the watermark of the replay_state row read in the same
+snapshot.
+"""
+from __future__ import annotations
+
+from pyspark.sql import DataFrame, Window
+from pyspark.sql import functions as F
+
+
+def tick_watermarks(replay_state_changes: DataFrame) -> DataFrame:
+    """One row per replayer tick transaction: its simulated end and LSN."""
+    state = replay_state_changes.where("op IN ('c', 'u', 'r')")
+    return state.groupBy("source_tx_id", "from_snapshot", "committed_at").agg(
+        F.max("watermark").alias("tick_end"), F.max("source_lsn").alias("tick_lsn"))
+
+
+def zone_supply(driver_changes: DataFrame, ticks: DataFrame) -> DataFrame:
+    """Idle and busy drivers per zone in simulated time: valid from valid_from until the zone's next change."""
+    changes = driver_changes.where("op <> 'd'")
+    by_tx = changes.where("NOT from_snapshot").join(
+        ticks.where("NOT from_snapshot").select("source_tx_id", "tick_end", "tick_lsn"), "source_tx_id")
+    by_snapshot = changes.where("from_snapshot").join(
+        ticks.where("from_snapshot").select("committed_at", "tick_end", "tick_lsn"), "committed_at")
+    rows = by_tx.unionByName(by_snapshot, allowMissingColumns=True)
+    # A driver's state after each tick that touched it: the transaction's last change (a new driver is inserted, then
+    # updated, in one transaction), valid until the driver's next such tick.
+    last = Window.partitionBy("driver_id", "tick_end").orderBy(F.col("source_lsn").desc())
+    rows = rows.withColumn("_n", F.row_number().over(last)).where("_n = 1")
+    nxt = Window.partitionBy("driver_id").orderBy("tick_end")
+    intervals = rows.select("driver_id", "status", "zone_id", "tick_end", "tick_lsn",
+                            F.lead("tick_end").over(nxt).alias("until"))
+    # Each interval adds one idle or busy driver to its zone at tick_end and removes it at `until`.
+    state = F.when(F.col("status") == "idle", "idle").when(F.col("status").isin("en_route", "on_trip"), "busy")
+    deltas = intervals.where(state.isNotNull()).select("zone_id", state.alias("kind"), "tick_end", "until", "tick_lsn")
+    plus = deltas.select("zone_id", "kind", F.col("tick_end").alias("t"), F.lit(1).alias("d"), "tick_lsn")
+    minus = deltas.where("until IS NOT NULL").select("zone_id", "kind", F.col("until").alias("t"), F.lit(-1).alias("d"),
+                                                     F.lit(None).cast("bigint").alias("tick_lsn"))
+    events = plus.unionByName(minus).groupBy("zone_id", "t").agg(
+        F.sum(F.when(F.col("kind") == "idle", F.col("d")).otherwise(0)).alias("d_idle"),
+        F.sum(F.when(F.col("kind") == "busy", F.col("d")).otherwise(0)).alias("d_busy"),
+        F.max("tick_lsn").alias("tick_lsn"))
+    running = Window.partitionBy("zone_id").orderBy("t").rowsBetween(Window.unboundedPreceding, 0)
+    return events.select(
+        "zone_id", F.col("t").alias("valid_from"),
+        F.lead("t").over(Window.partitionBy("zone_id").orderBy("t")).alias("valid_to"),
+        F.sum("d_idle").over(running).alias("idle"), F.sum("d_busy").over(running).alias("busy"),
+        F.max("tick_lsn").over(running).alias("supply_lsn"))
+
+
+def supply_at_window_ends(supply: DataFrame, minutes: int) -> DataFrame:
+    """Each zone's supply at every `minutes` window end inside the replayed span: the interval holding W."""
+    span = supply.agg(F.min("valid_from").alias("lo"), F.max("valid_from").alias("hi"))
+    step = F.expr(f"INTERVAL {minutes} MINUTES")
+    ends = span.select(F.explode(F.sequence(F.date_trunc("hour", "lo"), F.col("hi") + step, step)).alias("window_end"))
+    joined = ends.join(supply, (supply.valid_from <= ends.window_end)
+                       & (supply.valid_to.isNull() | (ends.window_end < supply.valid_to)))
+    return joined.select("window_end", "zone_id", "idle", "busy", "supply_lsn")
+
+
+def supply_by_area(supply: DataFrame, areas: DataFrame) -> DataFrame:
+    """Idle and busy drivers per surge area at each 15-minute window end, and the LSN of the tick they came from."""
+    return (supply_at_window_ends(supply, 15).join(areas, "zone_id")
+            .groupBy("window_end", "area_id").agg(F.sum("idle").alias("idle"), F.sum("busy").alias("busy"),
+                                                  F.max("supply_lsn").alias("supply_lsn")))
+
+
+def supply_by_borough(supply: DataFrame, zones: DataFrame) -> DataFrame:
+    """Busy drivers per borough at each 3-minute window end (R4)."""
+    return (supply_at_window_ends(supply, 3).join(zones.select("zone_id", "borough"), "zone_id")
+            .groupBy("window_end", "borough").agg(F.sum("busy").alias("busy"), F.max("supply_lsn").alias("supply_lsn")))
