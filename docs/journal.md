@@ -1084,3 +1084,22 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
 - `contracts/dst.py`: on a fall-back day, a trip picked up before 03:00 an hour short of its trip_time has its dropoff
   moved an hour later, in Python, pyarrow (prep) and Spark (silver), tested to agree; keys stay on published times.
   On the real file: dropoff-before-pickup 9,653 -> 0. The doubled hour can't be split. ADR-0004 amendment 1.
+
+## Phase 7: hardening
+
+### #36 Platform monitoring: failure emails, health checks, slot alarms, data quality monitoring
+- Failure emails (bundle variable `alert_email`) on the streaming job, the views job, the daily job, and the
+  streaming pipeline itself (fatal update or flow failure). Before this a stopped pipeline went unnoticed.
+- `views/health.py`, a task after `views` (so every 10 minutes, in a window only): silver lag (SLA-2, 20 min),
+  rules lag behind silver (45 simulated min), the longest streaming run in the last hour (17 min, against Free
+  Edition's ~20-minute driver loss, #25), the latest completeness breaks (SLA-5). Rows in `ops.platform_health`; a
+  breach fails the task, and the failure email is the alert. First run: all four ok (0.0, 10.0, none, 0).
+- The replayer logs the slot's retained WAL and activity every tick as an embedded-metric line (no new IAM);
+  CloudWatch alarms `ridepulse-slot-retained-wal` (> 256 MB, a quarter of Neon Free) and `ridepulse-slot-inactive`
+  (5 min while ticking) email the ops SNS topic, and again when OK.
+- Data quality monitoring works on Free Edition (the review's open question): a snapshot monitor on
+  `gold.agg_daily_economics`, in the bundle, refreshed at the end of each gold build. Tried by hand first, then
+  deleted with its dashboard and tables and recreated as code.
+- The dashboard has a fourth page, Platform health.
+- Not done: Neon egress against its budget (Neon's usage API isn't wired) and alert latency as a live metric (it
+  needs the notifier's sent_at from DynamoDB in Databricks). Both stay on #36.

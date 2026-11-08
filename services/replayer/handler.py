@@ -7,7 +7,9 @@ Settings come from the environment (infra/terraform/replayer); secrets from SSM 
 """
 from __future__ import annotations
 
+import json
 import os
+import time
 import urllib.parse
 
 import boto3
@@ -39,10 +41,28 @@ def _setup() -> dict:
             "geography": Geography.load(), "drivers": {}}
 
 
+def slot_metric(conn, slot: str) -> dict | None:
+    """The WAL the replication slot holds back (bytes), as a CloudWatch embedded-metric log line (#36): the log line
+    becomes metric RidePulse/SlotRetainedWalBytes, which an alarm watches. Neon Free has ~1 GB of storage, so a
+    slot nobody reads (Debezium down, #24) is the platform's quiet way to fill it."""
+    row = conn.execute("SELECT pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn), active FROM pg_replication_slots "
+                       "WHERE slot_name = %s", (slot,)).fetchone()
+    if row is None:
+        return None
+    line = {"_aws": {"Timestamp": int(time.time() * 1000), "CloudWatchMetrics": [{
+                "Namespace": "RidePulse", "Dimensions": [["Slot"]],
+                "Metrics": [{"Name": "SlotRetainedWalBytes", "Unit": "Bytes"}, {"Name": "SlotActive", "Unit": "Count"}]}]},
+            "Slot": slot, "SlotRetainedWalBytes": int(row[0] or 0), "SlotActive": int(bool(row[1]))}
+    print(json.dumps(line))
+    return line
+
+
 def handler(event, context) -> dict:
     if not _cold:
         _cold.update(_setup())
     with psycopg.connect(autocommit=True, options="-c search_path=dispatch", connect_timeout=15, **_cold["conninfo"]) as conn:
+        if os.environ.get("REQUIRE_SLOT"):
+            slot_metric(conn, os.environ["REQUIRE_SLOT"])
         try:
             r = tick(conn, _cold["store"], sink=_cold["sink"], ping_every=int(os.environ.get("PING_EVERY_S", "15")),
                      geography=_cold["geography"], require_slot=os.environ.get("REQUIRE_SLOT") or None,

@@ -23,6 +23,7 @@ FROM {G}.agg_cbd_impact"""),
     "recon": ("Reconciliations", f"SELECT reconciliation, day, checked, breaks FROM {G}.agg_recon_daily"),
     "fees": ("Fee checks", f"""SELECT fee, sum(trips_charged) AS trips_charged, sum(collected) AS collected, sum(expected) AS expected,
 sum(breaks) AS breaks FROM {G}.recon_fees WHERE breaks IS NOT NULL GROUP BY fee"""),
+    "health": ("Platform health", "SELECT checked_at, metric, value, limit_value, ok FROM ridepulse_dev.ops.platform_health"),
     "payout_breaks": ("Payout breaks", f"SELECT week_start, driver_id, break, earned_cents, paid_cents FROM {G}.recon_payouts WHERE break IS NOT NULL"),
 }
 
@@ -92,6 +93,11 @@ PAGES = [
         at(table("fee_checks", "fees", ["fee", "trips_charged", "collected", "expected", "breaks"], "Fees against fare_rules"), 0, 6, 6, 5),
         at(table("payout_breaks_t", "payout_breaks", ["week_start", "driver_id", "break", "earned_cents", "paid_cents"],
                  "Payout breaks"), 0, 11, 6, 6),
+    ]),
+    ("platform", "Platform health", [
+        at(chart("health_value", "health", "line", "checked_at", "value", "Each check over time (limits: silver lag 20 min, rules lag 45 "
+                 "simulated min, streaming run 17 min, completeness 0)", color="metric", agg="MAX"), 0, 0, 6, 7),
+        at(table("health_rows", "health", ["checked_at", "metric", "value", "limit_value", "ok"], "Checks"), 0, 7, 6, 7),
     ]),
 ]
 

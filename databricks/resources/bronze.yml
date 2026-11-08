@@ -43,6 +43,9 @@ resources:
         ridepulse.ref_dir: ${workspace.file_path}/src/ref
         # Debezium's TIMESTAMP microseconds are read as UTC, so the simulated clock keeps its wall value.
         spark.sql.session.timeZone: UTC
+      notifications:
+        - email_recipients: ["${var.alert_email}"]
+          alerts: [on-update-fatal-failure, on-flow-failure]
 
   jobs:
     streaming_back_to_back:
@@ -57,6 +60,8 @@ resources:
       max_concurrent_runs: 1
       queue:
         enabled: false
+      email_notifications:
+        on_failure: ["${var.alert_email}"]
       tasks:
         - task_key: streaming
           pipeline_task:
@@ -81,6 +86,14 @@ resources:
               - ${workspace.file_path}/src/ref
               - --silver-dir
               - ${workspace.file_path}/src/silver
+        - task_key: health
+          depends_on: [{task_key: views}]
+          environment_key: default
+          spark_python_task:
+            python_file: ../src/views/health.py
+            parameters: [--catalog, "${var.catalog}", --streaming-job-id, "${resources.jobs.streaming_back_to_back.id}"]
+      email_notifications:
+        on_failure: ["${var.alert_email}"]
       environments:
         - environment_key: default
           spec:
