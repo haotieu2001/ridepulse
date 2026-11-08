@@ -39,6 +39,7 @@ def _here() -> str:
 
 
 sys.path.insert(0, _here())
+from dst import spark_corrected_dropoff_sql  # noqa: E402
 from trip_key import SPARK_BASE_TRIP_KEY_SQL, spark_in_sample_sql  # noqa: E402
 
 CENTRAL_PARK = "USW00094728"
@@ -99,6 +100,7 @@ def tlc_trips(raw: DataFrame, groups: DataFrame, cbd_zone_ids: list[int], contra
     df = (df.withColumn("_base_key", base).withColumn("_nth", nth)
           .withColumn("trip_key", F.when(F.col("_nth") == 1, F.col("_base_key"))
                       .otherwise(F.concat(F.col("_base_key"), F.lit("-"), F.col("_nth").cast("string")))))
+    df = df.withColumn("dropoff_datetime", F.expr(spark_corrected_dropoff_sql()))   # after the key: #35
     df = df.join(F.broadcast(groups), (df._row_index >= groups.first_row) & (df._row_index < groups.first_row + groups.rows))
     ts = lambda c: F.col(c).cast("timestamp_ntz")  # noqa: E731
     seconds = lambda a, b: F.unix_timestamp(ts(b).cast("timestamp")) - F.unix_timestamp(ts(a).cast("timestamp"))  # noqa: E731

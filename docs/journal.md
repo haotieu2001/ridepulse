@@ -1076,3 +1076,11 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   with each question's own SQL. First check 4/5: Uber's take rate came back null, because the instructions said
   "HV0003 is Uber" and the metric view's provider dimension holds names. Instruction fixed: 5/5. The check is
   lenient (every expected value among Genie's): the CBD question passed while Genie returned every relation.
+
+### #35 The November fall-back hour, measured before replaying it
+- `docs/design/clock/measure_dst.py` on November 2024 (downloaded to scratch; AWS was logged out): the 01:00 hour of
+  2024-11-03 has 64,183 pickups (33,512 the next Sunday); 9,829 trips are an hour shorter on the wall clock than
+  their `trip_time`, 9,653 of them dropped off "before" pickup. The prep job would have quarantined those 9,653.
+- `contracts/dst.py`: on a fall-back day, a trip picked up before 03:00 an hour short of its trip_time has its dropoff
+  moved an hour later, in Python, pyarrow (prep) and Spark (silver), tested to agree; keys stay on published times.
+  On the real file: dropoff-before-pickup 9,653 -> 0. The doubled hour can't be split. ADR-0004 amendment 1.

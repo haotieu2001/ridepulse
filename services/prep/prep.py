@@ -44,6 +44,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
+from contracts.dst import arrow_corrected_dropoff
 from contracts.trip_key import KEY_FIELDS, SAMPLE_MODULUS, SEPARATOR
 
 from .store import EVENT_TYPES, DirStore, S3Store, Store, output_prefix, pointer_key, slice_name, source_manifest_key  # noqa: F401  (re-exported)
@@ -195,7 +196,8 @@ def read_month(path: pathlib.Path, month: str, stats: Counter) -> tuple[pa.Table
     seen: Counter = Counter()   # base key -> rows so far, in file order (the key's collision suffix)
     for g in range(source.num_row_groups):   # ~1M rows each: bounded memory
         t = source.read_row_group(g)
-        keys = base_keys(t)
+        keys = base_keys(t)   # on the published times, before the fall-back correction: keys never move
+        t = t.set_column(t.schema.get_field_index("dropoff_datetime"), "dropoff_datetime", arrow_corrected_dropoff(t, month))
         reasons = first_failure(blocking_checks(t, month))
         stats["rows"] += t.num_rows
         take, trip_keys = [], []

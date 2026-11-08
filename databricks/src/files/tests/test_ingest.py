@@ -117,3 +117,15 @@ def test_a_payout_file_parses_to_its_entries_and_its_controls_hold(spark):
                 for n, v in enumerate(lines)]   # one amount changed, the controls not
     bad = control_mismatches(spark.createDataFrame([(v, path) for v in tampered], "value STRING, _source_file STRING"))
     assert set(bad) == {"batch.credit", "file.credit"}
+
+
+def test_spark_moves_the_dropoff_like_python(spark):
+    from dst import spark_corrected_dropoff_sql
+
+    from contracts.dst import corrected_dropoff
+    cases = [("2024-11-03 01:40:00", "2024-11-03 01:10:00", 1800), ("2024-11-03 01:20:00", "2024-11-03 01:50:00", 1800),
+             ("2024-11-10 01:40:00", "2024-11-10 01:10:00", 1800)]
+    schema = "pickup_datetime TIMESTAMP_NTZ, dropoff_datetime TIMESTAMP_NTZ, trip_time BIGINT"
+    df = spark.createDataFrame([(t(p), t(d), tt) for p, d, tt in cases], schema)
+    got = [r[0] for r in df.select(pyspark.sql.functions.expr(spark_corrected_dropoff_sql())).collect()]
+    assert got == [corrected_dropoff(t(p), t(d), tt) for p, d, tt in cases]
