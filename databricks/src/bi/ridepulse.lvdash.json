@@ -4,14 +4,23 @@
       "name": "daily",
       "displayName": "Daily economics",
       "queryLines": [
-        "SELECT pickup_date, trips, gmv, driver_pay, take_rate, cbd_fees, cbd_trips FROM ridepulse_dev.gold.agg_daily_economics\n"
+        "SELECT pickup_date, day(pickup_date) AS day_of_month, date_format(pickup_date, 'MMM yyyy') AS month,\n",
+        "trips, gmv, driver_pay, take_rate, cbd_fees, cbd_trips FROM ridepulse_dev.gold.agg_daily_economics\n"
+      ]
+    },
+    {
+      "name": "cbd_daily",
+      "displayName": "CBD fees per day",
+      "queryLines": [
+        "SELECT pickup_date, cbd_fees FROM ridepulse_dev.gold.agg_daily_economics WHERE pickup_date >= '2025-01-01'\n"
       ]
     },
     {
       "name": "hourly",
       "displayName": "Trips by hour and borough",
       "queryLines": [
-        "SELECT z.borough, h.pickup_hour, sum(h.trips) AS trips\n",
+        "SELECT CASE WHEN z.borough IN ('Manhattan', 'Brooklyn', 'Queens', 'Bronx', 'Staten Island')\n",
+        "THEN z.borough ELSE 'Other' END AS borough, h.pickup_hour, sum(h.trips) AS trips\n",
         "FROM ridepulse_dev.gold.agg_zone_hourly h JOIN ridepulse_dev.gold.dim_zone z ON h.pickup_zone_id = z.zone_id GROUP BY ALL\n"
       ]
     },
@@ -188,12 +197,16 @@
                   "datasetName": "daily",
                   "fields": [
                     {
-                      "name": "pickup_date",
-                      "expression": "`pickup_date`"
+                      "name": "day_of_month",
+                      "expression": "`day_of_month`"
                     },
                     {
                       "name": "sum(trips)",
                       "expression": "SUM(`trips`)"
+                    },
+                    {
+                      "name": "month",
+                      "expression": "`month`"
                     }
                   ],
                   "disaggregated": false
@@ -205,11 +218,11 @@
               "widgetType": "line",
               "encodings": {
                 "x": {
-                  "fieldName": "pickup_date",
+                  "fieldName": "day_of_month",
                   "scale": {
-                    "type": "temporal"
+                    "type": "quantitative"
                   },
-                  "displayName": "pickup date"
+                  "displayName": "day of month"
                 },
                 "y": {
                   "fieldName": "sum(trips)",
@@ -217,11 +230,32 @@
                     "type": "quantitative"
                   },
                   "displayName": "trips"
+                },
+                "color": {
+                  "fieldName": "month",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "Jan 2024",
+                        "color": "#2a78d6"
+                      },
+                      {
+                        "value": "Dec 2024",
+                        "color": "#eb6834"
+                      },
+                      {
+                        "value": "Jan 2025",
+                        "color": "#1baf7a"
+                      }
+                    ]
+                  },
+                  "displayName": "month"
                 }
               },
               "frame": {
                 "showTitle": true,
-                "title": "Trips per day"
+                "title": "Trips per day, by month (day of month)"
               }
             }
           },
@@ -242,12 +276,16 @@
                   "datasetName": "daily",
                   "fields": [
                     {
-                      "name": "pickup_date",
-                      "expression": "`pickup_date`"
+                      "name": "day_of_month",
+                      "expression": "`day_of_month`"
                     },
                     {
                       "name": "avg(take_rate)",
                       "expression": "AVG(`take_rate`)"
+                    },
+                    {
+                      "name": "month",
+                      "expression": "`month`"
                     }
                   ],
                   "disaggregated": false
@@ -259,11 +297,11 @@
               "widgetType": "line",
               "encodings": {
                 "x": {
-                  "fieldName": "pickup_date",
+                  "fieldName": "day_of_month",
                   "scale": {
-                    "type": "temporal"
+                    "type": "quantitative"
                   },
-                  "displayName": "pickup date"
+                  "displayName": "day of month"
                 },
                 "y": {
                   "fieldName": "avg(take_rate)",
@@ -271,6 +309,27 @@
                     "type": "quantitative"
                   },
                   "displayName": "take rate"
+                },
+                "color": {
+                  "fieldName": "month",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "Jan 2024",
+                        "color": "#2a78d6"
+                      },
+                      {
+                        "value": "Dec 2024",
+                        "color": "#eb6834"
+                      },
+                      {
+                        "value": "Jan 2025",
+                        "color": "#1baf7a"
+                      }
+                    ]
+                  },
+                  "displayName": "month"
                 }
               },
               "frame": {
@@ -293,7 +352,7 @@
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "daily",
+                  "datasetName": "cbd_daily",
                   "fields": [
                     {
                       "name": "pickup_date",
@@ -329,7 +388,7 @@
               },
               "frame": {
                 "showTitle": true,
-                "title": "CBD fees collected per day ($)"
+                "title": "CBD fees collected per day, Jan 2025 ($)"
               }
             }
           },
@@ -387,7 +446,33 @@
                 "color": {
                   "fieldName": "borough",
                   "scale": {
-                    "type": "categorical"
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "Manhattan",
+                        "color": "#2a78d6"
+                      },
+                      {
+                        "value": "Brooklyn",
+                        "color": "#eb6834"
+                      },
+                      {
+                        "value": "Queens",
+                        "color": "#1baf7a"
+                      },
+                      {
+                        "value": "Bronx",
+                        "color": "#eda100"
+                      },
+                      {
+                        "value": "Staten Island",
+                        "color": "#e87ba4"
+                      },
+                      {
+                        "value": "Other",
+                        "color": "#008300"
+                      }
+                    ]
                   },
                   "displayName": "borough"
                 }
@@ -459,7 +544,25 @@
                 "color": {
                   "fieldName": "period",
                   "scale": {
-                    "type": "categorical"
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "jan_2024",
+                        "color": "#2a78d6"
+                      },
+                      {
+                        "value": "dec_2024",
+                        "color": "#eb6834"
+                      },
+                      {
+                        "value": "jan_2025_toll",
+                        "color": "#1baf7a"
+                      },
+                      {
+                        "value": "jan_2025_before_toll",
+                        "color": "#eda100"
+                      }
+                    ]
                   },
                   "displayName": "period"
                 }
@@ -524,7 +627,25 @@
                 "color": {
                   "fieldName": "period",
                   "scale": {
-                    "type": "categorical"
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "jan_2024",
+                        "color": "#2a78d6"
+                      },
+                      {
+                        "value": "dec_2024",
+                        "color": "#eb6834"
+                      },
+                      {
+                        "value": "jan_2025_toll",
+                        "color": "#1baf7a"
+                      },
+                      {
+                        "value": "jan_2025_before_toll",
+                        "color": "#eda100"
+                      }
+                    ]
                   },
                   "displayName": "period"
                 }
@@ -589,7 +710,25 @@
                 "color": {
                   "fieldName": "period",
                   "scale": {
-                    "type": "categorical"
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "jan_2024",
+                        "color": "#2a78d6"
+                      },
+                      {
+                        "value": "dec_2024",
+                        "color": "#eb6834"
+                      },
+                      {
+                        "value": "jan_2025_toll",
+                        "color": "#1baf7a"
+                      },
+                      {
+                        "value": "jan_2025_before_toll",
+                        "color": "#eda100"
+                      }
+                    ]
                   },
                   "displayName": "period"
                 }
@@ -654,7 +793,25 @@
                 "color": {
                   "fieldName": "period",
                   "scale": {
-                    "type": "categorical"
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "jan_2024",
+                        "color": "#2a78d6"
+                      },
+                      {
+                        "value": "dec_2024",
+                        "color": "#eb6834"
+                      },
+                      {
+                        "value": "jan_2025_toll",
+                        "color": "#1baf7a"
+                      },
+                      {
+                        "value": "jan_2025_before_toll",
+                        "color": "#eda100"
+                      }
+                    ]
                   },
                   "displayName": "period"
                 }
@@ -719,7 +876,25 @@
                 "color": {
                   "fieldName": "period",
                   "scale": {
-                    "type": "categorical"
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "jan_2024",
+                        "color": "#2a78d6"
+                      },
+                      {
+                        "value": "dec_2024",
+                        "color": "#eb6834"
+                      },
+                      {
+                        "value": "jan_2025_toll",
+                        "color": "#1baf7a"
+                      },
+                      {
+                        "value": "jan_2025_before_toll",
+                        "color": "#eda100"
+                      }
+                    ]
                   },
                   "displayName": "period"
                 }

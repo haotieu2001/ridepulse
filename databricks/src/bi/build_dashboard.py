@@ -15,8 +15,12 @@ G = "ridepulse_dev.gold"
 OUT = pathlib.Path(__file__).with_name("ridepulse.lvdash.json")
 
 DATASETS = {
-    "daily": ("Daily economics", f"SELECT pickup_date, trips, gmv, driver_pay, take_rate, cbd_fees, cbd_trips FROM {G}.agg_daily_economics"),
-    "hourly": ("Trips by hour and borough", f"""SELECT z.borough, h.pickup_hour, sum(h.trips) AS trips
+    # Only some months are loaded, so a day axis would draw a line across the months between: one line per month instead.
+    "daily": ("Daily economics", f"""SELECT pickup_date, day(pickup_date) AS day_of_month, date_format(pickup_date, 'MMM yyyy') AS month,
+trips, gmv, driver_pay, take_rate, cbd_fees, cbd_trips FROM {G}.agg_daily_economics"""),
+    "cbd_daily": ("CBD fees per day", f"SELECT pickup_date, cbd_fees FROM {G}.agg_daily_economics WHERE pickup_date >= '2025-01-01'"),
+    "hourly": ("Trips by hour and borough", f"""SELECT CASE WHEN z.borough IN ('Manhattan', 'Brooklyn', 'Queens', 'Bronx', 'Staten Island')
+THEN z.borough ELSE 'Other' END AS borough, h.pickup_hour, sum(h.trips) AS trips
 FROM {G}.agg_zone_hourly h JOIN {G}.dim_zone z ON h.pickup_zone_id = z.zone_id GROUP BY ALL"""),
     "cbd": ("Congestion toll impact", f"""SELECT period, cbd_relation, trips_per_day, avg_rider_total, avg_driver_pay, take_rate, avg_mph
 FROM {G}.agg_cbd_impact"""),
@@ -32,14 +36,24 @@ def field(name: str, expr: str) -> dict:
     return {"name": name, "expression": expr}
 
 
-def chart(name, dataset, kind, x, y, title, color=None, x_scale="temporal", agg="SUM"):
+# Fixed categorical order (dataviz reference palette, validated light): colour follows the entity, never its rank.
+MONTH_COLORS = {"Jan 2024": "#2a78d6", "Dec 2024": "#eb6834", "Jan 2025": "#1baf7a"}
+BOROUGH_COLORS = {"Manhattan": "#2a78d6", "Brooklyn": "#eb6834", "Queens": "#1baf7a", "Bronx": "#eda100",
+                  "Staten Island": "#e87ba4", "Other": "#008300"}
+PERIOD_COLORS = {"jan_2024": "#2a78d6", "dec_2024": "#eb6834", "jan_2025_toll": "#1baf7a", "jan_2025_before_toll": "#eda100"}
+
+
+def chart(name, dataset, kind, x, y, title, color=None, x_scale="temporal", agg="SUM", colors=None):
     """A line or bar chart of one measure (y) over x, optionally split by color."""
     y_field = f"{agg.lower()}({y})"
     fields = [field(x, f"`{x}`"), field(y_field, f"{agg}(`{y}`)")] + ([field(color, f"`{color}`")] if color else [])
     enc = {"x": {"fieldName": x, "scale": {"type": x_scale}, "displayName": x.replace("_", " ")},
            "y": {"fieldName": y_field, "scale": {"type": "quantitative"}, "displayName": y.replace("_", " ")}}
     if color:
-        enc["color"] = {"fieldName": color, "scale": {"type": "categorical"}, "displayName": color.replace("_", " ")}
+        scale = {"type": "categorical"}
+        if colors:
+            scale["mappings"] = [{"value": v, "color": c} for v, c in colors.items()]
+        enc["color"] = {"fieldName": color, "scale": scale, "displayName": color.replace("_", " ")}
     return {"name": name, "queries": [{"name": "main_query", "query": {"datasetName": dataset, "fields": fields, "disaggregated": False}}],
             "spec": {"version": 3, "widgetType": kind, "encodings": enc, "frame": {"showTitle": True, "title": title}}}
 
@@ -69,23 +83,24 @@ PAGES = [
         at(counter("trips_total", "daily", "trips", "Trips"), 0, 0, 2, 3),
         at(counter("gmv_total", "daily", "gmv", "Gross bookings ($)"), 2, 0, 2, 3),
         at(counter("pay_total", "daily", "driver_pay", "Driver pay ($)"), 4, 0, 2, 3),
-        at(chart("trips_per_day", "daily", "line", "pickup_date", "trips", "Trips per day"), 0, 3, 6, 6),
-        at(chart("take_rate_per_day", "daily", "line", "pickup_date", "take_rate", "Take rate per day (1 - driver pay / base fare)",
-                 agg="AVG"), 0, 9, 3, 6),
-        at(chart("cbd_fees_per_day", "daily", "bar", "pickup_date", "cbd_fees", "CBD fees collected per day ($)"), 3, 9, 3, 6),
+        at(chart("trips_per_day", "daily", "line", "day_of_month", "trips", "Trips per day, by month (day of month)",
+                 color="month", x_scale="quantitative", colors=MONTH_COLORS), 0, 3, 6, 6),
+        at(chart("take_rate_per_day", "daily", "line", "day_of_month", "take_rate", "Take rate per day (1 - driver pay / base fare)",
+                 color="month", x_scale="quantitative", agg="AVG", colors=MONTH_COLORS), 0, 9, 3, 6),
+        at(chart("cbd_fees_per_day", "cbd_daily", "bar", "pickup_date", "cbd_fees", "CBD fees collected per day, Jan 2025 ($)"), 3, 9, 3, 6),
         at(chart("hourly_by_borough", "hourly", "line", "pickup_hour", "trips", "Trips by hour of day, per borough",
-                 color="borough", x_scale="quantitative"), 0, 15, 6, 7),
+                 color="borough", x_scale="quantitative", colors=BOROUGH_COLORS), 0, 15, 6, 7),
     ]),
     ("congestion", "Congestion toll", [
         at(chart("cbd_trips", "cbd", "bar", "cbd_relation", "trips_per_day", "Trips per day, by where they meet the CBD",
-                 color="period", x_scale="categorical"), 0, 0, 6, 7),
+                 color="period", x_scale="categorical", colors=PERIOD_COLORS), 0, 0, 6, 7),
         at(chart("cbd_rider", "cbd", "bar", "cbd_relation", "avg_rider_total", "Rider total per trip ($)",
-                 color="period", x_scale="categorical"), 0, 7, 3, 7),
+                 color="period", x_scale="categorical", colors=PERIOD_COLORS), 0, 7, 3, 7),
         at(chart("cbd_driver", "cbd", "bar", "cbd_relation", "avg_driver_pay", "Driver pay per trip ($)",
-                 color="period", x_scale="categorical"), 3, 7, 3, 7),
-        at(chart("cbd_take", "cbd", "bar", "cbd_relation", "take_rate", "Take rate", color="period", x_scale="categorical"), 0, 14, 3, 7),
+                 color="period", x_scale="categorical", colors=PERIOD_COLORS), 3, 7, 3, 7),
+        at(chart("cbd_take", "cbd", "bar", "cbd_relation", "take_rate", "Take rate", color="period", x_scale="categorical", colors=PERIOD_COLORS), 0, 14, 3, 7),
         at(chart("cbd_speed", "cbd", "bar", "cbd_relation", "avg_mph", "Average trip speed (mph)",
-                 color="period", x_scale="categorical"), 3, 14, 3, 7),
+                 color="period", x_scale="categorical", colors=PERIOD_COLORS), 3, 14, 3, 7),
     ]),
     ("reconciliation", "Reconciliations", [
         at(chart("recon_breaks", "recon", "bar", "reconciliation", "breaks", "Breaks per reconciliation", x_scale="categorical"), 0, 0, 3, 6),
