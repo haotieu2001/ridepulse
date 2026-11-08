@@ -20,7 +20,7 @@ on:
 
 permissions:
   contents: read
-  id-token: write   # OIDC: short-lived AWS credentials for the ridepulse-github-ci role
+  id-token: write   # OIDC: short-lived AWS credentials for the ridepulse-github-prep role (main only)
 
 concurrency:
   group: prep-${{ inputs.month }}
@@ -43,7 +43,7 @@ jobs:
       # Pinned to a commit SHA, and to a release at least two weeks old.
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
-          role-to-assume: arn:aws:iam::121403124761:role/ridepulse-github-ci
+          role-to-assume: arn:aws:iam::121403124761:role/ridepulse-github-prep   # main only (#38)
           aws-region: us-east-2
       - name: Prep
         run: /usr/bin/time -v uv run --frozen python -m services.prep "$MONTH" --target-utilisation "$TARGET_UTILISATION" $FORCE

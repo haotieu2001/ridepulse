@@ -28,6 +28,10 @@ PING_SCHEMA_IDS = [int(i) for i in conf.get("ridepulse.ping_schema_ids").split("
 # The simulated clock is TIMESTAMP_NTZ (the TLC's wall clock, no zone), which Delta enables only on request.
 NTZ = {"delta.feature.timestampNtz": "supported"}
 EVENT_TYPES = ["TripRequested", "DriverAssigned", "TripStarted", "TripCompleted"]
+# A new Kafka cluster (a new Confluent account, docs/runbooks/confluent-new-account.md) gets a flow suffix: a new
+# flow has its own checkpoint, so it reads the new cluster from its start, and appends to the same bronze tables, so
+# no history is lost. Empty is the first cluster: the flow names Lakeflow gave these tables when they were created.
+FLOW_SUFFIX = conf.get("ridepulse.kafka.flow_suffix", "")
 CDC_TOPICS = ["cdc.dispatch.drivers", "cdc.dispatch.driver_profiles", "cdc.dispatch.replay_state", "cdc.dispatch.replay_runs"]
 
 
@@ -53,7 +57,7 @@ def dead_letters(name: str, source: str, topic: str) -> None:
     """Records whose `error` is set, to the DLQ topic, as JSON with the raw bytes in base64."""
     dlt.create_sink(f"{name}_dlq", "kafka", {**KAFKA, "topic": topic})
 
-    @dlt.append_flow(name=f"{name}_to_dlq", target=f"{name}_dlq")
+    @dlt.append_flow(name=f"{name}_to_dlq{FLOW_SUFFIX}", target=f"{name}_dlq")
     def flow():
         return (dlt.read_stream(source).where("error IS NOT NULL").select(
             F.col("raw_key").alias("key"),
@@ -79,8 +83,11 @@ def trips_v1_parsed():
     return df.withColumn("error", error)
 
 
-@dlt.table(name="trips_v1", comment="trips.v1 as it arrived; one row per Kafka record, duplicates kept (silver dedupes on event_id)",
-           cluster_by=["event_type"], table_properties=NTZ)
+dlt.create_streaming_table(name="trips_v1", cluster_by=["event_type"], table_properties=NTZ,
+                           comment="trips.v1 as it arrived; one row per Kafka record, duplicates kept (silver dedupes on event_id)")
+
+
+@dlt.append_flow(name=f"trips_v1{FLOW_SUFFIX}", target="trips_v1")
 def trips_v1():
     return dlt.read_stream("trips_v1_parsed").where("error IS NULL").select(
         F.regexp_extract(F.col("raw_key").cast("string"), r'^"(.*)"$', 1).alias("trip_key"),
@@ -110,8 +117,11 @@ def cdc_dispatch_parsed():
     return df.withColumn("error", error)
 
 
-@dlt.table(name="cdc_dispatch", comment="Debezium changes for the published dispatch tables; tombstones kept",
-           cluster_by=["source_table"])
+dlt.create_streaming_table(name="cdc_dispatch", cluster_by=["source_table"],
+                           comment="Debezium changes for the published dispatch tables; tombstones kept")
+
+
+@dlt.append_flow(name=f"cdc_dispatch{FLOW_SUFFIX}", target="cdc_dispatch")
 def cdc_dispatch():
     return dlt.read_stream("cdc_dispatch_parsed").where("error IS NULL").select(
         F.regexp_extract("topic", r"^cdc\.dispatch\.(.*)$", 1).alias("source_table"),
@@ -144,8 +154,11 @@ def locations_parsed():
     return df.withColumn("error", error)
 
 
-@dlt.table(name="locations", comment="Driver pings as they arrived; duplicates kept (silver dedupes on driver_id, device_ts)",
-           cluster_by=["device_ts"], table_properties=NTZ)
+dlt.create_streaming_table(name="locations", cluster_by=["device_ts"], table_properties=NTZ,
+                           comment="Driver pings as they arrived; duplicates kept (silver dedupes on driver_id, device_ts)")
+
+
+@dlt.append_flow(name=f"locations{FLOW_SUFFIX}", target="locations")
 def locations():
     return dlt.read_stream("locations_parsed").where("error IS NULL").select(
         "p.driver_id", F.col("p.device_ts").cast("timestamp_ntz").alias("device_ts"), "p.trip_key", "p.status",
