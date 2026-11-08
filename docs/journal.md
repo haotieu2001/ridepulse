@@ -1247,3 +1247,20 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
 - OAuth secrets for window, forwarder and ci are Terraform's now: one-year lifetime, replaced by an apply after 330
   days, expiry as an output (2027-11-08). Written to SSM; `make ci-secret` puts CI's into the repository secret.
   Each was exchanged for a token before the old CLI-made ones were deleted. Covers #44 (the CI rotation).
+
+### #78 Gated deploys
+- deploy.yml on every push to main: stg; stg_smoke (a validate-only update of stg's streaming pipeline, as
+  ridepulse-ci: the whole graph planned, no data); then live, behind the GitHub environment `live` (required
+  reviewer, main only): Terraform for confluent, landing, debezium, replayer with ridepulse-github-deploy (only `live`
+  may assume it; never the GitHub roles, the OIDC provider or the bootstrap/identity state), then the dev bundle and
+  the job ids. A plan that destroys or replaces anything stops and names it (ADR-0011, the #39 cascade).
+- dev is deployed by ridepulse-ci now, from CI and from a laptop (`make deploy` runs scripts/as_ci.sh): a bundle
+  makes the deployer the jobs' owner and only an admin can change an owner, so alternating identities would break
+  CI. The 7 dev jobs were handed to ridepulse-ci once. Pipelines can only change owner by a metastore admin (Databricks
+  owns that on Free Edition), so their owner is declared in the bundle, and both run as ridepulse-jobs (new: READ on
+  the Kafka secret scope, USE CONNECTION on neon_dev). A streaming update and the daily backfill passed on it.
+- ridepulse-ci holds MANAGE on the dev catalog (the bundle manages all six schemas): a privileged identity, guarded
+  by the approval and its secret, written down as such. The dashboard no longer embeds the deployer's credentials.
+- Found: the CLI profile records the account id, which no API returns inside the workspace; with it the rule-set
+  endpoint works, so "Service principal: User" on ridepulse-jobs is Terraform now (owner and ridepulse-ci).
+- Break-glass runbook: the bootstrap and identity stacks, refused replacements, CI down.

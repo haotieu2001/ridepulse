@@ -24,14 +24,20 @@ targets:
     # No `mode: development`: it renames schemas to dev_<user>_raw and ignores an
     # empty name_prefix. The catalog already separates environments, so the
     # plain names the plan uses (ridepulse_dev.raw.tlc) stay.
+    # Deployed by CI as ridepulse-ci after the `live` approval (deploy.yml, #78), or from a laptop as break-glass
+    # (docs/runbooks/break-glass-deploy.md). One deployment either way: the root path is pinned to where it has always
+    # lived, and the host (not a CLI profile) is all CI has; a laptop's CLI picks its profile for this host.
     workspace:
-      profile: ridepulse
+      host: https://dbc-f915d382-6d5f.cloud.databricks.com
+      root_path: /Workspace/Users/haokimtieu2001@gmail.com/.bundle/${bundle.name}/${bundle.target}
     variables:
       catalog: ridepulse_dev
     # ridepulse-jobs (infra/terraform/databricks, #77) reads the deployed files and can see every resource; what it
     # may run or change is granted per resource below.
     permissions:
-      - user_name: haokimtieu2001@gmail.com   # the owner, who deploys: a list replaces the default, so it's explicit
+      - user_name: haokimtieu2001@gmail.com   # the owner, break-glass deploys: a list replaces the default, so it's explicit
+        level: CAN_MANAGE
+      - service_principal_name: 39a85987-a185-409c-b168-41a6b40cb8b1   # ridepulse-ci, which deploys dev (#78)
         level: CAN_MANAGE
       - service_principal_name: c4c712f2-20ef-4012-8b27-0b460b996068   # ridepulse-jobs
         level: CAN_VIEW
@@ -53,7 +59,7 @@ targets:
       quality_monitors:
         daily_economics:
           table_name: ${var.catalog}.gold.agg_daily_economics
-          assets_dir: /Workspace/Users/${workspace.current_user.userName}/ridepulse_monitors
+          assets_dir: /Workspace/Users/haokimtieu2001@gmail.com/ridepulse_monitors   # the same whoever deploys
           output_schema_name: ${var.catalog}.ops
           snapshot: {}
       # The AI/BI dashboard (#34): written by src/bi/build_dashboard.py. Dev only: its queries name ridepulse_dev.
@@ -61,13 +67,23 @@ targets:
         ridepulse:
           display_name: RidePulse
           file_path: ./src/bi/ridepulse.lvdash.json
+          # Viewers query with their own access, so Unity Catalog's grants and the pii policy apply to each of them;
+          # embedded, it would run as whoever deployed last (#78: ridepulse-ci, which can't read the data).
+          embed_credentials: false
           warehouse_id: ccb41dc830068dc3
       pipelines:
         # The streaming job starts it as ridepulse-jobs (#77). The pipeline itself still runs as its owner.
         bronze_ingest:
+          # Runs as ridepulse-jobs, not its owner: the owner is the deploy identity, ridepulse-ci (#78).
+          run_as:
+            service_principal_name: c4c712f2-20ef-4012-8b27-0b460b996068   # ridepulse-jobs
           permissions:
             - service_principal_name: c4c712f2-20ef-4012-8b27-0b460b996068   # ridepulse-jobs
               level: CAN_RUN
+            # Owned by the person who made it, declared so a deploy by ridepulse-ci keeps it: only a metastore
+            # admin can change a pipeline's owner, and recreating it would drop its streaming tables (#78).
+            - user_name: haokimtieu2001@gmail.com
+              level: IS_OWNER
         # Plan path C (#27): a daily query-based pull of the dispatch database's reference tables, incremental on
         # each table's indexed updated_at cursor (V001), into bronze.neon_*. SCD type 2, so every version a pull
         # saw is kept with when it held: history per pull. What a cursor can't see (a delete, a row changed twice
@@ -75,9 +91,13 @@ targets:
         # this environment. No schedule of its own: the daily job (#33) runs it; by hand, `make refpull`.
         reference_pull:
           name: reference_pull
+          run_as:
+            service_principal_name: c4c712f2-20ef-4012-8b27-0b460b996068   # ridepulse-jobs, as the streaming pipeline (#78)
           permissions:
             - service_principal_name: c4c712f2-20ef-4012-8b27-0b460b996068   # ridepulse-jobs: the daily job starts it
               level: CAN_RUN
+            - user_name: haokimtieu2001@gmail.com   # its owner, as bronze_ingest's (#78)
+              level: IS_OWNER
           catalog: ${var.catalog}
           schema: bronze
           ingestion_definition:

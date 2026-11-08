@@ -19,6 +19,21 @@ resource "databricks_grant" "jobs_catalog" {
   privileges = ["ALL_PRIVILEGES", "MANAGE"]
 }
 
+# The two pipelines run as ridepulse-jobs too (#78): a pipeline runs as its owner unless told otherwise, and the
+# owner is now the deploy identity, ridepulse-ci. The streaming pipeline reads the Kafka keys from the secret scope;
+# the reference pull reads Neon through the UC connection.
+resource "databricks_secret_acl" "jobs_kafka" {
+  scope      = "ridepulse"
+  principal  = databricks_service_principal.jobs.application_id
+  permission = "READ"
+}
+
+resource "databricks_grant" "jobs_neon" {
+  foreign_connection = "neon_dev"
+  principal          = databricks_service_principal.jobs.application_id
+  privileges         = ["USE_CONNECTION"]
+}
+
 output "jobs_application_id" {
   description = "run_as for the bundle's scheduled jobs."
   value       = databricks_service_principal.jobs.application_id

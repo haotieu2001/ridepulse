@@ -1,33 +1,37 @@
 name: deploy
 
-# Deploys the Databricks bundle to the stg target as the ridepulse-ci service
-# principal (OAuth M2M). Feasibility test S3; grows into the plan's full
-# deploy pipeline (staging -> E2E -> approval -> prod) in later phases.
+# Every push to main, in order (#78):
+#   stg        the Databricks bundle to stg, as ridepulse-ci
+#   stg_smoke  a validate-only update of stg's streaming pipeline: Lakeflow resolves and plans the whole graph against
+#              stg (imports, schemas, flows, the Kafka source) without processing data
+#   live       after a required reviewer approves the `live` environment: Terraform applies for the stacks CI may apply,
+#              then the dev bundle. dev is the live environment here (one workspace, docs/production.md §6).
+# Not here, by design: the bootstrap stack (it holds the roles this workflow uses) and the databricks identity stack
+# (a workspace admin applies it). Both, and any apply that replaces a stateful resource, are break-glass:
+# docs/runbooks/break-glass-deploy.md.
 on:
   push:
     branches: [main]
-    paths:
-      - "databricks/**"
-      - ".github/workflows/deploy.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: deploy-stg
+  group: deploy
   cancel-in-progress: false
+
+env:
+  DATABRICKS_HOST: https://dbc-f915d382-6d5f.cloud.databricks.com
+  DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+  DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
 
 jobs:
   stg:
-    # Only from main: a manual run from another branch would deploy unreviewed code with the stg identity.
+    # Only from main: a manual run from another branch would deploy unreviewed code.
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    env:
-      DATABRICKS_HOST: https://dbc-f915d382-6d5f.cloud.databricks.com
-      DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
-      DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
     defaults:
       run:
         working-directory: databricks
@@ -37,12 +41,98 @@ jobs:
         with:
           persist-credentials: false
       - uses: databricks/setup-cli@8de769ec2543ee05e456ee2121350efc7efc4bda # v1.22.1
-
       - name: Who is deploying
         run: databricks current-user me -o json | jq -r '"deploying as " + .userName + " (" + .displayName + ")"'
-
       - name: Validate
         run: databricks bundle validate -t stg
-
       - name: Deploy
         run: databricks bundle deploy -t stg
+
+  stg_smoke:
+    needs: stg
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: databricks
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: databricks/setup-cli@8de769ec2543ee05e456ee2121350efc7efc4bda # v1.22.1
+      - name: Plan the streaming pipeline on stg without running it
+        run: databricks bundle run -t stg bronze_ingest --validate-only
+
+  live:
+    needs: stg_smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: live   # a required reviewer approves; main only
+    permissions:
+      contents: read
+      id-token: write   # OIDC: ridepulse-github-deploy, which only this environment may assume
+    env:
+      AWS_REGION: us-east-2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      # The version the state was written by (ci.yml).
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.17.0
+          terraform_wrapper: false
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::121403124761:role/ridepulse-github-deploy
+          aws-region: us-east-2
+      - name: Build the Lambda zips (the replayer stack hashes them)
+        run: scripts/build_lambdas.sh
+      # ADR-0011: a plan that would destroy or replace anything stops here and names it. A key, a schema or an
+      # instance replaced by accident is how #39 nearly broke the ping schema id; such an apply is break-glass.
+      - name: Terraform, the stacks CI applies
+        run: |
+          for stack in confluent landing debezium replayer; do
+            dir="infra/terraform/$stack"
+            echo "::group::$stack"
+            terraform -chdir="$dir" init -input=false > /dev/null
+            set +e
+            terraform -chdir="$dir" plan -input=false -no-color -detailed-exitcode -out=tf.plan > "plan-$stack.txt" 2>&1
+            code=$?
+            set -e
+            if [ "$code" = 1 ]; then cat "plan-$stack.txt"; exit 1; fi
+            if [ "$code" = 0 ]; then echo "$stack: no changes"; echo "::endgroup::"; continue; fi
+            terraform -chdir="$dir" show -json tf.plan > "plan-$stack.json"
+            destroys=$(jq -r '.resource_changes[] | select(.change.actions | index("delete")) | .address' "plan-$stack.json")
+            grep -E '^  # |^Plan:' "plan-$stack.txt"
+            if [ -n "$destroys" ]; then
+              echo "::error::$stack would destroy or replace: $destroys. Not applied: a break-glass apply decides that."
+              exit 1
+            fi
+            terraform -chdir="$dir" apply -input=false -no-color tf.plan
+            echo "### $stack: $(grep -E '^Plan:' "plan-$stack.txt")" >> "$GITHUB_STEP_SUMMARY"
+            echo "::endgroup::"
+          done
+      - uses: databricks/setup-cli@8de769ec2543ee05e456ee2121350efc7efc4bda # v1.22.1
+      - name: The dev bundle, as ridepulse-ci (the jobs' owner; the jobs and pipelines run as ridepulse-jobs)
+        working-directory: databricks
+        run: |
+          databricks bundle validate -t dev
+          databricks bundle deploy -t dev
+      # As `make deploy`: the window Lambda finds the jobs by these ids, and a deploy resets them to PAUSED, so an
+      # open window is opened again.
+      - name: Publish the job ids, and reopen an open window
+        run: |
+          (cd databricks && databricks bundle summary -t dev -o json) | \
+            jq -r '.resources.jobs | "\(.streaming_back_to_back.id) \(.views_every_10_min.id) \(.daily.id)"' | {
+            read -r streaming views daily
+            aws ssm put-parameter --name /ridepulse/dev/databricks/streaming_job_id --type String --value "$streaming" --overwrite > /dev/null
+            aws ssm put-parameter --name /ridepulse/dev/databricks/views_job_id --type String --value "$views" --overwrite > /dev/null
+            aws ssm put-parameter --name /ridepulse/dev/databricks/daily_job_id --type String --value "$daily" --overwrite > /dev/null
+          }
+          if [ "$(aws scheduler get-schedule --name ridepulse-replayer --query State --output text)" = ENABLED ]; then
+            echo "a window is open: opening it again so the jobs run"
+            aws lambda invoke --function-name ridepulse-window --cli-binary-format raw-in-base64-out \
+              --payload '{"action":"open"}' /dev/stdout
+          fi
