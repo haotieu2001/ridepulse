@@ -99,5 +99,22 @@ Measured on the January 2025 5% sample (1,020,410 trips, `docs/design/clock/meas
   simulated day.
 - V002 (Phase 2) adds the replayed-days record; the replayer's tick and the prep job's slicing get
   tests for retries, overlapping runs and the out-of-order trips above.
-- To revisit: a DST month. NTZ timestamps repeat in the November fall-back hour, so ordering inside
-  that hour is ambiguous; check it on the November file before replaying it.
+- ~~To revisit: a DST month.~~ Settled in amendment 1.
+
+## Amendment 1 (2026-11-08, #35): the November fall-back hour
+
+Measured on November 2024 (`docs/design/clock/measure_dst.py`). On 2024-11-03 the 01:00 hour holds 64,183 pickups,
+against 33,512 the next Sunday: it was lived twice and the file, with no offset, gives both the same timestamps.
+9,829 trips that night have a wall-clock duration exactly an hour shorter than their reported `trip_time` (9,832 in
+the whole month): they ended after the clocks went back, and 9,653 of them read as dropped off *before* their pickup.
+The prep job's V001 check would have quarantined all of them, dropping 6.6% of that night's trips from the replay.
+
+Decision (`contracts/dst.py`, used by the prep job and by silver):
+1. On a fall-back day, a trip picked up before 03:00 whose wall-clock duration is an hour shorter than `trip_time`
+   (within two minutes) has its dropoff moved an hour later. Measured: dropoff-before-pickup goes from 9,653 to 0,
+   and 3 trips in the month stay an hour off.
+2. The trip key keeps the published times, so keys are the same for the stream and the file.
+3. Pickups in the repeated hour can't be told apart. That simulated hour replays twice the demand, and R1 may alarm
+   on it. It is accepted, and expected in the alert counts of that night.
+4. Spring forward (a missing 02:00 hour) needs nothing: no timestamp repeats, and durations across it are an hour
+   long on the wall clock, as `trip_time` will say.
