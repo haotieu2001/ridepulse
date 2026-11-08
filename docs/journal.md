@@ -1264,3 +1264,7 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
 - Found: the CLI profile records the account id, which no API returns inside the workspace; with it the rule-set
   endpoint works, so "Service principal: User" on ridepulse-jobs is Terraform now (owner and ridepulse-ci).
 - Break-glass runbook: the bootstrap and identity stacks, refused replacements, CI down.
+- The first gated deploy (run 42511807852) failed in the landing plan: the deploy role's guard denied iam:* on every
+  ridepulse-github-* role, reads included, and the landing stack reads the prep role and owns its S3 policy. Now it
+  denies only changes to itself, the plan role and the OIDC provider; the IAM simulator confirms reads and the prep
+  policy are allowed and those three are not.
