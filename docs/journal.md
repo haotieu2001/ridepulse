@@ -1198,6 +1198,17 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
 - After the drill, completeness: silver equals Neon (293,213 events, 2,834 drivers). The check had outgrown the
   25 MB inline result limit; it now narrows to Neon's window, counts repeats in the warehouse, and reads external links.
 
+### #40 production.md finished
+- ADR-0006 to ADR-0015, one per difference in §1 that pointed at a phase: the dispatch database (Aurora), Kafka and
+  the network (Confluent Enterprise over PrivateLink), the alerting path (back to back here, continuous and real-time
+  there), serving surge (a Lakebase synced table), file ingestion (external locations instead of the forwarder),
+  infrastructure as code (Terraform for what is shared, bundles for what ships with code), alerting (an incident tool,
+  routed by owner), the TLC submission, privacy (keyed tokens, location retention), quality/security/cost controls.
+  Each starts from what this project measured or hit.
+- Scale table from measured sizes over 10.3 simulated days: bronze 28 MB/day (pings 71%), silver 32 MB/day,
+  silver.tlc_trips 1.4 GB per month, fct_trips ~1 GB per month. Costs from `docs/cost.md`.
+- A production C4 container diagram, rendered and checked; the current one in `c4.md` was stale (the pipeline ran
+  "every 10 min", no views job): fixed.
 ### The first update after some deploys fails: limit the damage
 - Four failures in two days (R2 and R4 `DUPLICATE_SOURCE_NAMES`, the pings flow `DUPLICATED_MAP_KEY`), each the first
   update after a deploy and each passing on the next update. Not reproducible on demand: three deploy-then-update
