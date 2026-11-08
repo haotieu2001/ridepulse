@@ -1,0 +1,27 @@
+# Gold (#29): the star schema, its keys and the metric view, from silver. A job task with an optional date range:
+# dimensions are rebuilt whole, facts replaced for the range (FR-15). The daily job (#33) runs it for each closed
+# day and for backfills; by hand, `make gold [START=2025-01-01 END=2025-01-31]`.
+resources:
+  jobs:
+    gold_build:
+      name: gold_build
+      max_concurrent_runs: 1
+      parameters:
+        - name: start
+          default: ""
+        - name: end
+          default: ""
+      tasks:
+        - task_key: build
+          environment_key: default
+          spark_python_task:
+            python_file: ../src/gold/build.py
+            parameters:
+              - --catalog
+              - ${var.catalog}
+              - "--start={{job.parameters.start}}"
+              - "--end={{job.parameters.end}}"
+      environments:
+        - environment_key: default
+          spec:
+            environment_version: "3"

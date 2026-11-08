@@ -16,6 +16,10 @@ resources:
       catalog_name: ${var.catalog}
       name: ref
       comment: Reference data and rule configuration.
+    gold:
+      catalog_name: ${var.catalog}
+      name: gold
+      comment: The star schema (docs/design/erd.md §2) with its keys, and the metric view for Genie.
     ops:
       catalog_name: ${var.catalog}
       name: ops

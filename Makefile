@@ -14,7 +14,7 @@ YEAR        ?= 2025
 
 export AWS_PROFILE
 
-.PHONY: help bootstrap-plan bootstrap-apply landing-plan landing-apply confluent-plan confluent-apply debezium-plan debezium-up debezium-down build-lambdas replayer-plan replayer-apply up down window-status replay bronze land-month forward files refpull land-zones land-noaa prep db-status db-migrate db-test db-seed catalog deploy s10-upload s10-run s10
+.PHONY: help bootstrap-plan bootstrap-apply landing-plan landing-apply confluent-plan confluent-apply debezium-plan debezium-up debezium-down build-lambdas replayer-plan replayer-apply up down window-status replay bronze land-month forward files refpull gold land-zones land-noaa prep db-status db-migrate db-test db-seed catalog deploy s10-upload s10-run s10
 
 help:
 	@echo "bootstrap-plan / bootstrap-apply  Terraform: state bucket, GitHub OIDC role, budget"
@@ -31,6 +31,7 @@ help:
 	@echo "forward [PREFIX=raw/...]          copy files already landed into the volume (new ones go by themselves)"
 	@echo "files                             landed files into bronze and silver (silver.tlc_trips, weather_day)"
 	@echo "refpull                           Neon reference tables into bronze.neon_* (query-based, SCD2)"
+	@echo "gold [START=d END=d]              the star schema, its keys and the metric view (#29)"
 	@echo "prep MONTH=2025-01 [OUT_DIR=dir]  prep job: contract, sample, event-time slices"
 	@echo "db-status / db-migrate            dispatch migrations on the dev Neon database"
 	@echo "db-test                           migrations + SQL tests in throwaway Neon databases"
@@ -116,6 +117,10 @@ files:
 # Neon's reference tables into bronze.neon_* now (#27, path C): the daily job (#33) will run the same pipeline.
 refpull:
 	cd databricks && databricks bundle run -t dev reference_pull
+
+# The star schema from silver (#29); START/END rebuild only those dates' facts. The daily job (#33) will run it.
+gold:
+	cd databricks && databricks bundle run -t dev gold_build --params start=$(START),end=$(END)
 
 land-zones:
 	uv run python -m services.tlc_downloader zones --bucket $(LANDING_BUCKET)

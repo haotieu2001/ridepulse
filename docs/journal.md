@@ -990,3 +990,22 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
 - ADR-0005 (accepted): history or deletes that matter go by B (trip events, driver state, `dim_driver` in #29); C is
   for reference data that is closed, not deleted (`zones`, `fare_rules`); `driver_profiles` stays on C as the
   standing comparison, unread by gold. A C table that can lose rows needs a soft delete or a periodic full snapshot.
+
+### #29 Gold: the star schema, keys and the metric view
+- `databricks/src/gold/build.py` (job `gold_build`, `make gold [START= END=]`): erd.md §2 as built. Dimensions
+  rebuilt whole; `fct_trips` and `fct_driver_shifts` replaced for the run's dates (REPLACE WHERE, FR-15). PK and FK
+  declared as Unity Catalog informational constraints (16), dropped before and declared after each build.
+- `dim_driver`: SCD2 from `silver.driver_profile_changes` (path B, ADR-0005), versions only where vehicle type or
+  base licence change, a delete closing the last one. Two clocks: a version holds from the simulated time the replay
+  had reached at its commit (the last tick's watermark), so a trip joins the profile its driver had then; a trip
+  inside the tick that created its driver takes the first version.
+- `dim_date` (2024-2026: ISO weekday, US federal holidays observed, toll from 2025-01-05), `dim_hour` (dayparts),
+  `dim_zone` (CBD flag, neighbours, `south_of_96th` by centroid: approximate), `dim_weather_day` (rainy >= 1 mm),
+  `dim_provider`. `mv_trip_economics`: joins to five dimensions, ratios of sums.
+- Real build: 2 min 15 s. fct_trips 20,405,666, fct_driver_shifts 12,698 (12,599 with trips), dim_driver 2,909
+  versions of 2,834 drivers, 2,833 current (the planted delete has none), none with two. No orphan key anywhere.
+  Every replayed completed trip in the January file has its driver (124,770); 2,334 more picked up in December
+  (the replay began 2024-12-31) wait for that month's file.
+- The metric view: 20,405,666 trips across provider x toll; take rate Uber 18.5% -> 24.0% and Lyft 24.7% -> 22.2%
+  before and after the toll (plan: 20-24%), tip rate 3.9-5.1%. For #30.
+- A multi-subquery integrity check hit a Spark internal error on the warehouse; the same checks as joins ran fine.
