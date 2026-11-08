@@ -45,3 +45,34 @@ resource "aws_s3_bucket_lifecycle_configuration" "tfstate" {
     }
   }
 }
+
+# CI's plan role (github_oidc.tf) reads its three stacks' states and nothing else in this bucket, even though
+# ReadOnlyAccess would allow every object: confluent's state holds API secrets, bootstrap's manages the role itself.
+# Only that role is named, so the owner's access is unchanged (#38).
+data "aws_iam_policy_document" "tfstate" {
+  statement {
+    sid           = "CiReadsOnlyThePlannedStates"
+    effect        = "Deny"
+    actions       = ["s3:GetObject", "s3:GetObjectVersion"]
+    not_resources = [for s in local.ci_planned_stacks : "${aws_s3_bucket.tfstate.arn}/${s}/terraform.tfstate"]
+    principals {
+      type        = "AWS"
+      identifiers = [aws_iam_role.github_ci.arn]
+    }
+  }
+  statement {
+    sid       = "CiNeverWritesState"
+    effect    = "Deny"
+    actions   = ["s3:PutObject", "s3:DeleteObject", "s3:DeleteObjectVersion"]
+    resources = ["${aws_s3_bucket.tfstate.arn}/*"]
+    principals {
+      type        = "AWS"
+      identifiers = [aws_iam_role.github_ci.arn]
+    }
+  }
+}
+
+resource "aws_s3_bucket_policy" "tfstate" {
+  bucket = aws_s3_bucket.tfstate.id
+  policy = data.aws_iam_policy_document.tfstate.json
+}

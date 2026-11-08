@@ -1,0 +1,38 @@
+# Version updates (#38). Security updates are on in the repository settings and ignore the cooldown. The cooldown is
+# the pinning rule: a release must be at least two weeks old before anything here uses it.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
+    groups:
+      python:
+        patterns: ["*"]
+
+  - package-ecosystem: terraform
+    directories:
+      - /infra/terraform/bootstrap
+      - /infra/terraform/landing
+      - /infra/terraform/confluent
+      - /infra/terraform/debezium
+      - /infra/terraform/replayer
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
+    groups:
+      providers:
+        patterns: ["*"]
