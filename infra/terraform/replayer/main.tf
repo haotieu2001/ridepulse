@@ -177,7 +177,8 @@ data "aws_iam_policy_document" "window" {
   statement {
     # The Databricks jobs (#25): ridepulse-window's OAuth credentials and the job ids `make deploy` writes.
     actions = ["ssm:GetParameter"]
-    resources = [for p in ["host", "window_client_id", "window_client_secret", "streaming_job_id", "views_job_id"] :
+    resources = [for p in ["host", "window_client_id", "window_client_secret", "streaming_job_id", "views_job_id",
+      "daily_job_id"] :
     "${local.ssm_arn}/ridepulse/${var.env}/databricks/${p}"]
   }
   statement {

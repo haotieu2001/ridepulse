@@ -190,3 +190,16 @@ def test_the_client_pauses_only_the_trigger_and_cancels_runs_on_close(monkeypatc
     assert [s[3] for s in sent if s[1] == "/api/2.1/jobs/runs/cancel-all"] == [{"job_id": 11}, {"job_id": 12}]
     assert sent[0][2] == "Basic " + base64.b64encode(b"id:secret").decode()
     assert all(s[2] == "Bearer tok" for s in sent[1:])   # one token for the whole run
+
+
+def test_the_daily_job_opens_and_closes_with_the_window(monkeypatch):
+    cron = lambda expr: {"quartz_cron_expression": expr, "timezone_id": "UTC", "pause_status": "PAUSED"}  # noqa: E731
+    jobs = {11: {"schedule": cron("0 * * * * ?")}, 12: {"schedule": cron("0 0/10 * * * ?")}, 13: {"schedule": cron("0 0/15 * * * ?")}}
+    sent = fake_databricks(monkeypatch, jobs)
+    client = Jobs(Databricks("https://dbc.example/", "id", "secret"), "11", "12", "13")
+    client.open()
+    assert all(j["schedule"]["pause_status"] == "UNPAUSED" for j in jobs.values())
+    assert client.state()["daily_job"] == "UNPAUSED"
+    client.close()
+    assert all(j["schedule"]["pause_status"] == "PAUSED" for j in jobs.values())
+    assert [s[3]["job_id"] for s in sent if s[1] == "/api/2.1/jobs/runs/cancel-all"] == [11, 12, 13]

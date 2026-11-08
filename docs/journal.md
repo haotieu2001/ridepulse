@@ -1051,3 +1051,16 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   crossed midnight) and accept the contract's standard variants ($0.75 pooled surcharge, half and double airport
   fees). Breaks left: CBD 5, surcharge 6, airport 1,827: the contract's own baselines for rare values. 2024 days
   aren't checked (fare_rules starts 2025-01-01): null, not 0.
+
+### #33 Daily job: the 15-minute gate, gold for closed days, backfills
+- Job `daily` (dev target, next to `reference_pull`, which only dev has): `gate` -> `due` (condition) ->
+  `reference_pull` and `files_ingest` -> `gold_build` for the range -> `record` in `gold.daily_runs`. The gate finds
+  the days the replay closed (V002's rule) that gold hasn't built; with `start`/`end` it's a backfill and the gate is
+  skipped. Every 15 minutes, paused; the window Lambda now unpauses and pauses it with the other two jobs (optional
+  in SSM, so a window works without it). Failure email on the job.
+- Real: a January 2025 backfill in 4 min, run twice: fingerprints of fct_trips (61,138,447), fct_driver_shifts,
+  dim_driver, agg_daily_economics and daily_runs identical. The gate with nothing pending: 32 s, the rest skipped.
+- A first try put the job in resources/ for every target: stg validated, but with the pipeline reference left as
+  a literal `${...}`. Moved into the dev target.
+- Not measured yet: SLA-3 (a day's gold within 30 min of closing) needs a demo window; `daily_runs.built_at` and the
+  watermark's commit time give it.

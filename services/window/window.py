@@ -46,17 +46,29 @@ def set_schedule(scheduler, name: str, state: str) -> None:
 
 
 class Jobs:
-    """The two Databricks jobs a window runs, as the ridepulse-window service principal: the streaming pipeline back
-    to back (every minute, no queue) and the views every 10 minutes. Both are paused outside a window."""
+    """The Databricks jobs a window runs, as the ridepulse-window service principal: the streaming pipeline back to back
+    (every minute, no queue), the views every 10 minutes, and the daily job's gate every 15 (#33). All are paused
+    outside a window. The daily job is optional, so a window works before it's deployed."""
 
-    def __init__(self, api: Databricks, streaming_job_id: str, views_job_id: str):
+    def __init__(self, api: Databricks, streaming_job_id: str, views_job_id: str, daily_job_id: str | None = None):
         self.api, self.streaming, self.views = api, int(streaming_job_id), int(views_job_id)
+        self.daily = int(daily_job_id) if daily_job_id else None
+
+    @property
+    def scheduled(self) -> list[int]:
+        return [self.views] + ([self.daily] if self.daily else [])
 
     @classmethod
     def from_ssm(cls, ssm, prefix: str) -> Jobs:
-        def get(name: str) -> str:
-            return ssm.get_parameter(Name=f"{prefix}/{name}", WithDecryption=True)["Parameter"]["Value"]
-        return cls(Databricks.from_ssm(ssm, prefix, "window"), get("streaming_job_id"), get("views_job_id"))
+        def get(name: str, required: bool = True) -> str | None:
+            try:
+                return ssm.get_parameter(Name=f"{prefix}/{name}", WithDecryption=True)["Parameter"]["Value"]
+            except ssm.exceptions.ParameterNotFound:
+                if required:
+                    raise
+                return None
+        return cls(Databricks.from_ssm(ssm, prefix, "window"), get("streaming_job_id"), get("views_job_id"),
+                   get("daily_job_id", required=False))
 
     def _call(self, method: str, path: str, body: dict | None = None) -> dict:
         return self.api.call(method, path, body)
@@ -76,17 +88,19 @@ class Jobs:
 
     def open(self) -> None:
         self._set_paused(self.streaming, False)   # its first run starts at the next minute
-        self._set_paused(self.views, False)
+        for job_id in self.scheduled:
+            self._set_paused(job_id, False)
 
     def close(self) -> None:
-        for job_id in (self.streaming, self.views):
+        for job_id in (self.streaming, *self.scheduled):
             self._set_paused(job_id, True)
             self._call("POST", "/api/2.1/jobs/runs/cancel-all", {"job_id": job_id})   # no run outlives the window
 
     def state(self) -> dict:
         active = self._call("GET", f"/api/2.1/jobs/runs/list?job_id={self.streaming}&active_only=true").get("runs", [])
         return {"streaming_job": self._trigger(self.streaming)[1].get("pause_status"),
-                "views_job": self._trigger(self.views)[1].get("pause_status"), "streaming_runs_active": len(active)}
+                "views_job": self._trigger(self.views)[1].get("pause_status"), "streaming_runs_active": len(active),
+                **({"daily_job": self._trigger(self.daily)[1].get("pause_status")} if self.daily else {})}
 
 
 def handler(event, context=None, ec2=None, scheduler=None, jobs=None) -> dict:
