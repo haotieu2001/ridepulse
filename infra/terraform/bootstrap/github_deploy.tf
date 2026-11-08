@@ -39,12 +39,16 @@ resource "aws_iam_role_policy_attachment" "github_deploy_admin" {
 }
 
 data "aws_iam_policy_document" "github_deploy_walls" {
+  # Reads stay allowed: plans read every role. The prep role's policy stays writable: the landing stack owns it (its
+  # bucket's ARNs), which is what this role applies. What it can never do is change itself, the plan role or the OIDC
+  # trust: no widening its own reach (the first deploy, 2026-11-08, failed on a blanket iam:* deny reading the prep role).
   statement {
-    sid     = "NeverTheGitHubRolesOrTheOidcProvider"
-    effect  = "Deny"
-    actions = ["iam:*"]
+    sid         = "NeverItselfThePlanRoleOrTheOidcProvider"
+    effect      = "Deny"
+    not_actions = ["iam:Get*", "iam:List*"]
     resources = [
-      "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/ridepulse-github-*",
+      "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/ridepulse-github-deploy",
+      "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/ridepulse-github-ci",
       aws_iam_openid_connect_provider.github.arn,
     ]
   }
