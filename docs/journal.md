@@ -1127,4 +1127,5 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   DUPLICATE_SOURCE_NAMES (three attempts), then the pipeline's own retry and a further update completed every flow on
   the same code, runtime and data. Source naming is an opt-in feature (source evolution, offset log V2) this pipeline
   does not enable, and `name()` is not allowed on a view-backed source like R4's; left as a platform transient the
-  retry absorbs. If it recurs outside first-after-deploy updates, revisit.
+  retry absorbs. Not the first time: the event log shows R2 failing the same way on 2026-11-07 14:15, also right
+  after a deploy (#37's runbook covers it). Revisit if it ever fails two updates in a row.
