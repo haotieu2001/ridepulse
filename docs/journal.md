@@ -1036,3 +1036,18 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   whose own controls don't add up stops, nothing loaded (a test tampers one amount).
 - Real: weeks of 2024-12-30 and 2025-01-06, 2,834 earners each: 2,834 entries for 2,833 drivers (one missing, one
   twice), $558,620.95 and $2,017,929.11.
+
+### #32 Three reconciliations: completeness, payouts, fees
+- In `gold/build.py`, rebuilt each run: `recon_completeness` (per closed day: the file's 5% sample against the
+  stream; closed days from `replay_runs` as V002's `replayed_days`), `recon_payouts` (per driver x paid week:
+  earned against the ACH entries), `recon_fees` (per day x fee against `fare_rules`), and `agg_recon_daily`.
+- Completeness: the one closed day (2025-01-09): 34,287 of 34,287 sampled trips streamed, 0 breaks (SLA-5). The first
+  run showed 864 "not in the file": stadium copies, whose `incident_id` is only on TripRequested, so copies are now
+  dropped by key.
+- Payouts: exactly the 6 planted errors (a missing, a duplicate and a wrong amount per week), no other break.
+- Fees: the first, per-trip check flagged 43% of BCF and 3% of surcharges. Measured: BCF isn't a clean percentage per
+  trip (2.4-3.0% of the fare, half the trips off by a cent or more), so it's checked per day in total (within 2%;
+  Jan 2025 days were -1.1% to +0.6%). Flat fees go by the dropoff date (1,184 CBD fees on Jan 4 pickups that
+  crossed midnight) and accept the contract's standard variants ($0.75 pooled surcharge, half and double airport
+  fees). Breaks left: CBD 5, surcharge 6, airport 1,827: the contract's own baselines for rare values. 2024 days
+  aren't checked (fare_rules starts 2025-01-01): null, not 0.

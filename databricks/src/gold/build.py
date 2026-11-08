@@ -26,7 +26,7 @@ from __future__ import annotations
 import argparse
 from datetime import date, timedelta
 
-from pyspark.sql import Column, DataFrame, SparkSession, Window
+from pyspark.sql import DataFrame, SparkSession, Window
 from pyspark.sql import functions as F
 
 PROVIDERS = [("HV0002", "Juno"), ("HV0003", "Uber"), ("HV0004", "Via"), ("HV0005", "Lyft")]
@@ -299,44 +299,65 @@ def recon_payouts(shifts: DataFrame, paid: DataFrame) -> DataFrame:
                     kind.alias("break"))
 
 
+# Charged values a flat fee may take besides its rate, as multiples of the rate or as amounts: the contract's
+# standard sets (tlc_trips.yaml). Anything else on a trip is off rule: the contract's own rare values.
+FLAT_VARIANTS = {"cbd_fee": ([1.0], []), "congestion_surcharge": ([1.0], [0.75]),   # $0.75: a pooled ride
+                 "airport_fee": ([0.5, 1.0, 2.0], [])}                              # half, one, two airport legs
+BCF_TOLERANCE = 0.02   # BCF isn't a clean percentage per trip (2.4-3.0% of the fare): checked per day, in total
+
+
 def recon_fees(trips: DataFrame, rules: DataFrame) -> DataFrame:
-    """Per pickup day x fee: fees collected against the rate fare_rules had in effect that day. A trip is off rule
-    when it was charged something else (BCF: the rate of the base fare, to the cent; a flat fee: 0 or the rate, or
-    the CBD fee anything before it began). Sales tax is taken as reported (the contract), so it isn't checked."""
+    """Per pickup day x fee: fees collected against the rate fare_rules had in effect. Flat fees go by the trip's
+    dropoff date (a trip picked up on 2025-01-04 at 23:50 entered the zone, and paid the CBD fee, after midnight);
+    a trip is off rule when its charge isn't 0, the rate or a standard variant. BCF is the rate of the base fare,
+    checked on the day's total, off when it misses by more than 2%. Sales tax is taken as reported (the contract).
+    Days before fare_rules' first date aren't checked: breaks null, never a false 0."""
     r = rules.select("fee", F.col("amount").cast("double").alias("rate"), "valid_from", "valid_to")
-    # fare_rules says nothing before its first date: those days aren't checked (off_rule_trips null), never "0 breaks"
     covered = F.lit(r.agg(F.min("valid_from")).first()[0])
 
-    def rate_on(fee: str) -> tuple[DataFrame, Column]:
+    def joined(fee: str, on: str) -> DataFrame:
         sub = r.where(F.col("fee") == fee)
-        return sub, (F.col("pickup_date") >= sub.valid_from) & (sub.valid_to.isNull() | (F.col("pickup_date") < sub.valid_to))
+        holds = (F.col(on) >= sub.valid_from) & (sub.valid_to.isNull() | (F.col(on) < sub.valid_to))
+        return (trips.select("pickup_date", F.to_date("dropped_off_at").alias("dropoff_date"), "base_fare",
+                             F.coalesce(F.col(fee), F.lit(0)).cast("double").alias("charged"))
+                .join(F.broadcast(sub), holds, "left"))
 
-    out = None
-    for fee, column in [("bcf", "bcf"), ("cbd_fee", "cbd_fee"), ("congestion_surcharge", "congestion_surcharge"),
-                        ("airport_fee", "airport_fee")]:
-        sub, holds = rate_on(fee)
-        t = trips.select("pickup_date", F.coalesce(F.col(column), F.lit(0)).cast("double").alias("charged"), "base_fare")
-        t = t.join(F.broadcast(sub), holds, "left")
-        if fee == "bcf":
-            expected = F.round(F.col("base_fare").cast("double") * F.col("rate"), 2)
-            off = F.abs(F.col("charged") - expected) > 0.011
-        else:
-            expected = F.when(F.col("charged") > 0, F.col("rate")).otherwise(F.lit(0.0))
-            off = (F.col("charged") > 0) & (F.col("rate").isNull() | (F.abs(F.col("charged") - F.col("rate")) > 0.001))
-        off = F.when(F.col("pickup_date") >= covered, off)
-        part = (t.groupBy("pickup_date").agg(
-                    F.lit(fee).alias("fee"), F.sum((F.col("charged") > 0).cast("int")).alias("trips_charged"),
-                    F.round(F.sum("charged"), 2).alias("collected"), F.round(F.sum(F.coalesce(expected, F.lit(0.0))), 2).alias("expected"),
-                    F.sum(off.cast("int")).alias("off_rule_trips")))
-        out = part if out is None else out.unionByName(part)
-    return out.withColumnRenamed("pickup_date", "day")
+    out = []
+    t = joined("bcf", "pickup_date")
+    bcf = (t.groupBy("pickup_date")
+           .agg(F.sum((F.col("charged") > 0).cast("int")).alias("trips_charged"), F.round(F.sum("charged"), 2).alias("collected"),
+                F.round(F.sum(F.col("base_fare").cast("double") * F.col("rate")), 2).alias("expected"))
+           .withColumn("off_rule_trips", F.lit(None).cast("bigint")))
+    out.append(bcf.withColumn("fee", F.lit("bcf")))
+    for fee, (multiples, amounts) in FLAT_VARIANTS.items():
+        t = joined(fee, "dropoff_date")
+        allowed = F.lit(False)
+        for m in multiples:
+            allowed = allowed | (F.abs(F.col("charged") - F.col("rate") * m) < 0.001)
+        for a in amounts:
+            allowed = allowed | (F.abs(F.col("charged") - a) < 0.001)
+        off = (F.col("charged") > 0) & (F.col("rate").isNull() | ~allowed)
+        out.append(t.groupBy("pickup_date").agg(
+            F.sum((F.col("charged") > 0).cast("int")).alias("trips_charged"), F.round(F.sum("charged"), 2).alias("collected"),
+            F.round(F.sum(F.when(F.col("charged") > 0, F.col("rate")).otherwise(0.0)), 2).alias("expected"),
+            F.sum(off.cast("int")).cast("bigint").alias("off_rule_trips")).withColumn("fee", F.lit(fee)))
+    df = out[0]
+    for part in out[1:]:
+        df = df.unionByName(part)
+    deviation = F.try_divide(F.col("collected"), F.col("expected")) - 1
+    breaks = F.when(F.col("fee") == "bcf", (F.abs(deviation) > BCF_TOLERANCE).cast("bigint")).otherwise(F.col("off_rule_trips"))
+    return (df.withColumnRenamed("pickup_date", "day")
+            .withColumn("deviation", deviation.cast("decimal(12,4)"))
+            .withColumn("breaks", F.when(F.col("day") >= covered, breaks))
+            .withColumn("off_rule_trips", F.when(F.col("day") >= covered, F.col("off_rule_trips")))
+            .select("day", "fee", "trips_charged", "collected", "expected", "deviation", "off_rule_trips", "breaks"))
 
 
 def agg_recon_daily(completeness: DataFrame, payouts: DataFrame | None, fees: DataFrame) -> DataFrame:
     """One row per period x reconciliation: what was checked, how many breaks (erd.md's agg_recon_daily). Fees on
     days fare_rules doesn't cover have null breaks: not checked."""
     c = completeness.select("day", F.lit("completeness").alias("reconciliation"), F.col("expected").alias("checked"), "breaks")
-    f = (fees.groupBy("day").agg(F.sum("trips_charged").alias("checked"), F.sum("off_rule_trips").alias("breaks"))
+    f = (fees.groupBy("day").agg(F.sum("trips_charged").alias("checked"), F.sum("breaks").alias("breaks"))
          .withColumn("reconciliation", F.lit("fees")))
     out = c.unionByName(f.select(c.columns))
     if payouts is not None:

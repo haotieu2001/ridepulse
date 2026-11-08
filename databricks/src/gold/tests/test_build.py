@@ -205,12 +205,18 @@ def test_fees_against_the_rule_in_effect_and_days_it_doesnt_cover(spark):
                                    ("congestion_surcharge", 2.75, date(2025, 1, 1), None), ("airport_fee", 2.5, date(2025, 1, 1), None)],
                                   "fee STRING, amount DOUBLE, valid_from DATE, valid_to DATE")
     trips = spark.createDataFrame([
-        (date(2025, 1, 6), 20.0, 0.55, 1.5, 2.75, 0.0),     # all on rule
-        (date(2025, 1, 6), 20.0, 0.60, 3.0, 2.75, 0.0),     # BCF off by 5 cents, CBD fee doubled
-        (date(2025, 1, 3), 20.0, 0.55, 1.5, 0.0, 0.0),      # a CBD fee before the toll began
-        (date(2024, 12, 9), 20.0, 0.55, None, 2.75, 2.5)],  # before fare_rules says anything: not checked
-        "pickup_date DATE, base_fare DOUBLE, bcf DOUBLE, cbd_fee DOUBLE, congestion_surcharge DOUBLE, airport_fee DOUBLE")
-    got = {(r.day, r.fee): r.off_rule_trips for r in recon_fees(trips, rules).collect()}
-    assert got[(date(2025, 1, 6), "bcf")] == 1 and got[(date(2025, 1, 6), "cbd_fee")] == 1
-    assert got[(date(2025, 1, 6), "congestion_surcharge")] == 0 and got[(date(2025, 1, 3), "cbd_fee")] == 1
+        (date(2025, 1, 6), t("2025-01-06 09:00:00"), 20.0, 0.55, 1.5, 2.75, 2.5),    # all on rule
+        (date(2025, 1, 6), t("2025-01-06 10:00:00"), 20.0, 0.56, 3.0, 0.75, 5.0),    # CBD fee doubled; pooled, two legs: fine
+        (date(2025, 1, 6), t("2025-01-06 11:00:00"), 20.0, 0.54, 0.0, 5.5, 2.0),     # surcharge doubled, airport $2: off
+        (date(2025, 1, 4), t("2025-01-05 00:20:00"), 20.0, 0.55, 1.5, 0.0, 0.0),     # crossed midnight into the toll: fine
+        (date(2025, 1, 3), t("2025-01-03 12:00:00"), 20.0, 0.55, 1.5, 0.0, 0.0),     # a CBD fee before the toll: off
+        (date(2025, 1, 7), t("2025-01-07 09:00:00"), 100.0, 3.50, 0.0, 0.0, 0.0),    # BCF 3.5% on its day: > 2% off
+        (date(2024, 12, 9), t("2024-12-09 09:00:00"), 20.0, 0.55, None, 2.75, 2.5)],  # before fare_rules: not checked
+        "pickup_date DATE, dropped_off_at TIMESTAMP_NTZ, base_fare DOUBLE, bcf DOUBLE, cbd_fee DOUBLE, "
+        "congestion_surcharge DOUBLE, airport_fee DOUBLE")
+    got = {(r.day, r.fee): r.breaks for r in recon_fees(trips, rules).collect()}
+    assert (got[(date(2025, 1, 6), "cbd_fee")], got[(date(2025, 1, 6), "congestion_surcharge")],
+            got[(date(2025, 1, 6), "airport_fee")], got[(date(2025, 1, 6), "bcf")]) == (1, 1, 1, 0)
+    assert got[(date(2025, 1, 4), "cbd_fee")] == 0 and got[(date(2025, 1, 3), "cbd_fee")] == 1
+    assert got[(date(2025, 1, 7), "bcf")] == 1
     assert got[(date(2024, 12, 9), "congestion_surcharge")] is None and got[(date(2024, 12, 9), "bcf")] is None
