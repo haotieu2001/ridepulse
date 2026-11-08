@@ -31,6 +31,7 @@ def _ssm(name: str) -> str:
 def _setup() -> dict:
     env = os.environ["RIDEPULSE_ENV"]
     url = urllib.parse.urlparse(_ssm(f"/ridepulse/{env}/neon/url"))
+    assert url.hostname and url.password, "the Neon URL in SSM has no host or password"
     conninfo = {"host": url.hostname.replace("-pooler.", "."), "port": url.port or 5432, "user": url.username,
                 "password": urllib.parse.unquote(url.password), "dbname": url.path.lstrip("/"), "sslmode": "require"}
     c = f"/ridepulse/confluent/{env}"

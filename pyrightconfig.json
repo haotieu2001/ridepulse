@@ -1,0 +1,9 @@
+{
+  "include": ["services", "contracts", "scripts/measure", "scripts/bi", "scripts/drills"],
+  "exclude": ["**/tests", "**/__pycache__"],
+  "typeCheckingMode": "basic",
+  "reportAttributeAccessIssue": false,
+  "venvPath": ".",
+  "venv": ".venv",
+  "pythonVersion": "3.13"
+}

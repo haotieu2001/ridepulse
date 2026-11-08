@@ -42,6 +42,7 @@ def _canonical(value: object, kind: str) -> str:
             value = datetime.fromisoformat(str(value))
         return value.strftime(TIMESTAMP_FORMAT)
     if kind == "int":
+        assert isinstance(value, int | str | float), f"not an int: {value!r}"
         return str(int(value))
     return str(value)
 

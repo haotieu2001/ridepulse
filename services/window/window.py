@@ -60,15 +60,16 @@ class Jobs:
 
     @classmethod
     def from_ssm(cls, ssm, prefix: str) -> Jobs:
-        def get(name: str, required: bool = True) -> str | None:
+        def get(name: str) -> str:
+            return ssm.get_parameter(Name=f"{prefix}/{name}", WithDecryption=True)["Parameter"]["Value"]
+
+        def optional(name: str) -> str | None:
             try:
-                return ssm.get_parameter(Name=f"{prefix}/{name}", WithDecryption=True)["Parameter"]["Value"]
+                return get(name)
             except ssm.exceptions.ParameterNotFound:
-                if required:
-                    raise
                 return None
         return cls(Databricks.from_ssm(ssm, prefix, "window"), get("streaming_job_id"), get("views_job_id"),
-                   get("daily_job_id", required=False))
+                   optional("daily_job_id"))
 
     def _call(self, method: str, path: str, body: dict | None = None) -> dict:
         return self.api.call(method, path, body)

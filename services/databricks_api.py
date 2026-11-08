@@ -38,7 +38,8 @@ class Databricks:
                                          data=urllib.parse.urlencode({"grant_type": "client_credentials", "scope": "all-apis"}).encode())
             req.add_header("Authorization", f"Basic {self._auth}")
             req.add_header("Content-Type", "application/x-www-form-urlencoded")
-            self._token = json.loads(self._send(req))["access_token"]
+            self._token = token = json.loads(self._send(req))["access_token"]
+            return token
         return self._token
 
     def call(self, method: str, path: str, body: dict | None = None) -> dict:

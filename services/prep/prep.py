@@ -258,8 +258,8 @@ def prep(month: str, store: Store, *, source_file: pathlib.Path | None = None, f
     if (not force and pointer and pointer["current"]["source_etag"] == current["etag"]
             and pointer["current"]["format_version"] == FORMAT_VERSION
             and pointer["current"].get("target_utilisation") == target_utilisation
-            and store.get_json(f"{prefix}/_manifest.json")):
-        return "unchanged", store.get_json(f"{prefix}/_manifest.json")
+            and (manifest := store.get_json(f"{prefix}/_manifest.json"))):
+        return "unchanged", manifest
 
     with tempfile.TemporaryDirectory() as tmp:
         if source_file is None:

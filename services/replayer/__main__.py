@@ -70,7 +70,7 @@ def main() -> int:
                 p.error(f"{a.kind} needs {sorted(missing)} in --params")
             row = conn.execute("INSERT INTO incidents (kind, starts_at, ends_at, params) VALUES (%s, %s, %s, %s::jsonb) "
                                "RETURNING incident_id", (a.kind, a.at, a.at + timedelta(minutes=a.minutes), json.dumps(params)))
-            print(f"incident {row.fetchone()[0]}: {a.kind} from {a.at} for {a.minutes} simulated minutes, {params}")
+            print(f"incident {job.one(row)}: {a.kind} from {a.at} for {a.minutes} simulated minutes, {params}")
             return 0
         if not a.bucket:
             p.error("--bucket or LANDING_BUCKET is required")

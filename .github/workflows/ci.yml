@@ -51,6 +51,9 @@ jobs:
         run: uv run ruff check .
       - name: Tests
         run: uv run pytest
+      # Types in basic mode (pyrightconfig.json, #76), on the venv the tests just built. Pinned, like the actions.
+      - name: Types
+        run: uvx pyright@1.1.408
 
   terraform:
     runs-on: ubuntu-latest
