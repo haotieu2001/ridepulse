@@ -85,6 +85,67 @@ targets:
                     query_based_connector_config:
                       cursor_columns: [updated_at]
       jobs:
+        # The daily job (#33): every 15 minutes, a gate finds the simulated days the replay closed and gold hasn't built;
+        # for those it pulls the reference tables, ingests landed files, builds gold for the range and records it. Given
+        # start and end it's a backfill: the gate is skipped and the range rebuilt (FR-15: twice changes nothing).
+        # Paused outside a demo window: the window Lambda unpauses it with the streaming and views jobs.
+        # Dev only: it runs reference_pull, which only dev has (the neon_dev connection).
+        daily:
+          name: daily
+          permissions:
+            - service_principal_name: 17447026-e680-4550-8b53-23a3b7ac2f13   # ridepulse-window
+              level: CAN_MANAGE
+          schedule:
+            quartz_cron_expression: "0 0/15 * * * ?"
+            timezone_id: UTC
+            pause_status: PAUSED
+          max_concurrent_runs: 1
+          parameters:
+            - name: start
+              default: ""
+            - name: end
+              default: ""
+          tasks:
+            - task_key: gate
+              environment_key: default
+              spark_python_task:
+                python_file: ./src/daily/gate.py
+                parameters: [gate, --catalog, "${var.catalog}", --src-dir, "${workspace.file_path}/src",
+                             "--start={{job.parameters.start}}", "--end={{job.parameters.end}}"]
+            - task_key: due
+              depends_on: [{task_key: gate}]
+              condition_task:
+                op: EQUAL_TO
+                left: "{{tasks.gate.values.run}}"
+                right: "true"
+            - task_key: reference_pull
+              depends_on: [{task_key: due, outcome: "true"}]
+              pipeline_task:
+                pipeline_id: ${resources.pipelines.reference_pull.id}
+            - task_key: files
+              depends_on: [{task_key: due, outcome: "true"}]
+              run_job_task:
+                job_id: ${resources.jobs.files_ingest.id}
+            - task_key: gold
+              depends_on: [{task_key: reference_pull}, {task_key: files}]
+              run_job_task:
+                job_id: ${resources.jobs.gold_build.id}
+                job_parameters:
+                  start: "{{tasks.gate.values.start}}"
+                  end: "{{tasks.gate.values.end}}"
+            - task_key: record
+              depends_on: [{task_key: gold}]
+              environment_key: default
+              spark_python_task:
+                python_file: ./src/daily/gate.py
+                parameters: [record, --catalog, "${var.catalog}", --src-dir, "${workspace.file_path}/src",
+                             "--start={{tasks.gate.values.start}}", "--end={{tasks.gate.values.end}}"]
+          email_notifications:
+            on_failure: [haokimtieu2001@gmail.com]
+          environments:
+            - environment_key: default
+              spec:
+                environment_version: "3"
         # The window Lambda pauses and unpauses these as ridepulse-window, which may manage these two jobs and nothing
         # else (#25, ADR-0002). In stg nothing unpauses them.
         streaming_back_to_back:

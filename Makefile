@@ -161,10 +161,11 @@ catalog:
 # so if a window is open (the replayer's schedule on) it's opened again, which unpauses them.
 deploy:
 	cd databricks && databricks bundle deploy -t dev
-	cd databricks && databricks bundle summary -t dev -o json | jq -r '.resources.jobs | "\(.streaming_back_to_back.id) \(.views_every_10_min.id)"' | \
-	  { read streaming views; \
+	cd databricks && databricks bundle summary -t dev -o json | jq -r '.resources.jobs | "\(.streaming_back_to_back.id) \(.views_every_10_min.id) \(.daily.id)"' | \
+	  { read streaming views daily; \
 	    aws ssm put-parameter --name /ridepulse/dev/databricks/streaming_job_id --type String --value "$$streaming" --overwrite --query Version --output text; \
-	    aws ssm put-parameter --name /ridepulse/dev/databricks/views_job_id --type String --value "$$views" --overwrite --query Version --output text; }
+	    aws ssm put-parameter --name /ridepulse/dev/databricks/views_job_id --type String --value "$$views" --overwrite --query Version --output text; \
+	    aws ssm put-parameter --name /ridepulse/dev/databricks/daily_job_id --type String --value "$$daily" --overwrite --query Version --output text; }
 	if [ "$$(aws scheduler get-schedule --name ridepulse-replayer --query State --output text)" = ENABLED ]; then \
 	  echo "a window is open: opening it again so the jobs run"; $(MAKE) up; fi
 
