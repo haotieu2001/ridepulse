@@ -37,7 +37,7 @@ help:
 	@echo "db-test                           migrations + SQL tests in throwaway Neon databases"
 	@echo "db-seed [DRIVERS=N]               zones and fare rules on the dev Neon database"
 	@echo "catalog                           create the $(CATALOG) catalog (once)"
-	@echo "deploy                            deploy the Databricks bundle (dev)"
+	@echo "deploy                            break-glass: the dev bundle as ridepulse-ci (CI deploys it after approval)"
 	@echo "identity-plan / identity-apply    Databricks identities, secrets and grants (infra/terraform/databricks)"
 	@echo "ci-secret                         copy the CI secret from SSM into the GitHub repository secret"
 	@echo "s10                               feasibility test S10: one TLC month into bronze"
@@ -159,10 +159,12 @@ catalog:
 	    --json "{\"warehouse_id\":\"$$wh\",\"statement\":\"CREATE CATALOG IF NOT EXISTS $(CATALOG)\",\"wait_timeout\":\"50s\"}" \
 	    | jq -e '.status.state == "SUCCEEDED"' >/dev/null && echo "created catalog $(CATALOG)"; }
 
+# Break-glass (#78): dev is deployed by deploy.yml after the `live` approval. By hand, it runs as the same identity,
+# ridepulse-ci (scripts/as_ci.sh), which owns the jobs: docs/runbooks/break-glass-deploy.md.
 # The window Lambda finds the two jobs by the ids published here (#25). A deploy resets both to the bundle's PAUSED,
 # so if a window is open (the replayer's schedule on) it's opened again, which unpauses them.
 deploy:
-	cd databricks && databricks bundle deploy -t dev
+	cd databricks && ../scripts/as_ci.sh databricks bundle deploy -t dev
 	cd databricks && databricks bundle summary -t dev -o json | jq -r '.resources.jobs | "\(.streaming_back_to_back.id) \(.views_every_10_min.id) \(.daily.id)"' | \
 	  { read streaming views daily; \
 	    aws ssm put-parameter --name /ridepulse/dev/databricks/streaming_job_id --type String --value "$$streaming" --overwrite --query Version --output text; \

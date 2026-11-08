@@ -35,9 +35,12 @@ def test_only_the_window_principal_may_manage_the_jobs_and_only_in_dev():
     dev = BUNDLE["targets"]["dev"]["resources"]["jobs"]
     for name in ("streaming_back_to_back", "views_every_10_min", "daily"):
         assert dev[name]["permissions"] == [{"service_principal_name": WINDOW_SP, "level": "CAN_MANAGE"}]
-    # It never gets the pipeline: the only grant there is the jobs principal's, to start updates.
+    # It never gets the pipeline: the grants there are the jobs principal's, to start updates, and the declared owner
+    # (only a metastore admin could change it, #78).
     pipeline = BUNDLE["targets"]["dev"]["resources"]["pipelines"]["bronze_ingest"]
-    assert pipeline["permissions"] == [{"service_principal_name": JOBS_SP, "level": "CAN_RUN"}]
+    assert pipeline["permissions"] == [{"service_principal_name": JOBS_SP, "level": "CAN_RUN"},
+                                       {"user_name": "haokimtieu2001@gmail.com", "level": "IS_OWNER"}]
+    assert pipeline["run_as"] == {"service_principal_name": JOBS_SP}
 
 
 def test_the_jobs_the_window_principal_can_edit_never_run_as_the_admin():

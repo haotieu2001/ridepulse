@@ -16,6 +16,12 @@ variable "databricks_profile" {
   default     = "ridepulse"
 }
 
+variable "account_id" {
+  description = "The Databricks account id, for rule-set names (from the CLI profile; not readable by API here)."
+  type        = string
+  default     = "cad7bcb3-ae16-41a5-ab76-d5beb7bb23f0"
+}
+
 variable "catalog" {
   description = "The environment's catalog."
   type        = string
