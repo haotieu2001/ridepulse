@@ -1115,6 +1115,15 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   the driver. One was a real bug: prep's `--out-dir` store had no `get_bytes`, so that mode could crash.
 - Left on #76: silver and supply logic as plain functions with tests, and a Postgres-Kafka-Debezium container test.
 
+### #76 A real Postgres -> Debezium -> Kafka test in CI
+- CI job `cdc`: Postgres 18 with logical WAL, Redpanda v26.2.5 as Kafka and Debezium Server 3.7.0 (downloaded with
+  production's SHA-512), run with `dev.properties` followed by `ci/cdc/local.properties`, so the routing under test is
+  dev's own and only the endpoints differ. A month of ticks, then `trips.v1` read back: every event once, keyed by
+  its trip, with deterministic ids, valid against the envelope and payload contracts, all four lifecycle events per
+  trip; the drivers' changes in Debezium's envelope. Passed on its first CI run (test 28 s, job 1.5 min).
+- Written blind: there is no Docker on the laptop, so it was built for CI and checked there (the test is skipped
+  where RIDEPULSE_CDC_BOOTSTRAP is unset).
+- Left on #76: silver's contract checks and supply as plain functions with tests.
 ### #37 Runbooks and a postmortem
 - New runbooks: `late-data-alert.md` (the `late_events` rule vs a platform health lag breach, and what a late event
   costs: only its live window), `quota-hit.md` (each free tier's cap and how it fails; none hit yet, so it says

@@ -1,8 +1,9 @@
 name: ci
 
-# Every pull request and push to main. Four jobs:
+# Every pull request and push to main. Five jobs:
 #   test       lint, unit, contract and Postgres tests (no secrets: a throwaway postgres service), types
 #   security   secrets in the history, Terraform misconfigurations, known vulnerabilities in dependencies
+#   cdc        Postgres -> Debezium -> Kafka for real: every trip event once, in the contracts' envelope
 #   terraform  fmt and validate for every stack; a real plan for the stacks a read-only role can plan
 #   bundle     the Databricks bundle validated for stg, and the Lambda zips built
 # Deploying is deploy.yml's job, from main only.
@@ -90,6 +91,59 @@ jobs:
         run: |
           uv export --frozen --all-groups --no-emit-project --format requirements-txt --output-file "$RUNNER_TEMP/requirements.txt"
           uvx pip-audit@2.10.1 --strict --disable-pip -r "$RUNNER_TEMP/requirements.txt"
+
+  # Postgres -> Debezium -> Kafka for real (#76): a month of ticks into a Postgres with logical WAL, Debezium Server with
+  # dev's own config (only the endpoints differ, ci/cdc/local.properties), Redpanda as Kafka. The test checks that
+  # every trip event reaches trips.v1 once, in the contracts' envelope.
+  cdc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: postgres
+      DEBEZIUM_VERSION: 3.7.0.Final   # infra/terraform/debezium/main.tf
+      DEBEZIUM_SHA512: 3c539d78d9ac4c2e13db7adb0f3cfcb0399e67c2a2d3feb4d2a43b3e42f15d6a4eb9463d07a16b6f71b736ded56d9c33dd5b0cfb71752bd57387aec824b3c0fd
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Postgres with logical WAL, and Redpanda
+        run: |
+          docker run -d --name pg -p 5432:5432 -e POSTGRES_PASSWORD=postgres \
+            postgres:18.4@sha256:a02db8cac496f15b094798a38254f14d6e00741f709360e5e00bb6668ea31636 -c wal_level=logical
+          docker run -d --name kafka -p 9092:9092 \
+            redpandadata/redpanda:v26.2.5@sha256:badca2d958f81da675c3055a9ecb6ebb590325582bcf16936148ffd65e96e920 \
+            redpanda start --mode dev-container --smp 1 --kafka-addr 0.0.0.0:9092 --advertise-kafka-addr localhost:9092
+          until docker exec pg pg_isready -U postgres; do sleep 1; done
+      - name: Dispatch schema
+        run: uv run python db/migrate.py --schema dispatch
+      - name: Debezium Server, dev's config with local endpoints
+        run: |
+          curl -fsSL --retry 3 -o debezium.tar.gz \
+            "https://repo1.maven.org/maven2/io/debezium/debezium-server-dist/$DEBEZIUM_VERSION/debezium-server-dist-$DEBEZIUM_VERSION.tar.gz"
+          echo "$DEBEZIUM_SHA512  debezium.tar.gz" | sha512sum -c -
+          tar -xzf debezium.tar.gz
+          cp debezium-server/lib_opt/debezium-connect-plugins-*.jar debezium-server/lib/   # the outbox router, as in dev
+          cat infra/terraform/debezium/env/dev.properties ci/cdc/local.properties > debezium-server/config/application.properties
+          (cd debezium-server && ./run.sh > ../debezium.log 2>&1 &)
+          for i in $(seq 1 90); do
+            psql -Atc "SELECT active FROM pg_replication_slots WHERE slot_name = 'ridepulse_debezium'" | grep -q t && exit 0
+            sleep 2
+          done
+          echo "Debezium's slot never became active"; tail -50 debezium.log; exit 1
+      - name: Every event reaches Kafka once
+        run: RIDEPULSE_CDC_BOOTSTRAP=localhost:9092 uv run pytest services/replayer/tests/test_cdc_integration.py -v
+      - name: Debezium's log
+        if: failure()
+        run: tail -100 debezium.log
 
   terraform:
     runs-on: ubuntu-latest
