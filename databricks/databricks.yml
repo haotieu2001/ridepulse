@@ -28,6 +28,13 @@ targets:
       profile: ridepulse
     variables:
       catalog: ridepulse_dev
+    # ridepulse-jobs (infra/terraform/databricks, #77) reads the deployed files and can see every resource; what it
+    # may run or change is granted per resource below.
+    permissions:
+      - user_name: haokimtieu2001@gmail.com   # the owner, who deploys: a list replaces the default, so it's explicit
+        level: CAN_MANAGE
+      - service_principal_name: c4c712f2-20ef-4012-8b27-0b460b996068   # ridepulse-jobs
+        level: CAN_VIEW
     resources:
       # The forwarder Lambda writes landed files here as ridepulse-forwarder, which may use the raw schema and write
       # this one volume, nothing else (#26, ADR-0002). USE CATALOG is granted in SQL: catalogs are made with SQL here.
@@ -56,6 +63,11 @@ targets:
           file_path: ./src/bi/ridepulse.lvdash.json
           warehouse_id: ccb41dc830068dc3
       pipelines:
+        # The streaming job starts it as ridepulse-jobs (#77). The pipeline itself still runs as its owner.
+        bronze_ingest:
+          permissions:
+            - service_principal_name: c4c712f2-20ef-4012-8b27-0b460b996068   # ridepulse-jobs
+              level: CAN_RUN
         # Plan path C (#27): a daily query-based pull of the dispatch database's reference tables, incremental on
         # each table's indexed updated_at cursor (V001), into bronze.neon_*. SCD type 2, so every version a pull
         # saw is kept with when it held: history per pull. What a cursor can't see (a delete, a row changed twice
@@ -63,6 +75,9 @@ targets:
         # this environment. No schedule of its own: the daily job (#33) runs it; by hand, `make refpull`.
         reference_pull:
           name: reference_pull
+          permissions:
+            - service_principal_name: c4c712f2-20ef-4012-8b27-0b460b996068   # ridepulse-jobs: the daily job starts it
+              level: CAN_RUN
           catalog: ${var.catalog}
           schema: bronze
           ingestion_definition:
@@ -109,6 +124,10 @@ targets:
         # Dev only: it runs reference_pull, which only dev has (the neon_dev connection).
         daily:
           name: daily
+          # Not the workspace admin: ridepulse-window can edit this job, so it runs as ridepulse-jobs, which holds this
+          # catalog's data and nothing at the workspace level (#77).
+          run_as:
+            service_principal_name: c4c712f2-20ef-4012-8b27-0b460b996068   # ridepulse-jobs
           permissions:
             - service_principal_name: 17447026-e680-4550-8b53-23a3b7ac2f13   # ridepulse-window
               level: CAN_MANAGE
@@ -166,11 +185,30 @@ targets:
                 environment_version: "3"
         # The window Lambda pauses and unpauses these as ridepulse-window, which may manage these two jobs and nothing
         # else (#25, ADR-0002). In stg nothing unpauses them.
+        # The daily job starts these two: they run as ridepulse-jobs too, so it never starts code running as the
+        # admin, and it may run them (#77). make files / make gold still work: the owner keeps CAN_MANAGE.
+        files_ingest:
+          run_as:
+            service_principal_name: c4c712f2-20ef-4012-8b27-0b460b996068   # ridepulse-jobs
+          permissions:
+            - service_principal_name: c4c712f2-20ef-4012-8b27-0b460b996068   # ridepulse-jobs
+              level: CAN_MANAGE_RUN
+        gold_build:
+          run_as:
+            service_principal_name: c4c712f2-20ef-4012-8b27-0b460b996068   # ridepulse-jobs
+          permissions:
+            - service_principal_name: c4c712f2-20ef-4012-8b27-0b460b996068   # ridepulse-jobs
+              level: CAN_MANAGE_RUN
+        # Both run as ridepulse-jobs, as daily does (#77).
         streaming_back_to_back:
+          run_as:
+            service_principal_name: c4c712f2-20ef-4012-8b27-0b460b996068   # ridepulse-jobs
           permissions:
             - service_principal_name: 17447026-e680-4550-8b53-23a3b7ac2f13   # ridepulse-window
               level: CAN_MANAGE
         views_every_10_min:
+          run_as:
+            service_principal_name: c4c712f2-20ef-4012-8b27-0b460b996068   # ridepulse-jobs
           permissions:
             - service_principal_name: 17447026-e680-4550-8b53-23a3b7ac2f13   # ridepulse-window
               level: CAN_MANAGE

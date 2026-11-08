@@ -1229,3 +1229,21 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   main validates on merge (#111). The Confluent provider bump (2.91.0) was planned locally first: no changes.
 - Found while checking: the SLA-8 drill (run from a branch made before #103) had put Debezium's allow-all egress
   back. Restored from main; all five stacks now plan clean against main.
+
+### #77 Databricks identities and grants in Terraform; the jobs run as a non-admin principal
+- `infra/terraform/databricks`: imported the 3 service principals, 3 account groups, their workspace assignments,
+  the warehouse permissions and the `pii` tag policy with 0 changes; it also owns the reader grants (moved out of
+  the gold build) and the forwarder's USE CATALOG.
+- `ridepulse-jobs` (new): the streaming, views and daily jobs, and the files_ingest and gold_build jobs the daily one
+  starts, run as it instead of the admin, closing #38's path from a leaked window secret to admin. It holds all
+  privileges and MANAGE on ridepulse_dev, ops membership, CAN_RUN on the two pipelines, CAN_VIEW on the bundle.
+  Each job ran as it; the daily job as a full backfill of 2025-01-09: gold whole (5,668 weekly rows, all ids).
+- Found on the way, each a run failing on a missing permission: the files and gold tasks start other jobs (which
+  then also run as ridepulse-jobs, so it never starts admin-run code); tagging a column with a governed tag needs
+  ASSIGN on the tag (granted in SQL, no Terraform resource).
+- Not Terraform, because Free Edition has no account console: account group membership ("can only be managed in
+  account"; the provider's account API answers Not Found), ASSIGN on the tag, and the owner's "Service principal:
+  User" role on ridepulse-jobs (UI; run_as needs it). Each is written out in the stack.
+- OAuth secrets for window, forwarder and ci are Terraform's now: one-year lifetime, replaced by an apply after 330
+  days, expiry as an output (2027-11-08). Written to SSM; `make ci-secret` puts CI's into the repository secret.
+  Each was exchanged for a token before the old CLI-made ones were deleted. Covers #44 (the CI rotation).

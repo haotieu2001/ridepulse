@@ -14,7 +14,7 @@ YEAR        ?= 2025
 
 export AWS_PROFILE
 
-.PHONY: help bootstrap-plan bootstrap-apply landing-plan landing-apply confluent-plan confluent-apply debezium-plan debezium-up debezium-down build-lambdas replayer-plan replayer-apply up down window-status replay bronze land-month forward files refpull gold land-zones land-noaa prep db-status db-migrate db-test db-seed catalog deploy s10-upload s10-run s10
+.PHONY: help identity-plan identity-apply ci-secret bootstrap-plan bootstrap-apply landing-plan landing-apply confluent-plan confluent-apply debezium-plan debezium-up debezium-down build-lambdas replayer-plan replayer-apply up down window-status replay bronze land-month forward files refpull gold land-zones land-noaa prep db-status db-migrate db-test db-seed catalog deploy s10-upload s10-run s10
 
 help:
 	@echo "bootstrap-plan / bootstrap-apply  Terraform: state bucket, GitHub OIDC role, budget"
@@ -38,6 +38,8 @@ help:
 	@echo "db-seed [DRIVERS=N]               zones and fare rules on the dev Neon database"
 	@echo "catalog                           create the $(CATALOG) catalog (once)"
 	@echo "deploy                            deploy the Databricks bundle (dev)"
+	@echo "identity-plan / identity-apply    Databricks identities, secrets and grants (infra/terraform/databricks)"
+	@echo "ci-secret                         copy the CI secret from SSM into the GitHub repository secret"
 	@echo "s10                               feasibility test S10: one TLC month into bronze"
 
 bootstrap-plan:
@@ -168,6 +170,21 @@ deploy:
 	    aws ssm put-parameter --name /ridepulse/dev/databricks/daily_job_id --type String --value "$$daily" --overwrite --query Version --output text; }
 	if [ "$$(aws scheduler get-schedule --name ridepulse-replayer --query State --output text)" = ENABLED ]; then \
 	  echo "a window is open: opening it again so the jobs run"; $(MAKE) up; fi
+
+# Identities, secrets and grants (#77). An apply after a secret's rotation date replaces it in SSM; then ci-secret
+# copies the CI one into the repository secret (piped, never printed).
+identity-plan:
+	terraform -chdir=infra/terraform/databricks init -input=false
+	terraform -chdir=infra/terraform/databricks plan -input=false -out=identity.tfplan
+
+identity-apply:
+	terraform -chdir=infra/terraform/databricks apply identity.tfplan
+
+ci-secret:
+	aws ssm get-parameter --name /ridepulse/ci/databricks_client_id --query Parameter.Value --output text | \
+	  gh secret set DATABRICKS_CLIENT_ID
+	aws ssm get-parameter --name /ridepulse/ci/databricks_client_secret --with-decryption --query Parameter.Value --output text | \
+	  gh secret set DATABRICKS_CLIENT_SECRET
 
 # TLC's CloudFront answers 403 after bursts of downloads, so retry with a pause.
 s10-upload:
