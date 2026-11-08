@@ -1115,6 +1115,15 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   the driver. One was a real bug: prep's `--out-dir` store had no `get_bytes`, so that mode could crash.
 - Left on #76: silver and supply logic as plain functions with tests, and a Postgres-Kafka-Debezium container test.
 
+### #43 Confluent after the trial credit: a new free account, when the credit ends (decided 2026-11-08)
+- The owner will move to a new free Confluent account rather than pay for Basic (~$1.5-2/month). Kafka here is a
+  pipe, not a store, so only the configuration that names the cluster moves: `docs/runbooks/confluent-new-account.md`.
+- Made safe first: bronze's three Kafka flows (and their DLQ flows) take `ridepulse.kafka.flow_suffix` from the
+  pipeline config. A new suffix means new flows with their own checkpoints, reading the new cluster from its start
+  and appending to the same tables; a full refresh would have wiped bronze and silver's history. Empty keeps the
+  names Lakeflow gave the tables: deployed and an update run, bronze counts unchanged (517,283 / 339,983 /
+  12,080,506), so the current checkpoints are kept.
+- Noted to the owner: signing up again for a new trial may be against Confluent's terms.
 ### #38 Security review
 - Unity Catalog (NFR-9): account groups `ridepulse-ops`, `ridepulse-finance`, `ridedesk`; gold-only grants; an ABAC
   policy masking `pii`-tagged driver ids to NULL outside ops; the weekly row filter extended so a driver sees their own
