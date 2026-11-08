@@ -37,7 +37,11 @@ resource "confluent_kafka_cluster" "this" {
   availability = "SINGLE_ZONE"
   cloud        = "AWS"
   region       = "us-east-2"
-  basic {}
+  # Basic includes one eCKU and bills $0.135/hour for each above it. Uncapped (the default, 50), demo days billed
+  # 1-5 dollars of eCKUs for a load of ~24 requests/s and 0.05 MB/s: ~$50/month, five times NFR-10 (docs/cost.md).
+  basic {
+    max_ecku = 1
+  }
 
   environment {
     id = confluent_environment.this.id
