@@ -46,6 +46,24 @@
       ]
     },
     {
+      "name": "dq_rows",
+      "displayName": "DQ: rows per snapshot",
+      "queryLines": [
+        "SELECT window.start AS snapshot_at, count AS row_count\n",
+        "FROM ridepulse_dev.ops.agg_daily_economics_profile_metrics WHERE column_name = ':table'\n"
+      ]
+    },
+    {
+      "name": "dq_latest",
+      "displayName": "DQ: latest snapshot per column",
+      "queryLines": [
+        "SELECT column_name, round(percent_null, 1) AS percent_null,\n",
+        "round(percent_zeros, 1) AS percent_zeros, CASE WHEN column_name = 'cbd_fees' THEN 'expected: no CBD fee before 2025-01-05' END AS note\n",
+        "FROM ridepulse_dev.ops.agg_daily_economics_profile_metrics\n",
+        "WHERE column_name <> ':table' AND window.start = (SELECT max(window.start) FROM ridepulse_dev.ops.agg_daily_economics_profile_metrics)\n"
+      ]
+    },
+    {
       "name": "payout_breaks",
       "displayName": "Payout breaks",
       "queryLines": [
@@ -1142,6 +1160,166 @@
           "position": {
             "x": 0,
             "y": 7,
+            "width": 6,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "dq_row_count",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "dq_rows",
+                  "fields": [
+                    {
+                      "name": "max(row_count)",
+                      "expression": "MAX(`row_count`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "max(row_count)",
+                  "displayName": "Data quality: days in agg_daily_economics (last snapshot)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Data quality: days in agg_daily_economics (last snapshot)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 14,
+            "width": 2,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "dq_rows_over_time",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "dq_rows",
+                  "fields": [
+                    {
+                      "name": "snapshot_at",
+                      "expression": "`snapshot_at`"
+                    },
+                    {
+                      "name": "max(row_count)",
+                      "expression": "MAX(`row_count`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "snapshot_at",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "snapshot at"
+                },
+                "y": {
+                  "fieldName": "max(row_count)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "row count"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Rows per data quality snapshot"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 14,
+            "width": 4,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "dq_columns",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "dq_latest",
+                  "fields": [
+                    {
+                      "name": "column_name",
+                      "expression": "`column_name`"
+                    },
+                    {
+                      "name": "percent_null",
+                      "expression": "`percent_null`"
+                    },
+                    {
+                      "name": "percent_zeros",
+                      "expression": "`percent_zeros`"
+                    },
+                    {
+                      "name": "note",
+                      "expression": "`note`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "column_name",
+                    "displayName": "column name"
+                  },
+                  {
+                    "fieldName": "percent_null",
+                    "displayName": "percent null"
+                  },
+                  {
+                    "fieldName": "percent_zeros",
+                    "displayName": "percent zeros"
+                  },
+                  {
+                    "fieldName": "note",
+                    "displayName": "note"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Data quality: % null and % zero per column, last snapshot"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 18,
             "width": 6,
             "height": 7
           }
