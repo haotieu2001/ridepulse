@@ -1009,3 +1009,18 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
 - The metric view: 20,405,666 trips across provider x toll; take rate Uber 18.5% -> 24.0% and Lyft 24.7% -> 22.2%
   before and after the toll (plan: 20-24%), tip rate 3.9-5.1%. For #30.
 - A multi-subquery integrity check hit a Spark internal error on the warehouse; the same checks as joins ran fine.
+
+### #30 Marts and the congestion-pricing analysis
+- Marts in `gold/build.py`, rebuilt whole from the facts: `agg_zone_hourly` (561,168 rows), `agg_daily_economics` (93
+  days), `agg_driver_weekly` (row filter `gold.ops_only`: only the new workspace group `ridepulse-ops`, with the owner
+  as its one member, sees driver rows; NFR-9), `agg_cbd_impact` (period x within/into/from/outside the CBD, per day).
+  `fct_trips` gains `cbd_fee` and `congestion_surcharge` (additive; fact writes merge the schema).
+- Landed Dec 2024 and Jan 2024: the forwarder copied them by itself (its first real S3 events), and the ingest job
+  loaded 21,068,851 and 19,663,930 rows; Dec has no `cbd_congestion_fee` column, read as null. Gold now 61,138,447
+  trips, every month's count exact.
+- First real build failed: a zone-hour with no fare divided by zero (ANSI on serverless) and a 1-second trip's mph
+  overflowed its decimal. Ratios now `try_divide` into wider decimals; a test with ANSI on covers it.
+- `docs/analysis/congestion-pricing.md`: Jan 5-31 2025 against Jan 2024. Trips touching the CBD flat or down (within
+  -1.9%) while the rest grew 7.2%; CBD trips 2-5% faster, the rest slightly slower; within the CBD the rider paid
+  12% more, the driver 1.1% less per trip, the take rose 4.9 points to 37.7%. With its limits: one month after, no
+  control, 2024 weather not loaded, Jan 1-4 and Dec 2024 unusable as baselines.
