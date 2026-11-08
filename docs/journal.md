@@ -1115,6 +1115,20 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   the driver. One was a real bug: prep's `--out-dir` store had no `get_bytes`, so that mode could crash.
 - Left on #76: silver and supply logic as plain functions with tests, and a Postgres-Kafka-Debezium container test.
 
+### #37 Runbooks and a postmortem
+- New runbooks: `late-data-alert.md` (the `late_events` rule vs a platform health lag breach, and what a late event
+  costs: only its live window), `quota-hit.md` (each free tier's cap and how it fails; none hit yet, so it says
+  which behaviour is measured and which only documented), `budget-alert.md` (Cost Explorer by service; November stood
+  at $0.95 of $10 on 2026-11-08, mostly KMS and the Debezium instance's EBS and IPv4), and an index. Debezium down and
+  slot dropped already existed (#24).
+- Free Edition exposes `system.billing.usage`: demo days used 23-29 DBU of pipeline compute and 115-134 of default
+  storage. The quota runbook uses it.
+- Postmortem `docs/postmortems/2026-11-06-alerts-stopped.md`: the 36 hours of demo windows with almost no alerts while
+  continuous mode, then a continuous job trigger, ran updates into Free Edition's ~20-minute driver loss. Timeline from
+  the pipeline's event log; no data lost (2025-01-09, the one closed day in the span, has 0 completeness breaks).
+- Found on the way: `DUPLICATE_SOURCE_NAMES` is not new. It failed R2 on 2026-11-07 at 14:15, right after a deploy,
+  as it failed R4 on 2026-11-08: the flows that read two streams, on some first updates after a deploy, passing on
+  the next. In the late-data runbook; revisit if it ever fails twice in a row.
 ### #43 Confluent after the trial credit: a new free account, when the credit ends (decided 2026-11-08)
 - The owner will move to a new free Confluent account rather than pay for Basic (~$1.5-2/month). Kafka here is a
   pipe, not a store, so only the configuration that names the cluster moves: `docs/runbooks/confluent-new-account.md`.
