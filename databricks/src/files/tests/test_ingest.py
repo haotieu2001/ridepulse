@@ -12,7 +12,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(ROOT / "databricks/src/files"))
 pyspark = pytest.importorskip("pyspark")
 
-from ingest import etag_of, fail_counts, month_of, positions, tlc_trips, weather_day  # noqa: E402
+from ingest import control_mismatches, etag_of, fail_counts, month_of, payouts, positions, tlc_trips, weather_day  # noqa: E402
 
 from contracts.trip_key import in_sample, trip_key  # noqa: E402
 
@@ -101,3 +101,19 @@ def test_weather_is_central_parks_day_in_units(spark):
     assert (jan1.tmax_c, jan1.tmin_c, jan1.precip_mm, jan1.trace_precip, jan1.snow_mm) == (
         Decimal("10.6"), Decimal("3.9"), Decimal("0.0"), True, None)
     assert days["2025-01-02"].precip_mm == Decimal("25.4") and days["2025-01-02"].trace_precip is False
+
+
+def test_a_payout_file_parses_to_its_entries_and_its_controls_hold(spark):
+    from services.payouts.payouts import nacha, plant
+    week = datetime(2025, 1, 6).date()
+    entries, _ = plant({f"D{n:04d}": 5000 + n for n in range(1, 8)}, week)
+    path = "dbfs:/Volumes/c/raw/landing/raw/payouts_ach/2025-01-06/etag=e/payouts_2025-01-06.ach"
+    lines = nacha(entries, week, datetime(2025, 1, 13, 6, 0)).splitlines()
+    raw = spark.createDataFrame([(v, path) for v in lines], "value STRING, _source_file STRING")
+    rows = sorted((r.driver_id, r.amount_cents, int(r.trace_number[8:])) for r in payouts(raw).collect())
+    assert rows == sorted((e.driver_id, e.cents, e.trace) for e in entries)
+    assert payouts(raw).first().week_start.isoformat() == "2025-01-06" and control_mismatches(raw) == {}
+    tampered = [v[:29] + str(int(v[29:39]) + 1).rjust(10, "0") + v[39:] if v.startswith("6") and n == 2 else v
+                for n, v in enumerate(lines)]   # one amount changed, the controls not
+    bad = control_mismatches(spark.createDataFrame([(v, path) for v in tampered], "value STRING, _source_file STRING"))
+    assert set(bad) == {"batch.credit", "file.credit"}

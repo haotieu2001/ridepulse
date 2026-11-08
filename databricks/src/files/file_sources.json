@@ -14,6 +14,12 @@
       "format": "csv",
       "bronze": "bronze.noaa_ghcnd",
       "silver": "silver.weather_day"
+    },
+    "payouts_ach": {
+      "description": "The payments processor's weekly NACHA (ACH) payout file, one per week (synthetic, services/payouts)",
+      "format": "text",
+      "bronze": "bronze.payouts_ach",
+      "silver": "silver.payouts"
     }
   }
 }
