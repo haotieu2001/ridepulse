@@ -211,6 +211,13 @@ jobs:
         with:
           persist-credentials: false
       - uses: databricks/setup-cli@8de769ec2543ee05e456ee2121350efc7efc4bda # v1.22.1
+      # Dependabot and fork PRs get no repository secrets, so they can't reach the workspace. They're said to be
+      # skipped, not passed off as validated; every push to main validates with the secrets.
       - name: Validate the bundle for stg
         working-directory: databricks
-        run: databricks bundle validate -t stg
+        run: |
+          if [ -z "$DATABRICKS_CLIENT_ID" ]; then
+            msg="Bundle not validated: this run has no workspace secrets (Dependabot or a fork). main validates it on merge."
+            echo "::notice::$msg"; echo "### $msg" >> "$GITHUB_STEP_SUMMARY"; exit 0
+          fi
+          databricks bundle validate -t stg
