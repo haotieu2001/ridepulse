@@ -10,28 +10,28 @@
 ## 1. What changes
 
 Each row is a deliberate difference. The rule is **one ADR per difference**: the "ADR" column names
-the record that explains it, or the phase that writes one.
+the record that explains it. Geography stays a stretch goal (S-D), and GenAI is RideDesk's (project 2).
 
 | Concern | This project (Free Edition) | Production (paid) | ADR |
 |---|---|---|---|
 | Event source | A replayer turns historical TLC trips into events; 5% sample; synthetic drivers and pings | Driver and rider apps at full volume through an API gateway; trips written by the dispatch service | ADR-0003, ADR-0004 |
 | Supply | Synthetic pool (~3,100), demand-shaped shifts, zone-level repositioning | Real driver app state and GPS | ADR-0003 |
 | Time | A simulated clock: replay watermark in `replay_state`, days close at D + 30 h | Wall clock; Spark event-time watermarks alone; the daily job runs on the calendar with a late-data allowance | ADR-0004 |
-| Source database | Neon Free Postgres, 0.25 CU, 48 simulated hours hot | Aurora PostgreSQL Multi-AZ; a read replica for query-based loads; migrations checked against contracts in CI | Phase 7 |
+| Source database | Neon Free Postgres, 0.25 CU, 48 simulated hours hot | Aurora PostgreSQL Multi-AZ; a read replica for query-based loads; migrations checked against contracts in CI | [ADR-0006](adr/0006-source-database.md) |
 | CDC | Debezium Server on one ephemeral EC2, offsets on disk, demo windows only | HA Kafka Connect (MSK Connect or Confluent's managed Debezium), offsets in Kafka, alerts on slot lag and WAL size; reference data by query-based loads from a read replica | ADR-0005 |
-| Kafka and network | Confluent Basic over the public internet, ACLs | MSK or Confluent Dedicated over PrivateLink; RBAC per service; NCC for serverless egress | Phase 7 |
-| Streaming latency | Triggered runs back to back (~10.5 min each, 3 of them starting up); the full-recompute views in a separate 10-minute job. Measured (#25): surge alert p95 19.1 min from request commit to email. Continuous mode ran, but Free Edition lost the serverless driver ~20 min into every update, continuous or not, so no update may run that long | Continuous pipelines or real-time mode for the rules (p95 <= 12 min was the plan's target, and a paid workspace's to meet); surge recomputed every few seconds | Phase 3 |
-| Serving surge | A Delta table and a dashboard tile | A low-latency store (Lakebase synced tables or a cache) read by the pricing service in milliseconds | Phase 7 |
+| Kafka and network | Confluent Basic over the public internet, ACLs | MSK or Confluent Dedicated over PrivateLink; RBAC per service; NCC for serverless egress | [ADR-0007](adr/0007-kafka-and-network.md) |
+| Streaming latency | Triggered runs back to back (~10.5 min each, 3 of them starting up); the full-recompute views in a separate 10-minute job. Measured (#25): surge alert p95 19.1 min from request commit to email. Continuous mode ran, but Free Edition lost the serverless driver ~20 min into every update, continuous or not, so no update may run that long | Continuous pipelines or real-time mode for the rules (p95 <= 12 min was the plan's target, and a paid workspace's to meet); surge recomputed every few seconds | [ADR-0008](adr/0008-streaming-latency.md) |
+| Serving surge | A Delta table and a dashboard tile | A low-latency store (Lakebase synced tables or a cache) read by the pricing service in milliseconds | [ADR-0009](adr/0009-serving-surge.md) |
 | Geography | 265 TLC zones, centroids, polygon adjacency (`ref/`) | H3 hexagons at several resolutions, GPS map-matching, surge per hexagon | stretch S-D |
-| Files | S3 landing, a forwarder Lambda copies into a UC Volume (Free Edition can't read our bucket) | An S3 bucket per environment with SSE-KMS and lifecycle rules; external locations; Auto Loader file events | Phase 4 |
+| Files | S3 landing, a forwarder Lambda copies into a UC Volume (Free Edition can't read our bucket) | An S3 bucket per environment with SSE-KMS and lifecycle rules; external locations; Auto Loader file events | [ADR-0010](adr/0010-file-ingestion.md) |
 | Environments | One workspace; a catalog per environment (`ridepulse_dev`, `ridepulse_stg`) | A workspace per environment under one metastore | ADR-0001 |
 | Identity | GitHub OIDC to AWS; service principal `ridepulse-ci` with OAuth M2M (90-day secret) | OIDC federation to Databricks too (no stored secret); SCIM groups; on-behalf-of auth in apps | ADR-0002 |
 | Secrets | SSM SecureString as the single source; copies derived | Same model, plus a CMK and rotation automation | ADR-0002 |
-| Infrastructure as code | Workspace-level Terraform + Asset Bundles; catalogs created with SQL (Default Storage only) | Account-level Terraform as well: workspaces, metastore, network, storage credentials | Phase 7 |
-| Alerting | SNS email, sent once (DynamoDB conditional put) | PagerDuty or Opsgenie with escalation; SLA alerts on the platform itself | Phase 7 |
-| Regulatory reporting | The TLC file is an input | The platform produces the monthly TLC submission, with a contract, completeness checks and an audit trail | Phase 7 |
-| Privacy | No identities exist; synthetic driver ids are to be masked and row-filtered all the same (#38, not built yet) | Precise location is sensitive: retention limits, aggregation, tokenized ids, access audits | Phase 7 |
-| Quality, security, cost | Contract checks with quarantine and DQ rates per provider (built); grants, masks and row filters (#38, not built yet); AWS budget alerts at $5 | Plus data quality monitoring, audit logs, ABAC, budget policies, `system.billing` dashboards | Phase 7 |
+| Infrastructure as code | Workspace-level Terraform + Asset Bundles; catalogs created with SQL (Default Storage only) | Account-level Terraform as well: workspaces, metastore, network, storage credentials | [ADR-0011](adr/0011-infrastructure-as-code.md) |
+| Alerting | SNS email, sent once (DynamoDB conditional put) | PagerDuty or Opsgenie with escalation; SLA alerts on the platform itself | [ADR-0012](adr/0012-alerting.md) |
+| Regulatory reporting | The TLC file is an input | The platform produces the monthly TLC submission, with a contract, completeness checks and an audit trail | [ADR-0013](adr/0013-regulatory-reporting.md) |
+| Privacy | No identities exist; synthetic driver ids are to be masked and row-filtered all the same (#38, not built yet) | Precise location is sensitive: retention limits, aggregation, tokenized ids, access audits | [ADR-0014](adr/0014-privacy.md) |
+| Quality, security, cost | Contract checks with quarantine and DQ rates per provider (built); grants, masks and row filters (#38, not built yet); AWS budget alerts at $5 | Plus data quality monitoring, audit logs, ABAC, budget policies, `system.billing` dashboards | [ADR-0015](adr/0015-quality-security-cost.md) |
 | GenAI | Not in RidePulse: the support copilot is RideDesk (project 2), reading RidePulse's silver and gold | Same split; AI Gateway in front of models | RideDesk plan |
 
 ### Alert latency in production (SLA-1)
@@ -77,10 +77,95 @@ it's spent.
 **What it costs.** Continuous pipelines bill DBUs around the clock. That, a Kafka cluster and a paging tool are most
 of §4's $1k+/month floor. Real-time mode and a low-latency store add to it, quoted in Phase 7.
 
+### Containers in production (C4 level 2)
+
+The same system as [`c4.md`](design/c4.md)'s level 2, with each difference above applied. Everything sits in private
+networks; arrows across accounts go over PrivateLink. The pipeline split follows "How the pipelines are split" (§1).
+
+```mermaid
+flowchart LR
+    apps["<b>Driver and rider apps</b><br/>mobile"]
+    tlc["<b>NYC TLC</b><br/>regulator"]
+
+    subgraph aws["AWS · per environment"]
+        gw["<b>API gateway</b><br/>auth, rate limits"]
+        disp["<b>Dispatch service</b><br/>trips, assignment"]
+        pinggw["<b>Ping gateway</b><br/>GPS every 4 s"]
+        aurora[("<b>Aurora PostgreSQL</b><br/>Multi-AZ · trips, drivers,<br/>outbox (ADR-0006)")]
+        reader[("<b>Aurora reader</b><br/>query-based loads")]
+        connect["<b>Kafka Connect, HA</b><br/>Debezium, outbox router"]
+        s3[("<b>S3, SSE-KMS</b><br/>raw files, Object Lock<br/>(ADR-0010)")]
+        pricing["<b>Pricing service</b><br/>reads surge in ms"]
+    end
+
+    subgraph bus["Confluent Cloud Enterprise · PrivateLink (ADR-0007)"]
+        kafka[["<b>Kafka</b><br/>trips.v1 · cdc.dispatch.*<br/>driver.locations.v1<br/>ops.alerts.v1 · *.dlq"]]
+        sr["<b>Schema Registry</b><br/>contracts, BACKWARD"]
+    end
+
+    subgraph lake["Databricks · a workspace per environment · NCC private endpoints"]
+        ing["<b>ingest_dispatch</b> +<br/><b>ingest_telemetry</b><br/>continuous: bronze, silver"]
+        sig["<b>ops_signals</b><br/>continuous, real-time<br/>supply, R1-R4<br/>(ADR-0008)"]
+        views["<b>ops_views</b><br/>triggered: KPIs,<br/>late events, alert list"]
+        files["<b>ingest_files</b><br/>Auto Loader, file events"]
+        gold["<b>gold_daily</b> + <b>ref</b><br/>jobs on table updates:<br/>gold, reconciliations"]
+        uc[("<b>Unity Catalog</b><br/>bronze · silver · gold<br/>ABAC, tags (ADR-0014)")]
+        lakebase[("<b>Lakebase</b><br/>synced surge table<br/>(ADR-0009)")]
+        bi["<b>AI/BI + Genie</b>"]
+        sub["<b>TLC submission</b><br/>monthly, signed off<br/>(ADR-0013)"]
+    end
+
+    subgraph ops["Operations"]
+        notif["<b>Alert router</b><br/>streams ops.alerts.v1"]
+        pager["<b>PagerDuty / Opsgenie</b><br/>by owner (ADR-0012)"]
+        obs["<b>Monitoring</b><br/>system tables, SLO burn,<br/>DQ monitors (ADR-0015)"]
+    end
+
+    apps --> gw
+    gw --> disp & pinggw
+    disp -- "one transaction:<br/>state + outbox" --> aurora
+    aurora -- "WAL" --> connect
+    aurora -. "replica" .-> reader
+    pinggw -- "Avro" --> kafka
+    connect -- "events, CDC" --> kafka
+    kafka --- sr
+    kafka --> ing
+    reader -. "reference pulls" .-> gold
+    s3 --> files
+    ing & files & gold --> uc
+    uc --> sig & views & bi & sub
+    sig -- "alerts" --> kafka
+    sig --> lakebase
+    lakebase --> pricing
+    kafka -- "ops.alerts.v1" --> notif
+    notif --> pager
+    uc --> obs
+    obs --> pager
+    sub --> tlc
+
+    classDef store fill:#1168bd,stroke:#0b4884,color:#fff
+    classDef box fill:#438dd5,stroke:#2e6295,color:#fff
+    classDef ext fill:#6b6b6b,stroke:#4d4d4d,color:#fff
+    class aurora,reader,s3,kafka,uc,lakebase store
+    class gw,disp,pinggw,connect,pricing,sr,ing,sig,views,files,gold,bi,sub,notif,pager,obs box
+    class apps,tlc ext
+```
+
+| Container | Replaces here | Owner |
+|---|---|---|
+| API gateway, dispatch service, ping gateway | the replayer Lambda and its prepared slices | product engineering |
+| Aurora PostgreSQL and its reader | Neon Free | product engineering |
+| Kafka Connect (HA) | Debezium Server on one EC2 instance | data platform |
+| Confluent Enterprise over PrivateLink | Confluent Basic over the internet | data platform |
+| The seven pipelines and jobs | one streaming pipeline and three jobs | data platform, dispatch ops, analytics |
+| Lakebase synced surge table | a Delta table read by a dashboard | dispatch ops |
+| TLC submission | the TLC file as an input | finance and compliance |
+| Alert router and incident tool | the polling notifier Lambda, SNS email | dispatch ops, data platform |
+
 ## 2. Scale at 100% of trips
 
-Sizing at the full volume, from [`sizing.md`](design/sizing.md) x 20 unless stated. To complete in
-Phase 7.
+Sizing at the full volume: measured here where it says so, and x 20 of this project's measurements otherwise
+(the replay is a 5% sample). Measured 2026-11-08 over 10.3 simulated days (2024-12-31 to 2025-01-11).
 
 | Quantity | This project | Production | Note |
 |---|---|---|---|
@@ -89,7 +174,12 @@ Phase 7.
 | Drivers busy at the peak | 1,392 (synthetic) | ≈ 28k | from ADR-0003's simulation, x 20 |
 | Pings | ≈ 2.9M/simulated day, busy drivers every 15 s | real apps: ~80k active drivers every 4 s ≈ 20k/s at peak, 100-300 GB/day raw | plan estimate |
 | Dispatch database | < 100 MB | tens of GB hot; WAL and CDC throughput become the constraint | |
-| Kafka | ≈ 470 MB/simulated day | ≈ 100-300 GB/day, pings dominate | partitions per topic to be sized |
+| Kafka | ≈ 470 MB/simulated day estimated; peak ~24 requests/s and 0.05 MB/s in (measured, 2026-11-06) | ≈ 100-300 GB/day, pings dominate | partitions: 48 for pings, 12 for trips and CDC (ADR-0007) |
+| Bronze, streaming | measured: 290 MB for 10.3 simulated days (28 MB/day), pings 71% | ≈ 0.6 GB/day at the same ping rate; 5-15 GB/day with app pings every 4 s | compressed Delta; raw pings kept 7 days (ADR-0014) |
+| Silver, streaming | measured: 329 MB (32 MB/day) | ≈ 0.6 GB/day, more with app pings | |
+| Silver, TLC file | measured: 1.4 GB per month (3 months, 61M trips) | the same: the file is already 100% | `silver.tlc_trips` |
+| Gold | measured: `fct_trips` ≈ 1 GB per month | the same for the file's trips; the streamed share grows x 20 | marts are small (< 50 MB) |
+| Pipeline compute | measured: 92 DBU for November 1-8 (demo windows only) | continuous, 24/7, split into pipelines (§1): to size by load test | list-price equivalent in §4 |
 
 ## 3. What stays the same (keeping the switch cheap)
 
@@ -107,16 +197,27 @@ status column is checked in Phase 7.
 
 ## 4. What it costs
 
-Plan estimates (checked October 2026), to be replaced with quotes and `system.billing` figures in
-Phase 7. Treat **$1k+/month** as a rough floor.
+**This project, measured** (`docs/cost.md`, from each provider's billing data):
 
-| Item | Monthly |
-|---|---|
-| Kafka: Confluent Standard or MSK Serverless | ≈ $385 or ≥ $547, before ping volume |
-| CDC: Connect cluster or managed connector | ≈ $76-152 or more |
-| PrivateLink endpoints | ≈ $7.30 per AZ-month each |
-| Aurora Multi-AZ, DBUs for continuous pipelines and serving | to quote |
-| This project, for comparison | ≈ $5-8 of usage (requirements NFR-10: <= $10) |
+| Item | October | November 1-8 |
+|---|---|---|
+| Billed: AWS | $0.38 | $0.95 |
+| Billed: Confluent, Databricks, Neon | $0 | $0 (Confluent's $10.34 of usage paid by the trial credit) |
+| Databricks usage at list price (what a paid workspace would bill) | ~$24 | ~$72, of which pipelines $32 and SQL $21 |
+
+The lesson for production pricing: the line that surprised was **capacity, not data**. Confluent billed eCKU-hours
+for a load of ~24 requests/s, until it was capped. Every elastic service gets an explicit ceiling (ADR-0015).
+
+**Production, plan estimates** (checked October 2026). Treat **$1k+/month** as a rough floor:
+
+| Item | Monthly | Basis |
+|---|---|---|
+| Kafka: Confluent Enterprise over PrivateLink (ADR-0007) | from ≈ $385 (Standard's price) upward, plus ping volume | quote at the load-tested eCKU count |
+| CDC: Connect cluster or managed connector | ≈ $76-152 or more | |
+| PrivateLink endpoints | ≈ $7.30 per AZ-month each | |
+| Aurora PostgreSQL Multi-AZ, a writer and a reader (ADR-0006) | to quote | sized from the dispatch write load at 100% |
+| Databricks: continuous pipelines, jobs, SQL, serving (ADR-0008, ADR-0009) | to quote | this project's list-price usage is the per-hour basis for triggered work; continuous compute runs 24/7 instead of 3-hour windows |
+| Incident tool and on-call (ADR-0012) | per seat | |
 
 ## 5. Rehearsal: the Pro sprint (stretch S-A)
 
@@ -147,5 +248,6 @@ what can't is said here, with the reason, so the gap is a known decision and not
 - [x] Phase 3: measured alert latency (SLA-1), and what production needs and how to set it up (§1, #25).
 - [ ] Pro sprint (§5): continuous and real-time mode measured against the production targets in §1.
 - [x] Phase 4: ADR-0005, path B (log-based CDC) vs path C (query-based) misses, measured (C saw 56 of 76 planted changes).
-- [ ] Phase 7: one ADR per row in §1 still marked with a phase; measured costs; the Pro sprint
-      results; a production C4 container diagram.
+- [x] Phase 7 (#40): one ADR per row in §1 (ADR-0006 to ADR-0015); measured costs (§4, `docs/cost.md`); the scale
+      table from measured sizes (§2); a production C4 container diagram (§1).
+- [ ] The Pro sprint's results (§5), which need a paid workspace.
