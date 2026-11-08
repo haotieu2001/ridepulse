@@ -62,6 +62,7 @@ resources:
         enabled: false
       email_notifications:
         on_failure: ["${var.alert_email}"]
+        no_alert_for_skipped_runs: true   # a 1-minute trigger skipped while a run is going is not a failure
       tasks:
         - task_key: streaming
           pipeline_task:
@@ -94,6 +95,7 @@ resources:
             parameters: [--catalog, "${var.catalog}", --streaming-job-id, "${resources.jobs.streaming_back_to_back.id}"]
       email_notifications:
         on_failure: ["${var.alert_email}"]
+        no_alert_for_skipped_runs: true   # a 1-minute trigger skipped while a run is going is not a failure
       environments:
         - environment_key: default
           spec:
