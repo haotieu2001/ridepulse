@@ -10,6 +10,7 @@ WINDOW = json.loads((ROOT / "config/window.json").read_text())
 BUNDLE = yaml.safe_load((ROOT / "databricks/databricks.yml").read_text())
 STREAMING = yaml.safe_load((ROOT / "databricks/resources/bronze.yml").read_text())["resources"]
 WINDOW_SP = "17447026-e680-4550-8b53-23a3b7ac2f13"   # ridepulse-window
+JOBS_SP = "c4c712f2-20ef-4012-8b27-0b460b996068"   # ridepulse-jobs (infra/terraform/databricks)
 
 
 def test_the_pipeline_is_triggered_and_runs_back_to_back_only_through_its_job():
@@ -32,10 +33,19 @@ def test_the_views_run_every_10_minutes_off_the_pipeline_and_start_paused():
 
 def test_only_the_window_principal_may_manage_the_jobs_and_only_in_dev():
     dev = BUNDLE["targets"]["dev"]["resources"]["jobs"]
-    for name in ("streaming_back_to_back", "views_every_10_min"):
+    for name in ("streaming_back_to_back", "views_every_10_min", "daily"):
         assert dev[name]["permissions"] == [{"service_principal_name": WINDOW_SP, "level": "CAN_MANAGE"}]
-    assert "pipelines" not in BUNDLE["targets"]["dev"]["resources"] or \
-        "bronze_ingest" not in BUNDLE["targets"]["dev"]["resources"]["pipelines"]
+    # It never gets the pipeline: the only grant there is the jobs principal's, to start updates.
+    pipeline = BUNDLE["targets"]["dev"]["resources"]["pipelines"]["bronze_ingest"]
+    assert pipeline["permissions"] == [{"service_principal_name": JOBS_SP, "level": "CAN_RUN"}]
+
+
+def test_the_jobs_the_window_principal_can_edit_never_run_as_the_admin():
+    # CAN_MANAGE can edit a job's tasks, so whatever the window principal can manage, and whatever those jobs start,
+    # runs as ridepulse-jobs (#77, from the #38 review).
+    dev = BUNDLE["targets"]["dev"]["resources"]["jobs"]
+    for name in ("streaming_back_to_back", "views_every_10_min", "daily", "files_ingest", "gold_build"):
+        assert dev[name]["run_as"] == {"service_principal_name": JOBS_SP}, name
 
 
 def test_the_window_fits_requirements_section_9():
