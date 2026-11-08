@@ -1114,3 +1114,22 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   (an online driver has a zone, a busy one a trip): now `Driver.zone` / `.trip` / `.shift_start` assert them, naming
   the driver. One was a real bug: prep's `--out-dir` store had no `get_bytes`, so that mode could crash.
 - Left on #76: silver and supply logic as plain functions with tests, and a Postgres-Kafka-Debezium container test.
+
+### #38 Security review
+- Unity Catalog (NFR-9): account groups `ridepulse-ops`, `ridepulse-finance`, `ridedesk`; gold-only grants; an ABAC
+  policy masking `pii`-tagged driver ids to NULL outside ops; the weekly row filter extended so a driver sees their own
+  rows (`ops.driver_accounts`). All applied by the gold build. Verified as a throwaway finance principal: 0 driver ids,
+  own rows only once mapped, silver/bronze/ops denied, no way to drop the policy or the tag.
+- Found the hard way: workspace groups can't take Unity Catalog grants (`PRINCIPAL_DOES_NOT_EXIST`); Free Edition makes
+  account groups through the workspace's `/api/2.0/account/scim/v2`. And masks apply to the build too: the first build
+  after the switch read NULL ids (the ops group hadn't propagated) and wrote `agg_driver_weekly` as 2 rows. Rebuilt
+  (5,668 rows); the build now refuses to start outside ops.
+- Free Edition has ABAC (with a governed tag from `/api/2.1/tag-policies`) and `system.access.audit`.
+- AWS: the CI role could read every secret and read/write/delete every state, and held prep's S3 write. Now: three
+  states read-only, secrets denied, prep on its own main-only role. Debezium egress limited to 443/5432/9092 (started
+  alone: slot active, heartbeat to Kafka). Applied: bootstrap, landing (the forwarder also picked up #97's code), debezium.
+- CI `security` job: gitleaks (no leaks in 120 commits), trivy config (accepted findings in `.trivyignore.yaml`),
+  pip-audit (none); Dependabot with a 14-day cooldown; Dependabot security updates on.
+- Follow-ups: per-workload Kafka identities (#102); jobs run as a non-admin principal, and the groups in Terraform (#77).
+- Noticed: the budget emails haotieukim2001@gmail.com, while SSM `/ridepulse/dev/alerts/email` holds another address.
+  Left as it is; for the owner to pick one.

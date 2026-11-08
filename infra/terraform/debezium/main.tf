@@ -83,11 +83,27 @@ resource "aws_security_group" "debezium" {
   description = "Debezium Server: no inbound, outbound to Neon, Confluent and AWS APIs"
   vpc_id      = data.aws_vpc.default.id
 
+  # By port, not by address: Neon, Confluent and the AWS APIs have no fixed IPs, and a NAT or VPC endpoints would cost
+  # more than the instance (#38). DNS and the time service are link-local, which security groups don't filter.
   egress {
-    description = "all outbound (Neon 5432, Confluent 9092/443, SSM, Maven)"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
+    description = "HTTPS: SSM, the AL2023 repos, Maven Central (boot)"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  egress {
+    description = "Postgres: Neon (logical replication)"
+    from_port   = 5432
+    to_port     = 5432
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  egress {
+    description = "Kafka: Confluent Cloud"
+    from_port   = 9092
+    to_port     = 9092
+    protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 }
