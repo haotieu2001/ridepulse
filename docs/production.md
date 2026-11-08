@@ -77,6 +77,67 @@ it's spent.
 **What it costs.** Continuous pipelines bill DBUs around the clock. That, a Kafka cluster and a paging tool are most
 of §4's $1k+/month floor. Real-time mode and a low-latency store add to it, quoted in Phase 7.
 
+### How the pipelines are split
+
+**Here:** one streaming pipeline holds the whole path, 51 steps: three Kafka sources into bronze, their dead-letter
+queues, silver for every source, the reference tables, supply, the four rules, and the alert sinks back to Kafka.
+Batch work (gold, file ingestion, the 10-minute views) runs as separate jobs. The reason is Free Edition: one active
+pipeline per type, and the alerts need every layer moving at once.
+
+**What one pipeline costs.**
+
+- **Blast radius:** a failure in one flow fails the update, so every other flow waits for the next one. A
+  `DUPLICATE_SOURCE_NAMES` in R4 delayed the trip events and pings as well (four times, 2026-11-07/08).
+- **Deploys:** any change replans all 51 steps; a change to R2 is a deploy of bronze too.
+- **Sizing:** compute is sized for the whole graph, not for what each part needs.
+- **Refresh:** a full refresh is chosen per table (`full_refresh_selection`); getting the selection wrong resets more
+  than intended.
+- **Ownership:** no team can own a part of it.
+
+**In production**, split by domain and by latency tier. Each pipeline publishes Unity Catalog tables that are the
+contract with the next one, and reads its inputs as streams from those tables, not from inside one graph:
+
+| Pipeline | Contents | Mode | Owner | Target |
+|---|---|---|---|---|
+| `ingest_dispatch` | Kafka `trips.v1` and `cdc.dispatch.*` into bronze, DLQs, then silver trip events and driver state with quarantine | continuous | data platform | silver within 1 min of the commit |
+| `ingest_telemetry` | Kafka `driver.locations.v1` into bronze and silver pings; partitioned by driver, the busiest stream | continuous | data platform | silver within 30 s |
+| `ops_signals` | supply as incremental state, R1-R4, the alert sinks; real-time mode for the surge signal (§1 above) | continuous | dispatch ops | §1's SLOs |
+| `ops_views` | KPIs, late-event rates, the alert list, DQ rates | triggered every few minutes | dispatch ops | 5 min |
+| `ingest_files` | Auto Loader for TLC, NOAA and partner files into bronze and silver | triggered on file arrival | data platform | SLA-6 |
+| `gold_daily` | the star schema, marts and reconciliations for each closed day | a job, triggered when the day's silver tables update | analytics | SLA-3/4 |
+| `ref` | zones, rules, fare rules from the source systems | a job, on change | data platform | daily |
+
+**How the pieces fit.**
+
+- **Across pipelines, tables are the interface.** Silver tables are data products with contracts (`contracts/`),
+  owners and schema evolution rules. Downstream pipelines read them as streams, so splitting adds no latency beyond
+  a commit.
+- **Orchestration:** Lakeflow Jobs with table-update triggers rather than clocks. A downstream job runs when its
+  inputs change, and lineage in Unity Catalog shows the chain end to end.
+- **Monitoring:** each pipeline's event log goes into the system tables, with alerts per pipeline on flow failures,
+  backlog (Kafka consumer lag) and freshness against its target. A failing `ops_signals` pages dispatch ops, not the
+  data platform.
+- **Deploys:** one bundle, with each pipeline as its own resource. CI deploys only what changed, through dev, stg and
+  prod workspaces with an approval before prod (#78). A rule change never replans ingestion.
+- **Compute:** sized per pipeline. Ingestion autoscales with Kafka lag; `ops_signals` gets the low-latency
+  configuration; the views and gold use cheaper triggered compute.
+- **Recovery:** a full refresh is scoped to one pipeline. Bronze is never refreshed: it keeps the history to rebuild
+  silver from (Kafka retention is days; bronze is the replay log).
+
+**Moving there from this project.** The code is already split along these lines:
+- **Separate source files:** `bronze/pipeline.py`, `silver/silver.py`, `ops/supply.py` and `ops/rules.py`, with the
+  logic in testable modules (#76).
+- **Fully qualified reads across layers:** every read from one layer to the next already uses a full table name
+  (`ridepulse_dev.silver.locations`). Only views inside one file use short names, and they stay in the same pipeline.
+
+What's left:
+- **Pipeline resources:** give each group its own pipeline resource in the bundle.
+- **Checkpoints:** each moved table's flow starts in the new pipeline with a new checkpoint. Bronze would re-read
+  Kafka from its retention, and silver dedupes. This is the same mechanism as the bronze flow suffix that #98 adds for
+  a new Kafka cluster.
+
+It's configuration, not a rewrite.
+
 ## 2. Scale at 100% of trips
 
 Sizing at the full volume, from [`sizing.md`](design/sizing.md) x 20 unless stated. To complete in
