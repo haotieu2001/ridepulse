@@ -1,0 +1,32 @@
+# trivy config findings accepted on purpose (#38, reviewed 2026-11-08). CI (ci.yml, security job) fails on any HIGH or
+# CRITICAL not listed here. Each entry says why; docs/security.md has the review they came from.
+misconfigurations:
+  - id: AWS-0104
+    paths: ["debezium/main.tf"]   # relative to the scanned directory, infra/terraform
+    statement: >-
+      Debezium's egress is open by address but limited to 443, 5432 and 9092: Neon, Confluent and the AWS APIs have no
+      fixed IPs, and VPC endpoints or a NAT would cost more than the instance.
+  - id: AWS-0095
+    statement: >-
+      The alerts SNS topic is unencrypted at rest: CloudWatch alarms can't publish to a topic under the AWS-managed SNS
+      key, a customer key costs $1/month (NFR-10), and the messages are alert text with no personal data.
+  - id: AWS-0132
+    statement: >-
+      S3 uses SSE-S3 (AES-256) rather than a customer-managed key: the buckets hold public TLC data and Terraform state;
+      a CMK adds cost and key management without changing who can read them (IAM and the bucket policies decide that).
+  - id: AWS-0017
+    statement: Lambda log groups use CloudWatch's default encryption; they carry no secrets (none are logged).
+  - id: AWS-0025
+    statement: The alerts claim table (DynamoDB) is a dedupe cache with default encryption at rest; no personal data.
+  - id: AWS-0024
+    statement: >-
+      No point-in-time recovery on the claim table: losing it re-sends at most the alerts still in Kafka, and PITR is
+      billed.
+  - id: AWS-0090
+    statement: >-
+      The landing bucket is unversioned: every object can be downloaded again from its source (TLC, NOAA) or rebuilt by
+      prep. The state bucket is versioned.
+  - id: AWS-0089
+    statement: No S3 access logging (billed storage); CloudTrail records the management events.
+  - id: AWS-0066
+    statement: No X-Ray tracing on the Lambdas; their logs and CloudWatch metrics cover them at this size.

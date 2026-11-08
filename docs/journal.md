@@ -1115,6 +1115,70 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   the driver. One was a real bug: prep's `--out-dir` store had no `get_bytes`, so that mode could crash.
 - Left on #76: silver and supply logic as plain functions with tests, and a Postgres-Kafka-Debezium container test.
 
+### #76 Supply and silver checks as testable functions (rest of #76)
+- `ops/supply_logic.py` (ticks, per-zone supply intervals, supply at window ends, per area and borough) and
+  `silver/silver_logic.py` (the trip-event and ping contract checks) hold the logic as plain DataFrame functions; the
+  pipeline files only read tables and call them. Moved verbatim, not rewritten.
+- Local Spark tests: a tick is its transaction with its last watermark; a driver inserted and signed on in one tick
+  counts once; a snapshot row takes the watermark read with it; supply at W is the interval holding W. Silver, with
+  the shipped expectations.yml and contract: `fail` checks quarantine with their name, `flag` checks set dq_<name>,
+  bad and missing values are named, and pings outside NYC / zone range / without a time are rejected.
+- Deployed and run: the first update after the deploy failed only R4 with STREAMING_QUERY_EVOLUTION_ERROR.
+  DUPLICATE_SOURCE_NAMES (three attempts), then the pipeline's own retry and a further update completed every flow on
+  the same code, runtime and data. Source naming is an opt-in feature (source evolution, offset log V2) this pipeline
+  does not enable, and `name()` is not allowed on a view-backed source like R4's; left as a platform transient the
+  retry absorbs. Not the first time: the event log shows R2 failing the same way on 2026-11-07 14:15, also right
+  after a deploy (#37's runbook covers it). Revisit if it ever fails two updates in a row.
+### #76 A real Postgres -> Debezium -> Kafka test in CI
+- CI job `cdc`: Postgres 18 with logical WAL, Redpanda v26.2.5 as Kafka and Debezium Server 3.7.0 (downloaded with
+  production's SHA-512), run with `dev.properties` followed by `ci/cdc/local.properties`, so the routing under test is
+  dev's own and only the endpoints differ. A month of ticks, then `trips.v1` read back: every event once, keyed by
+  its trip, with deterministic ids, valid against the envelope and payload contracts, all four lifecycle events per
+  trip; the drivers' changes in Debezium's envelope. Passed on its first CI run (test 28 s, job 1.5 min).
+- Written blind: there is no Docker on the laptop, so it was built for CI and checked there (the test is skipped
+  where RIDEPULSE_CDC_BOOTSTRAP is unset).
+- Left on #76: silver's contract checks and supply as plain functions with tests.
+### #37 Runbooks and a postmortem
+- New runbooks: `late-data-alert.md` (the `late_events` rule vs a platform health lag breach, and what a late event
+  costs: only its live window), `quota-hit.md` (each free tier's cap and how it fails; none hit yet, so it says
+  which behaviour is measured and which only documented), `budget-alert.md` (Cost Explorer by service; November stood
+  at $0.95 of $10 on 2026-11-08, mostly KMS and the Debezium instance's EBS and IPv4), and an index. Debezium down and
+  slot dropped already existed (#24).
+- Free Edition exposes `system.billing.usage`: demo days used 23-29 DBU of pipeline compute and 115-134 of default
+  storage. The quota runbook uses it.
+- Postmortem `docs/postmortems/2026-11-06-alerts-stopped.md`: the 36 hours of demo windows with almost no alerts while
+  continuous mode, then a continuous job trigger, ran updates into Free Edition's ~20-minute driver loss. Timeline from
+  the pipeline's event log; no data lost (2025-01-09, the one closed day in the span, has 0 completeness breaks).
+- Found on the way: `DUPLICATE_SOURCE_NAMES` is not new. It failed R2 on 2026-11-07 at 14:15, right after a deploy,
+  as it failed R4 on 2026-11-08: the flows that read two streams, on some first updates after a deploy, passing on
+  the next. In the late-data runbook; revisit if it ever fails twice in a row.
+### #43 Confluent after the trial credit: a new free account, when the credit ends (decided 2026-11-08)
+- The owner will move to a new free Confluent account rather than pay for Basic (~$1.5-2/month). Kafka here is a
+  pipe, not a store, so only the configuration that names the cluster moves: `docs/runbooks/confluent-new-account.md`.
+- Made safe first: bronze's three Kafka flows (and their DLQ flows) take `ridepulse.kafka.flow_suffix` from the
+  pipeline config. A new suffix means new flows with their own checkpoints, reading the new cluster from its start
+  and appending to the same tables; a full refresh would have wiped bronze and silver's history. Empty keeps the
+  names Lakeflow gave the tables: deployed and an update run, bronze counts unchanged (517,283 / 339,983 /
+  12,080,506), so the current checkpoints are kept.
+- Noted to the owner: signing up again for a new trial may be against Confluent's terms.
+### #38 Security review
+- Unity Catalog (NFR-9): account groups `ridepulse-ops`, `ridepulse-finance`, `ridedesk`; gold-only grants; an ABAC
+  policy masking `pii`-tagged driver ids to NULL outside ops; the weekly row filter extended so a driver sees their own
+  rows (`ops.driver_accounts`). All applied by the gold build. Verified as a throwaway finance principal: 0 driver ids,
+  own rows only once mapped, silver/bronze/ops denied, no way to drop the policy or the tag.
+- Found the hard way: workspace groups can't take Unity Catalog grants (`PRINCIPAL_DOES_NOT_EXIST`); Free Edition makes
+  account groups through the workspace's `/api/2.0/account/scim/v2`. And masks apply to the build too: the first build
+  after the switch read NULL ids (the ops group hadn't propagated) and wrote `agg_driver_weekly` as 2 rows. Rebuilt
+  (5,668 rows); the build now refuses to start outside ops.
+- Free Edition has ABAC (with a governed tag from `/api/2.1/tag-policies`) and `system.access.audit`.
+- AWS: the CI role could read every secret and read/write/delete every state, and held prep's S3 write. Now: three
+  states read-only, secrets denied, prep on its own main-only role. Debezium egress limited to 443/5432/9092 (started
+  alone: slot active, heartbeat to Kafka). Applied: bootstrap, landing (the forwarder also picked up #97's code), debezium.
+- CI `security` job: gitleaks (no leaks in 120 commits), trivy config (accepted findings in `.trivyignore.yaml`),
+  pip-audit (none); Dependabot with a 14-day cooldown; Dependabot security updates on.
+- Follow-ups: per-workload Kafka identities (#102); jobs run as a non-admin principal, and the groups in Terraform (#77).
+- Noticed: the budget emails haotieukim2001@gmail.com, while SSM `/ridepulse/dev/alerts/email` holds another address.
+  Left as it is; for the owner to pick one.
 ### #39 Cost report and the 30-minute rebuild
 - Cost (`docs/cost.md`): billed $0.38 in October and $0.95 in November 1-8, all AWS; within NFR-10 only because the
   Confluent trial credit pays for Kafka. Confluent usage was $10.34 in November 1-8, almost all eCKU-hours (75 at
@@ -1145,3 +1209,13 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   silver.tlc_trips 1.4 GB per month, fct_trips ~1 GB per month. Costs from `docs/cost.md`.
 - A production C4 container diagram, rendered and checked; the current one in `c4.md` was stale (the pipeline ran
   "every 10 min", no views job): fixed.
+### The first update after some deploys fails: limit the damage
+- Four failures in two days (R2 and R4 `DUPLICATE_SOURCE_NAMES`, the pings flow `DUPLICATED_MAP_KEY`), each the first
+  update after a deploy and each passing on the next update. Not reproducible on demand: three deploy-then-update
+  cycles today (no change, a comment in rules.py, the new settings) all passed. One of the four reads a single stream,
+  so restructuring the two-stream rules would not have covered it: the cause is on the Databricks side.
+- What it cost: Lakeflow retried the failing flow inside the same update (failing identically) for ~7 minutes, and
+  every flow failure emailed on its own, before the job's failure email.
+- Now: `pipelines.maxFlowRetryAttempts: "0"` (fail the update at once), `max_retries: 1` on the streaming job's task
+  (a fresh update at once), and pipeline emails only on fatal failures. An update that fails twice running still
+  emails. Deployed; an update ran clean on it. The retry path shows the next time the failure happens.
