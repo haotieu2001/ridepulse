@@ -120,6 +120,16 @@ resource "databricks_grant" "reader_gold" {
   privileges = ["SELECT", "USE_SCHEMA"]
 }
 
+# Ops reads everything in the catalog, including tables made later. Since the pipelines and jobs run as ridepulse-jobs
+# (#77, #78), a new table is owned by it, and its owner was the only one who could read it: silver.incident_changes,
+# the first such table (#79), was unreadable to the owner until this. Granted on the catalog, so it covers tables
+# that don't exist yet.
+resource "databricks_grant" "ops_catalog" {
+  catalog    = var.catalog
+  principal  = databricks_group.this["ops"].display_name
+  privileges = ["BROWSE", "EXECUTE", "READ_VOLUME", "SELECT", "USE_CATALOG", "USE_SCHEMA"]
+}
+
 # The forwarder's USE CATALOG was granted in SQL (#26); its schema and volume grants are in the bundle.
 resource "databricks_grant" "forwarder_catalog" {
   catalog    = var.catalog

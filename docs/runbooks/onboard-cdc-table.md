@@ -28,8 +28,14 @@ any of steps 2-4 is missing, so CI catches a half-onboarded table.
    nothing streams it.
 2. **Debezium's new configuration** replaces the instance (its boot script changes), and CI refuses replacements.
    So it's break-glass (`break-glass-deploy.md`): with no window open, `make debezium-plan`, read
-   `aws_instance.debezium must be replaced` and nothing else, then `make debezium-up` and `make down`. The new
-   instance resumes from the same slot and Kafka offsets.
+   `aws_instance.debezium must be replaced` and nothing else, then `make debezium-up`.
+   - **Wait for the first boot.** It installs Debezium, about a minute. Then the slot is active:
+     `SELECT active FROM pg_replication_slots WHERE slot_name = 'ridepulse_debezium'`.
+   - **Only then `make down`.** Stopped during its first boot, the instance never installs Debezium, and a restart
+     doesn't retry (2026-11-09). The fix is another replacement:
+     `terraform -chdir=infra/terraform/debezium apply -replace=aws_instance.debezium`.
+
+   The new instance resumes from the same slot and Kafka offsets.
 3. **Merge;** approve the `live` deploy. It creates the topic (Confluent) before anything writes to it, and deploys
    the bundle, which creates `silver.<name>_changes`.
 4. **The existing rows:** with a window open (Debezium streaming), ask for an incremental snapshot:
@@ -44,6 +50,18 @@ any of steps 2-4 is missing, so CI catches a half-onboarded table.
    SELECT count(DISTINCT <key>) FROM ridepulse_dev.silver.<name>_changes
    ```
    It should equal `SELECT count(*) FROM dispatch.<table>` in Neon. Then `make down`.
+
+   The new silver table is owned by `ridepulse-jobs`, which the pipeline runs as. Ops reads it through the
+   catalog-level grant to `ridepulse-ops` (`infra/terraform/databricks`). Anyone else gets it by a grant there.
+
+## Proven: `dispatch.incidents` (2026-11-09)
+
+| | |
+|---|---|
+| Neon | 27 incidents |
+| `silver.incident_changes` | 27, all by the snapshot (`op r`, no LSN) |
+| Quarantined | 0 |
+| Dead-lettered | 0 |
 
 ## Notes
 
