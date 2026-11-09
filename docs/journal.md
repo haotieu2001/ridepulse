@@ -1268,3 +1268,17 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   ridepulse-github-* role, reads included, and the landing stack reads the prep role and owns its S3 policy. Now it
   denies only changes to itself, the plan role and the OIDC provider; the IAM simulator confirms reads and the prep
   policy are allowed and those three are not.
+
+### #79 CDC tables from one registry, with incremental snapshots
+- `config/cdc_tables.json`: silver and bronze read it (bundle copy), the Confluent stack makes the topics from it;
+  `test_cdc_registry.py` replays the migrations' publication statements and compares them, Debezium's include
+  list and the envelope contract with it. Shown to catch a half-onboarded table: 4 checks fail on a registry-only
+  entry. Moving the 4 existing tables onto it planned 0 changes in Confluent.
+- V007: Debezium's signal table, for incremental snapshots. CI's CDC job proves a signal re-reads a table's existing
+  rows (op r). Found by that test: a snapshot read has no LSN (source.snapshot=incremental), and bronze (DLQ, "missing
+  source position"), silver (quarantine, "change without an LSN") and the contract all rejected it, so every row an
+  onboarding snapshot brought would have been lost. All three now allow it for op r only. Also found: the signal
+  table does emit its rows (5 for one request), to a topic that now exists for them.
+- V008 onboards dispatch.incidents (27 rows on Neon), the labels #25 scored against: migrated, Debezium replaced
+  (break-glass: its boot script changed), the rest through the gated deploy, then a snapshot signal.
+- `docs/runbooks/onboard-cdc-table.md`: the procedure as run.

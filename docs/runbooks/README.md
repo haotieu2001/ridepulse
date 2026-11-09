@@ -12,6 +12,7 @@ how to repair, and how to confirm. Incidents worth learning from are written up 
 | The AWS budget alert | the budget email (over $5 actual, or $10 forecast) | [budget-alert.md](budget-alert.md) |
 | Rebuild the window's platform (SLA-8) | a drill, or a lost Debezium instance | [rebuild.md](rebuild.md) |
 | Move to a new Confluent account | the trial credit ending (#43) | [confluent-new-account.md](confluent-new-account.md) |
+| Onboard a dispatch table to CDC | a new table whose changes silver should have | [onboard-cdc-table.md](onboard-cdc-table.md) |
 | Deploy by hand | the bootstrap or identity stacks, a refused replacement, CI down | [break-glass-deploy.md](break-glass-deploy.md) |
 
 Postmortems:
