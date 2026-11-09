@@ -1308,3 +1308,9 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
 - DATA_SOURCES.md: every downloaded file with the version it's pinned to (ETag, Last-Modified, bytes, SHA-256 from the
   manifests): three TLC months (61.1M rows), the zone files, NOAA 2025; attribution; and what is synthetic, each
   with how and where.
+
+### #42 Presentation material
+- `docs/presentation/`: a 6-minute video script (scenes, what to show, what to say, with a real incident command),
+  three posts (congestion pricing, the silent-night postmortem, the snapshot rows a test saved), CV bullets and four
+  STAR stories. Every number is a project measurement; two CV bullets were narrowed to what was measured (R1's
+  false-alarm rate, the BCF tolerance). The recording is the owner's.
