@@ -140,7 +140,7 @@ jobs:
           done
           echo "Debezium's slot never became active"; tail -50 debezium.log; exit 1
       - name: Every event reaches Kafka once
-        run: RIDEPULSE_CDC_BOOTSTRAP=localhost:9092 uv run pytest services/replayer/tests/test_cdc_integration.py -v
+        run: RIDEPULSE_CDC_BOOTSTRAP=localhost:9092 uv run pytest services/replayer/tests/test_cdc_integration.py -v -rP
       - name: Debezium's log
         if: failure()
         run: tail -100 debezium.log

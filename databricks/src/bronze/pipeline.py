@@ -9,6 +9,8 @@ Each row keeps the raw value, the Kafka position (topic, partition, offset) and 
 that doesn't parse goes to its *.dlq topic with the raw bytes, the error and the source offset, and nowhere else:
 bronze holds only what silver can read. Run as a triggered pipeline every 10 minutes (the job in resources/).
 """
+import json
+
 import dlt
 from databricks.sdk.runtime import dbutils
 from pyspark.sql import Column, DataFrame
@@ -32,7 +34,9 @@ EVENT_TYPES = ["TripRequested", "DriverAssigned", "TripStarted", "TripCompleted"
 # flow has its own checkpoint, so it reads the new cluster from its start, and appends to the same bronze tables, so
 # no history is lost. Empty is the first cluster: the flow names Lakeflow gave these tables when they were created.
 FLOW_SUFFIX = conf.get("ridepulse.kafka.flow_suffix", "")
-CDC_TOPICS = ["cdc.dispatch.drivers", "cdc.dispatch.driver_profiles", "cdc.dispatch.replay_state", "cdc.dispatch.replay_runs"]
+# One topic per CDC table, from the registry (config/cdc_tables.json, #79); the copy sits beside silver's code.
+REGISTRY = json.load(open(f"{conf.get('ridepulse.silver_dir')}/cdc_tables.json"))
+CDC_TOPICS = [f"cdc.{REGISTRY['schema']}.{t['table']}" for t in REGISTRY["tables"]]
 
 
 def kafka(topics: list[str]) -> DataFrame:

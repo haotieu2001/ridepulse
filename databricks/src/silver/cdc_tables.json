@@ -1,0 +1,92 @@
+{
+  "_doc": "The dispatch tables published by log-based CDC (ADR-0005, #79): onboarding one is an entry here plus a migration that adds it to the publication. Read by silver and bronze (through the bundle copy databricks/src/silver/cdc_tables.json) and by the Confluent stack (its topics); checked against the migrations, Debezium's table.include.list and the CDC envelope contract by contracts/tests/test_cdc_registry.py. The outbox is published too but routed to trips.v1, and the signal table carries Debezium's incremental-snapshot requests: neither is a table here. schema: the row's columns as Debezium sends them (Spark DDL); kinds: how silver types them (micros and days: Debezium's integer timestamps and dates; iso: an ISO string; anything else: a cast). topic: partitions, cleanup policy, retention_days (null: no time limit).",
+  "publication": "ridepulse_cdc",
+  "schema": "dispatch",
+  "signal_table": "debezium_signal",
+  "tables": [
+    {
+      "table": "drivers",
+      "key": "driver_id",
+      "silver": "driver_changes",
+      "schema": "driver_id STRING, status STRING, zone_id INT, current_trip_key STRING, status_changed_at BIGINT, updated_at STRING, online_since BIGINT, leaving BOOLEAN",
+      "kinds": {
+        "status_changed_at": "micros",
+        "online_since": "micros",
+        "updated_at": "iso"
+      },
+      "topic": {
+        "partitions": 3,
+        "cleanup_policy": "compact,delete",
+        "retention_days": 7
+      }
+    },
+    {
+      "table": "driver_profiles",
+      "key": "driver_id",
+      "silver": "driver_profile_changes",
+      "schema": "driver_id STRING, full_name STRING, base_license STRING, vehicle_type STRING, rating STRING, joined_on INT, updated_at STRING",
+      "kinds": {
+        "rating": "decimal(3,2)",
+        "joined_on": "days",
+        "updated_at": "iso"
+      },
+      "topic": {
+        "partitions": 1,
+        "cleanup_policy": null,
+        "retention_days": 7
+      }
+    },
+    {
+      "table": "replay_state",
+      "key": "id",
+      "silver": "replay_state_changes",
+      "schema": "id INT, watermark BIGINT, speed STRING, updated_at STRING, budget_day INT, budget_used_min STRING",
+      "kinds": {
+        "watermark": "micros",
+        "speed": "decimal(6,2)",
+        "updated_at": "iso",
+        "budget_day": "days",
+        "budget_used_min": "decimal(10,2)"
+      },
+      "topic": {
+        "partitions": 1,
+        "cleanup_policy": "compact",
+        "retention_days": null
+      }
+    },
+    {
+      "table": "replay_runs",
+      "key": "run_id",
+      "silver": "replay_runs_changes",
+      "schema": "run_id BIGINT, started_from BIGINT, ended_at BIGINT, speed STRING, started_at STRING, updated_at STRING",
+      "kinds": {
+        "started_from": "micros",
+        "ended_at": "micros",
+        "speed": "decimal(6,2)",
+        "started_at": "iso",
+        "updated_at": "iso"
+      },
+      "topic": {
+        "partitions": 1,
+        "cleanup_policy": "compact",
+        "retention_days": null
+      }
+    },
+    {
+      "table": "incidents",
+      "key": "incident_id",
+      "silver": "incident_changes",
+      "schema": "incident_id BIGINT, kind STRING, starts_at BIGINT, ends_at BIGINT, params STRING, created_at STRING",
+      "kinds": {
+        "starts_at": "micros",
+        "ends_at": "micros",
+        "created_at": "iso"
+      },
+      "topic": {
+        "partitions": 1,
+        "cleanup_policy": "compact",
+        "retention_days": null
+      }
+    }
+  ]
+}

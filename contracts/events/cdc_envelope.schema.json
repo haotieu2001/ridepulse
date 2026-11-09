@@ -57,7 +57,8 @@
             "drivers",
             "driver_profiles",
             "replay_state",
-            "replay_runs"
+            "replay_runs",
+            "incidents"
           ]
         }
       }

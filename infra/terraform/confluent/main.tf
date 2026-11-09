@@ -180,20 +180,29 @@ resource "confluent_api_key" "app_schema_registry" {
 # are Phase 0's, kept so those tests can be re-run.
 locals {
   day_ms = 86400000
-  topics = {
-    "trips.v1"                     = { partitions = 3, config = { "retention.ms" = 7 * local.day_ms } }
-    "cdc.dispatch.drivers"         = { partitions = 3, config = { "cleanup.policy" = "compact,delete", "retention.ms" = 7 * local.day_ms } }
-    "cdc.dispatch.driver_profiles" = { partitions = 1, config = { "retention.ms" = 7 * local.day_ms } }
-    "cdc.dispatch.replay_state"    = { partitions = 1, config = { "cleanup.policy" = "compact" } }
-    "cdc.dispatch.replay_runs"     = { partitions = 1, config = { "cleanup.policy" = "compact" } }
-    "driver.locations.v1"          = { partitions = 6, config = { "retention.ms" = local.day_ms } }
-    "ops.alerts.v1"                = { partitions = 1, config = { "retention.ms" = 7 * local.day_ms } }
-    "trips.v1.dlq"                 = { partitions = 1, config = { "retention.ms" = 14 * local.day_ms } }
-    "cdc.dispatch.dlq"             = { partitions = 1, config = { "retention.ms" = 14 * local.day_ms } }
-    "driver.locations.v1.dlq"      = { partitions = 1, config = { "retention.ms" = 14 * local.day_ms } }
-    "__debezium-heartbeat.cdc"     = { partitions = 1, config = { "retention.ms" = local.day_ms } }
-    "debezium.offsets"             = { partitions = 1, config = { "cleanup.policy" = "compact" } }
+  # One topic per CDC table, from the registry (config/cdc_tables.json, #79): onboarding a table adds its topic here.
+  cdc = jsondecode(file("${path.module}/../../../config/cdc_tables.json"))
+  cdc_topics = {
+    for t in local.cdc.tables : "cdc.${local.cdc.schema}.${t.table}" => {
+      partitions = t.topic.partitions
+      config = merge(
+        t.topic.cleanup_policy == null ? {} : { "cleanup.policy" = t.topic.cleanup_policy },
+        t.topic.retention_days == null ? {} : { "retention.ms" = t.topic.retention_days * local.day_ms },
+      )
+    }
   }
+  # Debezium's signal table (V007) is captured like any table; if it emits change events, they land here, unread.
+  signal_topic = { "cdc.${local.cdc.schema}.${local.cdc.signal_table}" = { partitions = 1, config = { "retention.ms" = local.day_ms } } }
+  topics = merge(local.cdc_topics, local.signal_topic, {
+    "trips.v1"                 = { partitions = 3, config = { "retention.ms" = 7 * local.day_ms } }
+    "driver.locations.v1"      = { partitions = 6, config = { "retention.ms" = local.day_ms } }
+    "ops.alerts.v1"            = { partitions = 1, config = { "retention.ms" = 7 * local.day_ms } }
+    "trips.v1.dlq"             = { partitions = 1, config = { "retention.ms" = 14 * local.day_ms } }
+    "cdc.dispatch.dlq"         = { partitions = 1, config = { "retention.ms" = 14 * local.day_ms } }
+    "driver.locations.v1.dlq"  = { partitions = 1, config = { "retention.ms" = 14 * local.day_ms } }
+    "__debezium-heartbeat.cdc" = { partitions = 1, config = { "retention.ms" = local.day_ms } }
+    "debezium.offsets"         = { partitions = 1, config = { "cleanup.policy" = "compact" } }
+  })
 }
 
 resource "confluent_kafka_topic" "app" {
