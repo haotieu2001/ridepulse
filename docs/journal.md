@@ -1287,3 +1287,14 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   so Debezium was never installed and a restart doesn't retry: replaced again and left to boot. And the new table is
   owned by ridepulse-jobs (the pipeline's run_as), which made it unreadable to the owner: ridepulse-ops now has read on
   the whole catalog (Terraform), covering tables made later.
+
+### #80 The paid switch: the sample rate as config, an edition flag
+- The replay sample's modulus (20, 5%) is `contracts/sample.json`: trip_key.py reads it (so prep, the Spark key
+  expressions and the tests do), the bundle has an identical copy, and its contract_version must equal
+  tlc_trips.yaml's, so a new rate is visibly a contract version. The YAML rule points at the file instead of saying 20.
+- `edition = free | paid` on confluent, landing and debezium (default free). Free plans: no changes, the existing
+  resources moved to [0] by moved blocks. Paid plans, not applied: Confluent Basic -> Enterprise across zones, a
+  replacement that prevent_destroy stops until it's deliberate; landing drops the forwarder (6 resources) for a
+  storage credential role (2). Paid CDC isn't built, so a paid debezium plan stops with that error rather than
+  ship an untested connector config.
+- production.md §3 checked: every rule done; the MERGE / REPLACE WHERE row was stale (gold done since #33).

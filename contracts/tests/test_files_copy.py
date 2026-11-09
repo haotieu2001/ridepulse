@@ -9,6 +9,7 @@ REGISTRY = json.loads((ROOT / "config/file_sources.json").read_text())
 
 def test_the_ingest_jobs_copies_are_the_originals():
     assert (ROOT / "databricks/src/files/trip_key.py").read_bytes() == (ROOT / "contracts/trip_key.py").read_bytes()
+    assert (ROOT / "databricks/src/files/sample.json").read_bytes() == (ROOT / "contracts/sample.json").read_bytes()
     assert (ROOT / "databricks/src/files/file_sources.json").read_bytes() == (ROOT / "config/file_sources.json").read_bytes()
 
 

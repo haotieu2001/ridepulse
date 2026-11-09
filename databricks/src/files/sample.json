@@ -1,0 +1,5 @@
+{
+  "_doc": "The replay sample (#80): a trip is in it when int(first 8 hex digits of its base key, base 16) % modulus == 0. 20 is the plan's 5%. Read by contracts/trip_key.py (and so by prep, the replayer and the Spark key expressions), and by the bundle's copy. Part of the trip-key contract (contracts/tlc_trips.yaml, key.sample): a new modulus changes which trips replay, so it is a major contract version, and contract_version must match the contract's.",
+  "contract_version": "1.0.0",
+  "modulus": 20
+}

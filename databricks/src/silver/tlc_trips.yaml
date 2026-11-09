@@ -35,7 +35,7 @@ key:
     fractional_seconds: 0             # so whole-second serialisation is lossless
   sample:
     column: in_sample
-    rule: int(first 8 hex digits of the base key, base 16) % 20 = 0    # the 5% replay sample
+    rule: int(first 8 hex digits of the base key, base 16) % modulus = 0, with modulus from contracts/sample.json (20, the 5% replay sample)
 
 columns:
   # --- identity and lineage -------------------------------------------------------------------

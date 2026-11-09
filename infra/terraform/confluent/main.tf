@@ -34,13 +34,22 @@ resource "confluent_environment" "this" {
 # as Databricks Free Edition and Neon.
 resource "confluent_kafka_cluster" "this" {
   display_name = "ridepulse-dev"
-  availability = "SINGLE_ZONE"
+  availability = var.edition == "free" ? "SINGLE_ZONE" : "MULTI_ZONE"
   cloud        = "AWS"
   region       = "us-east-2"
-  # Basic includes one eCKU and bills $0.135/hour for each above it. Uncapped (the default, 50), demo days billed
-  # 1-5 dollars of eCKUs for a load of ~24 requests/s and 0.05 MB/s: ~$50/month, five times NFR-10 (docs/cost.md).
-  basic {
-    max_ecku = 1
+  # Free: Basic, which includes one eCKU and bills $0.135/hour for each above it. Uncapped (the default, 50), demo days
+  # billed 1-5 dollars of eCKUs for a load of ~24 requests/s: ~$50/month, five times NFR-10 (docs/cost.md).
+  dynamic "basic" {
+    for_each = var.edition == "free" ? [1] : []
+    content {
+      max_ecku = 1
+    }
+  }
+  # Paid: Enterprise, across zones, private networking (ADR-0007). A change of cluster type replaces the cluster:
+  # planned, then applied through break-glass, with docs/runbooks/confluent-new-account.md's steps after it.
+  dynamic "enterprise" {
+    for_each = var.edition == "paid" ? [1] : []
+    content {}
   }
 
   environment {
