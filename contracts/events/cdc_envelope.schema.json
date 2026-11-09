@@ -43,7 +43,11 @@
       ],
       "properties": {
         "lsn": {
-          "type": "integer"
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "The WAL position. Null only on an incremental snapshot read (op r, #79): the row was read, not taken from the WAL."
         },
         "ts_ms": {
           "type": "integer",
@@ -108,6 +112,26 @@
         "required": [
           "before"
         ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "source": {
+            "properties": {
+              "lsn": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "op": {
+            "const": "r"
+          }
+        }
       }
     }
   ]

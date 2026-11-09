@@ -116,7 +116,10 @@ def cdc_dispatch_parsed():
     error = (F.when(F.col("raw_value").isNull(), None)
              .when(F.expr("try_parse_json(cast(raw_value AS STRING))").isNull(), "value is not JSON")
              .when(~F.col("e.op").isin("c", "u", "d", "r"), "unknown op")
-             .when(F.col("e.source.lsn").isNull() | F.col("e.source.table").isNull(), "missing source position")
+             # An incremental snapshot read (#79) has no LSN: the row was read, not taken from the WAL. Anything else
+             # without one is broken.
+             .when((F.col("e.source.lsn").isNull() & (F.col("e.op") != "r")) | F.col("e.source.table").isNull(),
+                   "missing source position")
              .when((F.col("e.op") != "d") & F.col("e.after").isNull(), "change without an after image"))
     return df.withColumn("error", error)
 

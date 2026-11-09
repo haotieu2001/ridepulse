@@ -129,7 +129,7 @@ def cdc_tables(table: str, target: str, pk: str, schema: str, kinds: dict) -> No
               .withColumn("row", F.from_json(F.coalesce("after", "before"), schema)))
         reason = first_reason((F.col("row").isNotNull(), "change has no row image"),
                               (F.col(f"row.{pk}").isNotNull(), f"change without {pk}"),
-                              (F.col("source_lsn").isNotNull(), "change without an LSN"))
+                              (F.col("source_lsn").isNotNull() | (F.col("op") == "r"), "change without an LSN"))
         return df.select(*[typed(c, kinds.get(c)) for c in columns], "op", "source_lsn", "source_tx_id", "committed_at",
                          "from_snapshot", "topic", "partition", "offset", "kafka_ts", "raw_value", "key",
                          reason.alias("reason"))

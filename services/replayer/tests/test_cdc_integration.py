@@ -114,6 +114,8 @@ def test_a_signal_snapshots_a_tables_existing_rows():
     assert read, "the signal brought no snapshot read of the existing row"
     jsonschema.validate(read[0], schema("cdc_envelope.schema.json"))
     assert read[0]["after"]["kind"] == "stadium" and json.loads(read[0]["after"]["params"]) == {"zone": 138}
+    # A read, not a WAL change: no LSN (bronze, silver and the contract allow that for op r only).
+    print(f"incremental read source: lsn={read[0]['source'].get('lsn')} snapshot={read[0]['source'].get('snapshot')}")
 
     # Recorded, not asserted: whether Debezium also emits the signal table's own rows (the topic exists either way).
     signals = changes_until("cdc.dispatch.debezium_signal", lambda seen: len(seen) > 0, timeout_s=20)
