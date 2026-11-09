@@ -18,7 +18,7 @@ def test_header():
 
 def test_key_inputs_match_the_python_definition():
     assert CONTRACT["key"]["inputs"] == [name for name, _ in KEY_FIELDS]
-    assert f"% {SAMPLE_MODULUS} = 0" in CONTRACT["key"]["sample"]["rule"]
+    assert "% modulus = 0" in CONTRACT["key"]["sample"]["rule"] and f"({SAMPLE_MODULUS}, " in CONTRACT["key"]["sample"]["rule"]
 
 
 def test_columns_are_unique_typed_and_sourced():

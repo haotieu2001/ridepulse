@@ -245,16 +245,16 @@ Sizing at the full volume: measured here where it says so, and x 20 of this proj
 ## 3. What stays the same (keeping the switch cheap)
 
 These are rules for every phase, so the paid design is a configuration change, not a rewrite. The
-status column is checked in Phase 7.
+status column was checked on 2026-11-09 (#80).
 
 | Rule | Status now |
 |---|---|
 | Contracts don't depend on the source: the same Avro and JSON contracts whether the replayer or a real app produces an event | done: `contracts/events/` (JSON Schema), the ping Avro in Schema Registry, `tlc_trips.yaml` |
-| No hard-coded environment: trigger, catalog, storage path, sample rate and replay speed are bundle variables | partly: catalog per target, replay speed a replayer argument; the sample rate is still a constant in `contracts/trip_key.py` (#80) |
+| No hard-coded environment: trigger, catalog, storage path, sample rate and replay speed are bundle variables | done: catalog per target, the pipeline's trigger in its job, replay speed a replayer argument, the sample rate in `contracts/sample.json` (#80; part of the key contract, so a change is a contract version) |
 | Debezium config is one file per environment | done: `infra/terraform/debezium/env/dev.properties` |
 | Secrets only from SSM and secret scopes | done (ADR-0002) |
-| Terraform modules take an edition flag (`free` / `paid`) | not yet (#80) |
-| Every write is a `MERGE` or `REPLACE WHERE`, so backfills and reruns are safe | silver done (FR-15); gold in Phase 4 (#29, #33) |
+| done (#80): `edition` on the confluent, landing and debezium stacks, default `free`. Paid plans: Confluent Enterprise across zones (a cluster replacement, which `prevent_destroy` stops until it's deliberate); landing drops the forwarder for a Unity Catalog storage credential role (ADR-0010). Paid CDC (ADR-0007) isn't built: a paid plan of the debezium stack stops and says so |
+| Every write is a `MERGE` or `REPLACE WHERE`, so backfills and reruns are safe | done: silver (FR-15) and gold (`REPLACE WHERE` per date range, the marts rebuilt whole; a range rebuilt twice changes nothing, #33). Rerun twice for 2025-01-09 on 2026-11-08 as `ridepulse-jobs` |
 
 ## 4. What it costs
 
