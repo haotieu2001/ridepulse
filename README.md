@@ -1,47 +1,110 @@
 # RidePulse
 
-A ride-hailing operations and analytics platform for a fictional NYC operator, built on real NYC TLC
-for-hire trip records: Postgres CDC with Debezium, Kafka, a Databricks lakehouse, AWS and Terraform.
+**A ride-hailing operations and analytics platform for a fictional NYC operator, built on 61 million real trip
+records.**
 
-Status: **Phase 3 (silver, CDC, rules) done; Phase 4 (batch, reconciliation, BI) next.** Every step is in
-[docs/journal.md](docs/journal.md); the Phase 0 tests in [docs/feasibility.md](docs/feasibility.md).
+New York's taxi regulator publishes every Uber, Lyft and Via trip. RidePulse replays January 2025 through a dispatch
+database as if it were happening now, at 10x: trips are requested, assigned and completed, and synthetic drivers
+move and ping. The changes stream out of Postgres by CDC (Debezium) into Kafka, and a Databricks lakehouse turns them
+into live ops alerts within minutes:
+- a surge with no drivers;
+- long waits;
+- an airport queue;
+- an app outage.
+
+The same platform builds a daily star schema and reconciles it against the regulator's own file and the payouts.
+Everything is code: Terraform, Databricks Asset Bundles, contracts, tests, and a gated deploy.
+
+It runs on free tiers (Databricks Free Edition, Neon, Confluent Basic, AWS) for a few dollars a month. Every place where
+that falls short of production is written down, with the reason and the production design
+([production.md](docs/production.md)).
+
+```mermaid
+flowchart LR
+    tlc["NYC TLC + NOAA<br/>files"] --> s3[("S3 landing")]
+    s3 --> prep["Prep<br/>contract, 5% sample"] --> s3
+    s3 --> rep["Replayer<br/>Lambda, 10x clock"]
+    rep -- "one transaction per tick" --> pg[("Dispatch Postgres<br/>Neon")]
+    pg -- "WAL" --> dbz["Debezium"] --> kafka[["Kafka<br/>Confluent"]]
+    rep -- "GPS pings (Avro)" --> kafka
+    kafka --> stream["Streaming pipeline<br/>bronze, silver,<br/>rules R1-R4"]
+    s3 --> files["File ingest"]
+    stream & files --> uc[("Unity Catalog<br/>bronze, silver, gold")]
+    uc --> daily["Daily job<br/>gold, reconciliations"] --> uc
+    uc --> bi["Dashboard + Genie"]
+    stream -- "alerts" --> kafka --> notif["Notifier"] --> email["Email"]
+```
+
+The detailed diagrams are in [c4.md](docs/design/c4.md); the production design in [production.md](docs/production.md).
 
 ## Results
 
-Measured on replays of Wednesday 2025-01-08 (30 simulated hours at 10x, eight injected incidents) and Friday
-2025-01-10 evening (10 simulated hours, the pipeline back to back)
-([journal #25](docs/journal.md), `scripts/measure/alerts.py`).
+All measured, on real runs. The evidence is linked.
 
-| What | Result |
-|---|---|
-| Surge alert latency, request commit in Postgres -> email (SLA-1) | R1 p50 **15.2** min, p95 **19.1** (R3 p95 18.1; R2 27.2, which waits a 75-min join hold-back by design). Pipeline runs back to back at ~10.5 min each; Debezium < 1 s, the notifier ~0.5 min. The plan's 12 min needs continuous mode, which Free Edition can't keep up (`docs/production.md` §1) |
-| Injected incidents detected (recall) | **8 / 8** over two replays: four stadium surges (R1, and R3 at JFK), three app outages (R4), tunnel pings (late events), each in its first window |
-| Alarms on windows no incident touched | R1 8.2% -> **1.2%** after calibration; R2 1.1%; R3 52% -> 20% (the synthetic supply has no airport holding lot); R4 0.1%; late events 0% |
-| Late tunnel pings | 3,924 of 206,418 pings (1.9% of the 2% injected) flagged late, each in its own window |
-| Debezium killed mid-stream / replication slot dropped | 0 events lost or repeated after recovery ([journal #24](docs/journal.md)) |
+| What | Result | Evidence |
+|---|---|---|
+| Surge alert latency, request commit in Postgres to email | R1 p50 **15.2 min**, p95 **19.1 min** (R3 p95 18.1; R2 27.2, waiting its join by design). Free Edition's ~20-minute limit per pipeline update rules out continuous mode; the 12-minute target is the production one | [journal #25](docs/journal.md), [ADR-0008](docs/adr/0008-streaming-latency.md) |
+| Injected incidents detected | **8 of 8**, each in its first window: stadium surges, app outages, late pings. False alarms on clean windows: R1 1.2%, R2 1.1%, R4 0.1% | [journal #25](docs/journal.md) |
+| Debezium killed, replication slot dropped | **0 events lost or repeated** after recovery | [slot-dropped.md](docs/runbooks/slot-dropped.md), [debezium-killed.md](docs/runbooks/debezium-killed.md) |
+| Log-based vs query-based CDC | Debezium saw **76 of 76** planted changes; a cursor-based pull **56 of 76** (no intermediate versions, no deletes) | [ADR-0005](docs/adr/0005-log-based-vs-query-based-cdc.md) |
+| Silver against the dispatch database | **Equal:** 293,213 events, 2,834 drivers, none missing, extra or repeated | [rebuild.md](docs/runbooks/rebuild.md) |
+| Stream against the regulator's file | every replayed trip found once in the TLC file, copies excluded; the BCF within 2% a day, flat fees exact | [journal #30](docs/journal.md) |
+| Platform rebuilt from code (Debezium destroyed with its slot) | healthy end to end in **12.5 min**, target 30 | [rebuild.md](docs/runbooks/rebuild.md) |
+| A table onboarded to CDC with its existing rows | **27 of 27** rows by incremental snapshot, none quarantined | [onboard-cdc-table.md](docs/runbooks/onboard-cdc-table.md) |
+| Driver data outside ops | **0 driver ids** visible to a finance user; own rows only for a driver; silver, bronze and ops denied | [security.md](docs/security.md) |
+| Cost | **$0.95** billed for November 1-8 (AWS). The surprise was Kafka capacity, now capped: ~$50/month avoided | [cost.md](docs/cost.md) |
 
-## Layout
+What went wrong along the way is written down too, for example a 36-hour stretch with no alerts:
+[postmortem](docs/postmortems/2026-11-06-alerts-stopped.md).
 
-| Path | What |
-|---|---|
-| `infra/terraform/bootstrap/` | Terraform state bucket, GitHub Actions OIDC role, cost budget |
-| `databricks/` | Databricks Asset Bundle: storage, jobs, source |
-| `docs/` | Feasibility results and ADRs |
+## How it's built
 
-## Run
+| Layer | What | Where |
+|---|---|---|
+| Contracts | trip key and replay sample, event schemas (JSON Schema, Avro), the TLC data contract, the CDC table registry | `contracts/`, `config/` |
+| Source | replayer and dispatch schema with an outbox (Postgres), monthly prep | `services/`, `db/` |
+| CDC and transport | Debezium Server (outbox router, incremental snapshots), Kafka topics, ACLs and schemas | `infra/terraform/debezium`, `infra/terraform/confluent` |
+| Lakehouse | one streaming pipeline (bronze, silver, supply, rules), file ingest, the daily gold job, views | `databricks/` |
+| Serving | AI/BI dashboard, Genie space, a metric view | `databricks/src/bi/` |
+| Platform | AWS (Lambdas, S3, SNS, EventBridge), Databricks identities and grants, CI and gated deploys | `infra/terraform/`, `.github/workflows/` |
+| Decisions | 15 ADRs, runbooks, a postmortem, the journal of every step | `docs/` |
 
-Prerequisites: AWS CLI with an SSO profile `ridepulse`, Databricks CLI profile `ridepulse`, Terraform ≥ 1.11.
+Quality gates on every PR:
+- lint, unit, Spark and Postgres tests, and pyright;
+- a real Postgres-Debezium-Kafka test;
+- secret, infrastructure and dependency scans;
+- Terraform plans.
+
+A merge deploys stg, smoke-tests it, and waits for an approval before anything live changes
+([break-glass-deploy.md](docs/runbooks/break-glass-deploy.md)).
+
+## Run it
+
+Prerequisites: an AWS account with an SSO profile `ridepulse`, a Databricks workspace with a CLI profile `ridepulse`,
+a Neon project, a Confluent Cloud account, Terraform 1.17, and `uv`. Setting up a machine is in
+[new-laptop.md](docs/new-laptop.md).
 
 ```bash
-# AWS bootstrap: first copy infra/terraform/bootstrap/terraform.tfvars.example to terraform.tfvars
-make bootstrap-plan      # review the plan, then
-make bootstrap-apply
+make bootstrap-plan && make bootstrap-apply   # state bucket, GitHub OIDC roles, budget (once)
+make landing-plan && make landing-apply       # the landing bucket
+make confluent-plan && make confluent-apply   # topics, ACLs, schemas
+make db-migrate && make db-seed              # the dispatch schema, zones, fare rules
+make land-month MONTH=2025-01                 # one TLC month, pinned to its ETag (also land-zones, land-noaa)
+make prep MONTH=2025-01                       # contract check, 5% sample, event-time slices
+make replayer-plan && make replayer-apply     # replayer, notifier, the window Lambda
+make debezium-plan && make debezium-up        # Debezium; let its first boot finish
+make catalog                                  # the Databricks catalog (once); the bundle comes from CI
 
-# Feasibility test S10: one TLC month (~20M rows) into bronze
-make s10
+make replay DATE=2025-01-08                   # start the simulated clock
+make up                                       # open a demo window: Debezium, replayer, pipeline, alerts
+make window-status
+make down                                     # close it
 ```
+
+After that, changes go through a PR: a merge deploys stg and, after an approval, the live environment.
 
 ## Data
 
-Trip data: NYC Taxi & Limousine Commission trip records, via NYC Open Data. Drivers, payouts and
-support policies are synthetic.
+Real: NYC TLC trip records and zones, NOAA daily weather. Synthetic: the drivers, their pings, the dispatch
+timeline, injected incidents and payout files. Which versions, and what exactly is made up:
+[DATA_SOURCES.md](docs/DATA_SOURCES.md). Trip data: NYC Taxi and Limousine Commission, via NYC Open Data.
