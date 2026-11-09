@@ -1298,3 +1298,13 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   storage credential role (2). Paid CDC isn't built, so a paid debezium plan stops with that error rather than
   ship an untested connector config.
 - production.md §3 checked: every rule done; the MERGE / REPLACE WHERE row was stale (gold done since #33).
+
+## Phase 8: presentation
+
+### #41 README and DATA_SOURCES
+- README rewritten (it still said "Phase 3 done"): a pitch, an architecture diagram (rendered and checked), ten
+  measured results each linked to its evidence, how it's built, how to run it, and the data. No demo GIF: none can be
+  recorded from here, so the video (#42) carries the demo.
+- DATA_SOURCES.md: every downloaded file with the version it's pinned to (ETag, Last-Modified, bytes, SHA-256 from the
+  manifests): three TLC months (61.1M rows), the zone files, NOAA 2025; attribution; and what is synthetic, each
+  with how and where.
