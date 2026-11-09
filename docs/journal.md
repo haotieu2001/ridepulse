@@ -1282,3 +1282,8 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
 - V008 onboards dispatch.incidents (27 rows on Neon), the labels #25 scored against: migrated, Debezium replaced
   (break-glass: its boot script changed), the rest through the gated deploy, then a snapshot signal.
 - `docs/runbooks/onboard-cdc-table.md`: the procedure as run.
+- Rolled out on dev: 27 of 27 incidents reached silver.incident_changes through the snapshot (op r, no LSN), none
+  quarantined or dead-lettered. Two lessons: the first replacement was stopped (`make down`) during its first boot,
+  so Debezium was never installed and a restart doesn't retry: replaced again and left to boot. And the new table is
+  owned by ridepulse-jobs (the pipeline's run_as), which made it unreadable to the owner: ridepulse-ops now has read on
+  the whole catalog (Terraform), covering tables made later.
