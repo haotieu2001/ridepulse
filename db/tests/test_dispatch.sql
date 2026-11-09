@@ -101,7 +101,7 @@ END $$;
 -- 7. Debezium's publication carries the outbox, driver and replay tables, and not trips
 DO $$ BEGIN
   ASSERT (SELECT array_agg(tablename::text ORDER BY tablename) FROM pg_publication_tables WHERE pubname = 'ridepulse_cdc')
-         = ARRAY['driver_profiles', 'drivers', 'outbox', 'replay_runs', 'replay_state'], 'publication tables';
+         = ARRAY['debezium_signal', 'driver_profiles', 'drivers', 'incidents', 'outbox', 'replay_runs', 'replay_state'], 'publication tables';
 END $$;
 
 -- 8. the planted hard delete removes a profile only; a driver with trip history can't be deleted

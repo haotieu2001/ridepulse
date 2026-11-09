@@ -16,6 +16,7 @@ the watermark is generous (2 simulated hours, 12 wall minutes at 10x) because la
 (#20, #21), and a copy arriving later than that is a replay of history, not news. trip_events adds a MERGE, so even
 a copy re-emitted days later can't appear twice in what gold reads.
 """
+import json
 import sys
 
 import dlt
@@ -99,24 +100,10 @@ quarantine_flow("trip_events", "trips.v1", "trip_events_checked", F.col("trip_ke
 
 # --- CDC: one typed table per published dispatch table --------------------------------------------------
 
-CDC = {
-    "drivers": ("driver_changes", "driver_id",
-                "driver_id STRING, status STRING, zone_id INT, current_trip_key STRING, status_changed_at BIGINT, "
-                "updated_at STRING, online_since BIGINT, leaving BOOLEAN",
-                {"status_changed_at": "micros", "online_since": "micros", "updated_at": "iso"}),
-    "driver_profiles": ("driver_profile_changes", "driver_id",
-                        "driver_id STRING, full_name STRING, base_license STRING, vehicle_type STRING, rating STRING, "
-                        "joined_on INT, updated_at STRING",
-                        {"rating": "decimal(3,2)", "joined_on": "days", "updated_at": "iso"}),
-    "replay_state": ("replay_state_changes", "id",
-                     "id INT, watermark BIGINT, speed STRING, updated_at STRING, budget_day INT, budget_used_min STRING",
-                     {"watermark": "micros", "speed": "decimal(6,2)", "updated_at": "iso", "budget_day": "days",
-                      "budget_used_min": "decimal(10,2)"}),
-    "replay_runs": ("replay_runs_changes", "run_id",
-                    "run_id BIGINT, started_from BIGINT, ended_at BIGINT, speed STRING, started_at STRING, updated_at STRING",
-                    {"started_from": "micros", "ended_at": "micros", "speed": "decimal(6,2)", "started_at": "iso",
-                     "updated_at": "iso"}),
-}
+# One typed table per published dispatch table, from the registry (config/cdc_tables.json, copied beside this file;
+# #79): onboarding a table is an entry there, not a change here.
+REGISTRY = json.load(open(f"{SILVER_DIR}/cdc_tables.json"))
+CDC = {t["table"]: (t["silver"], t["key"], t["schema"], t["kinds"]) for t in REGISTRY["tables"]}
 
 
 def typed(c: str, kind: str | None) -> Column:
@@ -142,7 +129,7 @@ def cdc_tables(table: str, target: str, pk: str, schema: str, kinds: dict) -> No
               .withColumn("row", F.from_json(F.coalesce("after", "before"), schema)))
         reason = first_reason((F.col("row").isNotNull(), "change has no row image"),
                               (F.col(f"row.{pk}").isNotNull(), f"change without {pk}"),
-                              (F.col("source_lsn").isNotNull(), "change without an LSN"))
+                              (F.col("source_lsn").isNotNull() | (F.col("op") == "r"), "change without an LSN"))
         return df.select(*[typed(c, kinds.get(c)) for c in columns], "op", "source_lsn", "source_tx_id", "committed_at",
                          "from_snapshot", "topic", "partition", "offset", "kafka_ts", "raw_value", "key",
                          reason.alias("reason"))

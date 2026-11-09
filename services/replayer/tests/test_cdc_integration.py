@@ -76,3 +76,47 @@ def test_every_outbox_event_reaches_kafka_once_in_the_contracts_envelope(tmp_pat
     drivers = consume("cdc.dispatch.drivers", 1)
     assert drivers, "no driver changes on cdc.dispatch.drivers"
     jsonschema.validate(json.loads(drivers[0].value()), schema("cdc_envelope.schema.json"))
+
+
+def changes_until(topic: str, done, timeout_s: int = 180) -> list[dict]:
+    """Debezium envelopes from `topic` (from the start) until `done(envelopes)` holds or the time runs out."""
+    from confluent_kafka import Consumer
+    c = Consumer({"bootstrap.servers": BOOTSTRAP, "group.id": f"cdc-test-{topic}-{time.time_ns()}",
+                  "auto.offset.reset": "earliest", "enable.auto.commit": False})
+    c.subscribe([topic])
+    seen: list[dict] = []
+    deadline = time.time() + timeout_s
+    while not done(seen) and time.time() < deadline:
+        seen += [json.loads(m.value()) for m in c.consume(500, timeout=2) if not m.error() and m.value()]
+    c.close()
+    return seen
+
+
+def test_a_signal_snapshots_a_tables_existing_rows():
+    """#79: a row in the signal table makes Debezium re-read a table's rows in an incremental snapshot (op r) while
+    streaming goes on, which is how a table onboarded later gets the rows it already had."""
+    with psycopg.connect(autocommit=True, options="-c search_path=dispatch") as conn:
+        row = conn.execute("INSERT INTO incidents (kind, starts_at, ends_at, params) VALUES ('stadium', "
+                           "'2025-01-08 13:00', '2025-01-08 14:00', '{\"zone\": 138}') RETURNING incident_id").fetchone()
+        assert row is not None
+        incident = row[0]
+
+        def ours(op):
+            return lambda seen: any(e.get("op") == op and (e.get("after") or {}).get("incident_id") == incident
+                                    for e in seen)
+
+        assert ours("c")(changes_until("cdc.dispatch.incidents", ours("c"))), "the insert never streamed"
+        conn.execute("INSERT INTO debezium_signal (id, type, data) VALUES (%s, 'execute-snapshot', %s)",
+                     (f"test-{time.time_ns()}", json.dumps({"data-collections": ["dispatch.incidents"],
+                                                            "type": "incremental"})))
+    snapshot = changes_until("cdc.dispatch.incidents", ours("r"))
+    read = [e for e in snapshot if e.get("op") == "r" and e["after"]["incident_id"] == incident]
+    assert read, "the signal brought no snapshot read of the existing row"
+    jsonschema.validate(read[0], schema("cdc_envelope.schema.json"))
+    assert read[0]["after"]["kind"] == "stadium" and json.loads(read[0]["after"]["params"]) == {"zone": 138}
+    # A read, not a WAL change: no LSN (bronze, silver and the contract allow that for op r only).
+    print(f"incremental read source: lsn={read[0]['source'].get('lsn')} snapshot={read[0]['source'].get('snapshot')}")
+
+    # Recorded, not asserted: whether Debezium also emits the signal table's own rows (the topic exists either way).
+    signals = changes_until("cdc.dispatch.debezium_signal", lambda seen: len(seen) > 0, timeout_s=20)
+    print(f"signal table rows emitted to Kafka: {len(signals)}")

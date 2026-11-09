@@ -9,6 +9,8 @@ Each row keeps the raw value, the Kafka position (topic, partition, offset) and 
 that doesn't parse goes to its *.dlq topic with the raw bytes, the error and the source offset, and nowhere else:
 bronze holds only what silver can read. Run as a triggered pipeline every 10 minutes (the job in resources/).
 """
+import json
+
 import dlt
 from databricks.sdk.runtime import dbutils
 from pyspark.sql import Column, DataFrame
@@ -32,7 +34,9 @@ EVENT_TYPES = ["TripRequested", "DriverAssigned", "TripStarted", "TripCompleted"
 # flow has its own checkpoint, so it reads the new cluster from its start, and appends to the same bronze tables, so
 # no history is lost. Empty is the first cluster: the flow names Lakeflow gave these tables when they were created.
 FLOW_SUFFIX = conf.get("ridepulse.kafka.flow_suffix", "")
-CDC_TOPICS = ["cdc.dispatch.drivers", "cdc.dispatch.driver_profiles", "cdc.dispatch.replay_state", "cdc.dispatch.replay_runs"]
+# One topic per CDC table, from the registry (config/cdc_tables.json, #79); the copy sits beside silver's code.
+REGISTRY = json.load(open(f"{conf.get('ridepulse.silver_dir')}/cdc_tables.json"))
+CDC_TOPICS = [f"cdc.{REGISTRY['schema']}.{t['table']}" for t in REGISTRY["tables"]]
 
 
 def kafka(topics: list[str]) -> DataFrame:
@@ -112,7 +116,10 @@ def cdc_dispatch_parsed():
     error = (F.when(F.col("raw_value").isNull(), None)
              .when(F.expr("try_parse_json(cast(raw_value AS STRING))").isNull(), "value is not JSON")
              .when(~F.col("e.op").isin("c", "u", "d", "r"), "unknown op")
-             .when(F.col("e.source.lsn").isNull() | F.col("e.source.table").isNull(), "missing source position")
+             # An incremental snapshot read (#79) has no LSN: the row was read, not taken from the WAL. Anything else
+             # without one is broken.
+             .when((F.col("e.source.lsn").isNull() & (F.col("e.op") != "r")) | F.col("e.source.table").isNull(),
+                   "missing source position")
              .when((F.col("e.op") != "d") & F.col("e.after").isNull(), "change without an after image"))
     return df.withColumn("error", error)
 
