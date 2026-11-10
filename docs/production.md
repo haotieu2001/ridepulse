@@ -142,6 +142,8 @@ It's configuration, not a rewrite.
 
 The same system as [`c4.md`](design/c4.md)'s level 2, with each difference above applied. Everything sits in private
 networks; arrows across accounts go over PrivateLink. The pipeline split follows "How the pipelines are split" (§1).
+The boxes marked **ride app** (API gateway, dispatch service, ping gateway) are the real services the replayer plays
+in the Free Edition build.
 
 ![Containers in production](design/diagrams/production-containers.svg)
 

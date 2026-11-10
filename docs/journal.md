@@ -1329,3 +1329,8 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   show on GitHub and offline; laid out by hand on a grid, then rendered and checked for crossing lines and overlapping
   labels. The builder warns when a text is wider than its box. The ERDs use crow's-foot ends with a legend; the
   replayer tick is a sequence diagram with its Postgres transaction shaded.
+
+### What plays the ride app, marked in every diagram (owner review)
+- A "plays the ride app" tag on the stand-in: the grey dashed box around prep, S3 and the replayer (Level 2), the
+  replayer (Level 3 tick), the overview's stand-in box and Level 1's first line; in production, "ride app" on the
+  API gateway, dispatch service and ping gateway, the real services the replayer plays.

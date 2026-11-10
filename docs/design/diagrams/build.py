@@ -34,6 +34,7 @@ GROUPS = {   # name: (fill, border, label colour)
     "plain": ("#f8fafc", "#e2e8f0", "#334155"),
 }
 PERSON, EXTERNAL, SYSTEM = "#1e3a8a", "#475569", "#1d4ed8"
+APP = "#334155"   # the "plays the ride app" tag
 LAYER = {"bronze": "#b45309", "silver": "#64748b", "gold": "#ca8a04", "bad": "#dc2626", "job": "#7c3aed"}
 
 # Arial advance widths (1/1000 em). Close enough to the system sans fonts to catch overflowing text.
@@ -198,6 +199,14 @@ class Svg:
         for i, s in enumerate(lines):
             self.text(lx, ly - height / 2 + 15 + 16 * i, s, 11, "#334155", anchor="middle")
 
+    def tag(self, cx, cy, text, fill=APP):
+        """A dark pill, e.g. on a card's top edge, marking what a box stands for."""
+        w = text_width(text.upper(), 10, bold=True) * 1.08 + 0.6 * len(text) + 22
+        self.front.append(f'<rect x="{cx - w / 2:.1f}" y="{cy - 10}" width="{w:.1f}" height="20" rx="10" '
+                          f'fill="{fill}"/>')
+        self.front.append(f'<text x="{cx:.1f}" y="{cy + 4}" font-size="10" font-weight="700" fill="#ffffff" '
+                          f'text-anchor="middle" letter-spacing="0.6">{esc(text.upper())}</text>')
+
     @staticmethod
     def _along(points, at):
         segs = [(a, b, abs(b[0] - a[0]) + abs(b[1] - a[1])) for a, b in zip(points, points[1:], strict=False)]
@@ -336,7 +345,7 @@ def overview() -> Svg:
     s = Svg(1690, 630, "RidePulse at a glance",
             "Left: the stand-in for the rider and driver apps. Below: what a real ride-hailing platform runs.",
             name="overview")
-    s.group(28, 92, 820, 170, "Stand-in for the real apps", "standin", dashed=True, label_at="bottom")
+    s.group(28, 92, 820, 170, "Stand-in: plays the ride app", "standin", dashed=True, label_at="bottom")
     tlc = s.card(52, 140, "NYC TLC trip files", ["real trips, published", "monthly"], "s3", w=230)
     prep = s.card(330, 140, "Prep", ["5% sample, sliced", "by simulated time"], "actions", w=220)
     rep = s.card(598, 140, "Replayer", ["Lambda, plays trips at 10x:", "requests, pickups, GPS"], "lambda", w=230)
@@ -381,7 +390,7 @@ def context() -> Svg:
     s.front.append(f'<rect x="{rp.x}" y="{rp.y}" width="{rp.w}" height="{rp.h}" rx="16" fill="{SYSTEM}" '
                    f'filter="url(#shadow)"/>')
     s.text(rp.x + 28, rp.y + 46, "RidePulse", 22, "#ffffff", 800)
-    for i, line in enumerate(["replays real NYC trips as if live", "raises ops alerts in minutes",
+    for i, line in enumerate(["plays the ride app with real NYC trips", "raises ops alerts in minutes",
                               "builds the daily economics", "reconciles against the regulator"]):
         s.fits(line, 14, rp.w - 56)
         s.text(rp.x + 28, rp.y + 82 + 24 * i, line, 14, "#dbeafe")
@@ -408,14 +417,18 @@ def context() -> Svg:
 def containers() -> Svg:
     """C4 level 2: one box per thing that runs, grouped by where it runs."""
     s = Svg(1480, 1230, "Level 2: containers",
-            "One box per thing that runs, grouped by where it runs. Dashed: the second, query-based CDC path (ADR-0005).",
+            "One box per thing that runs, grouped by where it runs. Grey dashed box: plays the ride app. "
+            "Dashed line: the query-based CDC path (ADR-0005).",
             name="c4-containers")
     k0, k1, k2, k3, k5 = 40, 300, 590, 860, 1200
     t1, t2, t3, t4, t5, t6 = 212, 360, 508, 652, 844, 994
 
     src = s.solid(k1, 84, "NYC TLC + NOAA", ["public trip and weather files"], w=230, h=58, fill=EXTERNAL)
 
-    s.group(20, 168, 1145, 444, "Sources · the replayer stands in for the apps · AWS + Neon", "aws", label_x=448)
+    s.group(20, 168, 1145, 444, "Sources · AWS + Neon", "aws")
+    s.back.append('<rect x="28" y="200" width="1084" height="106" rx="14" fill="#f1f5f9" stroke="#64748b" '
+                  'stroke-width="1.5" stroke-dasharray="6 5"/>')
+    s.tag(700, 306, "Plays the ride app · stand-in")
     prep = s.card(k0, t1, "Prep job", ["GitHub Actions, monthly:", "contract, 5% sample,", "event-time slices"],
                   "actions", w=220, h=82)
     s3 = s.card(k1, t1, "S3 landing", ["raw files + ETag, slices,", "heat map, targets"], "s3", w=230, h=82, store=True)
@@ -479,6 +492,8 @@ def replayer_tick() -> Svg:
     top, bottom = 92, 790
     for ax, title, sub, icon in actors.values():
         s.card(ax - 105, top, title, [sub], icon, w=210, h=58)
+        if title == "Replayer":
+            s.tag(ax, top, "Plays the ride app")
         s.back.append(f'<path d="M {ax} {top + 58} V {bottom}" stroke="#cbd5e1" stroke-width="1.5" '
                       f'stroke-dasharray="4 4"/>')
     x = {k: v[0] for k, v in actors.items()}
@@ -583,7 +598,8 @@ def lakehouse() -> Svg:
 def production() -> Svg:
     """production.md: the same containers with every production difference applied."""
     s = Svg(1580, 1440, "Containers in production",
-            "The level 2 view with each production difference applied. Everything sits in private networks.",
+            "The level 2 view with each production difference applied. Ride app: the real services the "
+            "replayer stands in for.",
             name="production-containers")
     c = [50 + 260 * i for i in range(6)]
     a1, a2, a3, kr, d1, d2, d3, d4 = 212, 344, 476, 652, 830, 972, 1114, 1316
@@ -594,6 +610,8 @@ def production() -> Svg:
     gw = s.card(c[1], a1, "API gateway", ["auth, rate limits"], "apigateway", w=220, h=82)
     disp = s.card(c[2], a1, "Dispatch service", ["trips, assignment"], "ecs", w=220, h=82)
     ping = s.card(c[1], a2, "Ping gateway", ["GPS every 4 s"], "ecs", w=220, h=82)
+    for box in (gw, disp, ping):
+        s.tag(box.x + box.w - 52, box.y, "Ride app")
     aurora = s.card(c[2], a2, "Aurora PostgreSQL", ["Multi-AZ: trips,", "drivers, outbox"], "aurora", w=220, h=82,
                     store=True)
     reader = s.card(c[3], a2, "Aurora reader", ["read replica for", "query-based loads"], "aurora", w=220, h=82,
