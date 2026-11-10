@@ -1314,3 +1314,11 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
   three posts (congestion pricing, the silent-night postmortem, the snapshot rows a test saved), CV bullets and four
   STAR stories. Every number is a project measurement; two CV bullets were narrowed to what was measured (R1's
   false-alarm rate, the BCF tolerance). The recording is the owner's.
+
+### Diagrams made readable (owner review)
+- The README overview mixed the stand-in with the real flow (files -> S3 -> prep -> replayer looked like part of the
+  platform). Redrawn: the replayer and its prep are boxed as the stand-in for the rider and driver apps, and the
+  rest reads as what a real platform runs. Rendered and checked: no crossing lines.
+- c4.md: RideDesk (project 2) out of Level 1, which now says what each person gets; a "how to read it" line on
+  Levels 1, 2 and the lakehouse; the lakehouse diagram redrawn to what runs (it still said every 10 minutes and put
+  the alerts in the pipeline); Debezium is started and stopped, not destroyed, per window; Kafka's cost is eCKUs.
