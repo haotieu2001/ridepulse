@@ -143,74 +143,7 @@ It's configuration, not a rewrite.
 The same system as [`c4.md`](design/c4.md)'s level 2, with each difference above applied. Everything sits in private
 networks; arrows across accounts go over PrivateLink. The pipeline split follows "How the pipelines are split" (§1).
 
-```mermaid
-flowchart LR
-    apps["<b>Driver and rider apps</b><br/>mobile"]
-    tlc["<b>NYC TLC</b><br/>regulator"]
-
-    subgraph aws["AWS · per environment"]
-        gw["<b>API gateway</b><br/>auth, rate limits"]
-        disp["<b>Dispatch service</b><br/>trips, assignment"]
-        pinggw["<b>Ping gateway</b><br/>GPS every 4 s"]
-        aurora[("<b>Aurora PostgreSQL</b><br/>Multi-AZ · trips, drivers,<br/>outbox (ADR-0006)")]
-        reader[("<b>Aurora reader</b><br/>query-based loads")]
-        connect["<b>Kafka Connect, HA</b><br/>Debezium, outbox router"]
-        s3[("<b>S3, SSE-KMS</b><br/>raw files, Object Lock<br/>(ADR-0010)")]
-        pricing["<b>Pricing service</b><br/>reads surge in ms"]
-    end
-
-    subgraph bus["Confluent Cloud Enterprise · PrivateLink (ADR-0007)"]
-        kafka[["<b>Kafka</b><br/>trips.v1 · cdc.dispatch.*<br/>driver.locations.v1<br/>ops.alerts.v1 · *.dlq"]]
-        sr["<b>Schema Registry</b><br/>contracts, BACKWARD"]
-    end
-
-    subgraph lake["Databricks · a workspace per environment · NCC private endpoints"]
-        ing["<b>ingest_dispatch</b> +<br/><b>ingest_telemetry</b><br/>continuous: bronze, silver"]
-        sig["<b>ops_signals</b><br/>continuous, real-time<br/>supply, R1-R4<br/>(ADR-0008)"]
-        views["<b>ops_views</b><br/>triggered: KPIs,<br/>late events, alert list"]
-        files["<b>ingest_files</b><br/>Auto Loader, file events"]
-        gold["<b>gold_daily</b> + <b>ref</b><br/>jobs on table updates:<br/>gold, reconciliations"]
-        uc[("<b>Unity Catalog</b><br/>bronze · silver · gold<br/>ABAC, tags (ADR-0014)")]
-        lakebase[("<b>Lakebase</b><br/>synced surge table<br/>(ADR-0009)")]
-        bi["<b>AI/BI + Genie</b>"]
-        sub["<b>TLC submission</b><br/>monthly, signed off<br/>(ADR-0013)"]
-    end
-
-    subgraph ops["Operations"]
-        notif["<b>Alert router</b><br/>streams ops.alerts.v1"]
-        pager["<b>PagerDuty / Opsgenie</b><br/>by owner (ADR-0012)"]
-        obs["<b>Monitoring</b><br/>system tables, SLO burn,<br/>DQ monitors (ADR-0015)"]
-    end
-
-    apps --> gw
-    gw --> disp & pinggw
-    disp -- "one transaction:<br/>state + outbox" --> aurora
-    aurora -- "WAL" --> connect
-    aurora -. "replica" .-> reader
-    pinggw -- "Avro" --> kafka
-    connect -- "events, CDC" --> kafka
-    kafka --- sr
-    kafka --> ing
-    reader -. "reference pulls" .-> gold
-    s3 --> files
-    ing & files & gold --> uc
-    uc --> sig & views & bi & sub
-    sig -- "alerts" --> kafka
-    sig --> lakebase
-    lakebase --> pricing
-    kafka -- "ops.alerts.v1" --> notif
-    notif --> pager
-    uc --> obs
-    obs --> pager
-    sub --> tlc
-
-    classDef store fill:#1168bd,stroke:#0b4884,color:#fff
-    classDef box fill:#438dd5,stroke:#2e6295,color:#fff
-    classDef ext fill:#6b6b6b,stroke:#4d4d4d,color:#fff
-    class aurora,reader,s3,kafka,uc,lakebase store
-    class gw,disp,pinggw,connect,pricing,sr,ing,sig,views,files,gold,bi,sub,notif,pager,obs box
-    class apps,tlc ext
-```
+![Containers in production](design/diagrams/production-containers.svg)
 
 | Container | Replaces here | Owner |
 |---|---|---|

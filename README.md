@@ -19,35 +19,11 @@ It runs on free tiers (Databricks Free Edition, Neon, Confluent Basic, AWS) for 
 that falls short of production is written down, with the reason and the production design
 ([production.md](docs/production.md)).
 
-How to read it: the **left box stands in for the rider and driver apps** a real company would have. It replays real
-TLC trips through the dispatch database as if they were happening now. Everything to its right is what a real
+How to read it: the **top box stands in for the rider and driver apps** a real company would have. It replays real
+TLC trips through the dispatch database as if they were happening now. Everything in the box below is what a real
 ride-hailing platform runs: the dispatch database, CDC into Kafka, the lakehouse, and the alerts.
 
-```mermaid
-flowchart LR
-    subgraph standin["Stand-in for the real apps"]
-        tlc["NYC TLC trip files<br/>(real trips)"] --> prep["Prep<br/>5% sample, sliced<br/>by time"]
-        prep --> rep["Replayer<br/>plays the trips at 10x:<br/>requests, pickups, dropoffs,<br/>driver GPS"]
-    end
-
-    subgraph live["What a real platform runs"]
-        pg[("Dispatch database<br/>Postgres")]
-        dbz["Debezium<br/>reads every change"]
-        kafka[["Kafka"]]
-        stream["Streaming pipeline<br/>bronze, silver,<br/>rules R1-R4"]
-        uc[("Lakehouse<br/>bronze, silver, gold")]
-        daily["Daily job<br/>gold, reconciliations"]
-        notif["Notifier<br/>emails ops on-call"]
-    end
-
-    rep -- "trips, drivers" --> pg
-    rep -- "GPS pings" --> kafka
-    pg --> dbz --> kafka --> stream --> uc
-    tlc -. "the regulator's file,<br/>for reconciliation" .-> daily
-    uc <--> daily
-    stream -- "alerts" --> notif
-    uc --> bi["Dashboard + Genie<br/>analysts, finance"]
-```
+![RidePulse at a glance: the replayer stands in for the apps; below it, what a real platform runs](docs/design/diagrams/overview.svg)
 
 The detailed diagrams are in [c4.md](docs/design/c4.md); the production design in [production.md](docs/production.md).
 
