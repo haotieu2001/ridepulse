@@ -1322,3 +1322,10 @@ Plans this builds from: `ridepulse-project-plan-v6.html` (project 1) and
 - c4.md: RideDesk (project 2) out of Level 1, which now says what each person gets; a "how to read it" line on
   Levels 1, 2 and the lakehouse; the lakehouse diagram redrawn to what runs (it still said every 10 minutes and put
   the alerts in the pipeline); Debezium is started and stopped, not destroyed, per window; Kafka's cost is eCKUs.
+
+### Diagrams as SVG with service icons (owner review)
+- Every mermaid diagram (README overview, C4 Levels 1-3, production containers, both ERDs) redrawn as an SVG built by
+  `docs/design/diagrams/build.py` (`make diagrams`, standard library only): the vendors' service icons embedded, so they
+  show on GitHub and offline; laid out by hand on a grid, then rendered and checked for crossing lines and overlapping
+  labels. The builder warns when a text is wider than its box. The ERDs use crow's-foot ends with a legend; the
+  replayer tick is a sequence diagram with its Postgres transaction shaded.
