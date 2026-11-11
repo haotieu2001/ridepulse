@@ -14,22 +14,6 @@
   --shadow: 0 1px 2px rgba(15, 23, 42, .06), 0 1px 3px rgba(15, 23, 42, .08);
   color-scheme: light;
 }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #0b1120; --surface: #111827; --surface-2: #1e293b; --text: #e5e7eb; --muted: #9ca3af; --faint: #94a3b8;
-    --border: #1f2937; --border-strong: #334155; --accent: #93c5fd; --accent-soft: #172554; --code-bg: #1e293b;
-    --ok: #6ee7b7; --ok-soft: #052e22; --ok-line: #065f46; --warn: #fcd34d; --warn-soft: #2b1d05; --warn-line: #78350f;
-    --bad: #fca5a5; --bad-soft: #2a0f0f; --bad-line: #7f1d1d; --info: #bfdbfe; --info-soft: #0f1d3d; --info-line: #1e3a8a;
-    --shadow: none; color-scheme: dark;
-  }
-}
-:root[data-theme="dark"] {
-  --bg: #0b1120; --surface: #111827; --surface-2: #1e293b; --text: #e5e7eb; --muted: #9ca3af; --faint: #94a3b8;
-  --border: #1f2937; --border-strong: #334155; --accent: #93c5fd; --accent-soft: #172554; --code-bg: #1e293b;
-  --ok: #6ee7b7; --ok-soft: #052e22; --ok-line: #065f46; --warn: #fcd34d; --warn-soft: #2b1d05; --warn-line: #78350f;
-  --bad: #fca5a5; --bad-soft: #2a0f0f; --bad-line: #7f1d1d; --info: #bfdbfe; --info-soft: #0f1d3d; --info-line: #1e3a8a;
-  --shadow: none; color-scheme: dark;
-}
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; scroll-padding-top: 16px; -webkit-text-size-adjust: 100%; }
 body {
@@ -54,11 +38,11 @@ pre code { background: none; padding: 0; font-size: .84rem; overflow-wrap: norma
 .logo { display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 9px; background: #1d4ed8;
         color: #fff; font-size: .8rem; letter-spacing: .5px; }
 .side-tools { display: flex; gap: 8px; margin: 14px 0 10px; }
-.side-tools .lang, .side-tools .theme {
+.side-tools .lang {
   font: inherit; font-size: .82rem; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text);
   border-radius: 8px; padding: 4px 10px; text-decoration: none; cursor: pointer;
 }
-.side-tools .lang:hover, .side-tools .theme:hover { border-color: var(--accent); }
+.side-tools .lang:hover { border-color: var(--accent); }
 .toc-wrap > summary { font-size: .74rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
                       color: var(--faint); cursor: pointer; padding: 6px 0; list-style: none; }
 .toc-wrap > summary::-webkit-details-marker { display: none; }
@@ -197,7 +181,6 @@ details.more > :last-child { margin-bottom: 14px; }
 <div class="brand"><span class="logo" aria-hidden="true">RP</span><span>RidePulse</span></div>
 <div class="side-tools">
 <a class="lang" href="index.vi.html" hreflang="vi">Tiếng Việt</a>
-<button class="theme" type="button" aria-label="Theme" title="Theme">&#x25D0;</button>
 </div>
 <details class="toc-wrap" open>
 <summary>Contents</summary>
@@ -1406,20 +1389,6 @@ could do too much, and Kafka billing at five times the budget.</p>
 <dialog class="lightbox"><div class="lb-bar"><span class="lb-title"></span><button type="button" class="lb-close">Close &#x2715;</button></div><div class="lb-body"></div></dialog>
 <script>
 (function () {
-  var root = document.documentElement;
-  try {
-    var saved = localStorage.getItem("rp-theme");
-    if (saved === "light" || saved === "dark") root.setAttribute("data-theme", saved);
-  } catch (e) {}
-  var themeBtn = document.querySelector(".theme");
-  if (themeBtn) themeBtn.addEventListener("click", function () {
-    var dark = root.getAttribute("data-theme") === "dark" ||
-      (!root.getAttribute("data-theme") && window.matchMedia("(prefers-color-scheme: dark)").matches);
-    var next = dark ? "light" : "dark";
-    root.setAttribute("data-theme", next);
-    try { localStorage.setItem("rp-theme", next); } catch (e) {}
-  });
-
   // Diagrams: open at natural size in a dialog.
   var box = document.querySelector(".lightbox");
   var body = box.querySelector(".lb-body");
