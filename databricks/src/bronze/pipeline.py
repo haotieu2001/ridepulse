@@ -30,7 +30,7 @@ PING_SCHEMA_IDS = [int(i) for i in conf.get("ridepulse.ping_schema_ids").split("
 # The simulated clock is TIMESTAMP_NTZ (the TLC's wall clock, no zone), which Delta enables only on request.
 NTZ = {"delta.feature.timestampNtz": "supported"}
 EVENT_TYPES = ["TripRequested", "DriverAssigned", "TripStarted", "TripCompleted"]
-# A new Kafka cluster (a new Confluent account, docs/runbooks/confluent-new-account.md) gets a flow suffix: a new
+# A new Kafka cluster (a new Confluent account, docs/index.html#rb-confluent) gets a flow suffix: a new
 # flow has its own checkpoint, so it reads the new cluster from its start, and appends to the same bronze tables, so
 # no history is lost. Empty is the first cluster: the flow names Lakeflow gave these tables when they were created.
 FLOW_SUFFIX = conf.get("ridepulse.kafka.flow_suffix", "")

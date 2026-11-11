@@ -1,5 +1,5 @@
 variable "edition" {
-  description = "free: this project (Free Edition, Confluent Basic, one EC2). paid: the production design (docs/production.md, ADR-0007, ADR-0010). Changing it is planned, then applied through break-glass (it replaces resources)."
+  description = "free: this project (Free Edition, Confluent Basic, one EC2). paid: the production design (docs/index.html#production, ADR-0007, ADR-0010). Changing it is planned, then applied through break-glass (it replaces resources)."
   type        = string
   default     = "free"
   validation {

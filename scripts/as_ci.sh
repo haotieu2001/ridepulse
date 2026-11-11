@@ -3,7 +3,7 @@
 # else would make them the jobs' owner, and only an admin can give ownership back. The OAuth pair comes from SSM
 # (written by infra/terraform/databricks) into this process's environment only; nothing is printed or stored.
 #
-# Usage: scripts/as_ci.sh databricks bundle deploy -t dev      (break-glass: docs/runbooks/break-glass-deploy.md)
+# Usage: scripts/as_ci.sh databricks bundle deploy -t dev      (break-glass: docs/index.html#rb-break-glass)
 set -euo pipefail
 [ $# -gt 0 ] || { echo "usage: scripts/as_ci.sh COMMAND [ARGS...]" >&2; exit 2; }
 profile="${AWS_PROFILE:-ridepulse}"

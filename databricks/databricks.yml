@@ -25,7 +25,7 @@ targets:
     # empty name_prefix. The catalog already separates environments, so the
     # plain names the plan uses (ridepulse_dev.raw.tlc) stay.
     # Deployed by CI as ridepulse-ci after the `live` approval (deploy.yml, #78), or from a laptop as break-glass
-    # (docs/runbooks/break-glass-deploy.md). One deployment either way: the root path is pinned to where it has always
+    # (docs/index.html#rb-break-glass). One deployment either way: the root path is pinned to where it has always
     # lived, and the host (not a CLI profile) is all CI has; a laptop's CLI picks its profile for this host.
     workspace:
       host: https://dbc-f915d382-6d5f.cloud.databricks.com

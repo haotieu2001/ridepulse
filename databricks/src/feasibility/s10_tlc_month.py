@@ -2,7 +2,7 @@
 
 Reads the month's Parquet file from the TLC Volume (uploaded with `make s10-upload`), writes it to
 bronze, and prints row counts and timings. Pass means the job finishes and the row counts match.
-Record the result in docs/feasibility.md.
+Recorded in docs/index.html#phase0.
 """
 import argparse
 import json

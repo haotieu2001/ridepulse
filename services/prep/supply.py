@@ -8,7 +8,7 @@ to the slices, so the replayer stays a stateless per-minute Lambda:
                  driver signing on starts, drawn with a hash of driver and time
 
 A driver is busy from DriverAssigned to TripCompleted as they replay (the ADR-0004 schedule). The
-reference is docs/design/supply/simulate_supply.py; services/prep/tests/test_supply.py holds them equal.
+reference is scripts/design/supply/simulate_supply.py; services/prep/tests/test_supply.py holds them equal.
 """
 from __future__ import annotations
 
@@ -67,7 +67,7 @@ def staffing(t: pa.Table, schedule, target_utilisation: float) -> dict[str, dict
     """{hour: {peak_busy, online_target}} for each hour in which a driver goes busy or free. Peak is the
     highest count right after a change in that hour, as in the simulator: drivers carried into an hour
     count only until its first change. Counting them changes 9 of January 2025's 747 targets, by at
-    most 5 drivers (docs/journal.md), and emergency sign-on covers a shortfall."""
+    most 5 drivers (docs/index.html#supply), and emergency sign-on covers a shortfall."""
     if not 0 < target_utilisation <= 1:
         raise ValueError(f"target utilisation must be in (0, 1], got {target_utilisation}")
     delta: Counter = Counter()

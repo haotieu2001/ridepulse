@@ -6,7 +6,7 @@
 --   INSERT INTO dispatch.debezium_signal (id, type, data)
 --   VALUES (gen_random_uuid()::text, 'execute-snapshot', '{"data-collections": ["dispatch.<table>"], "type": "incremental"}');
 --
--- docs/runbooks/onboard-cdc-table.md has the whole procedure.
+-- docs/index.html#rb-onboard has the whole procedure.
 CREATE TABLE debezium_signal (
   id   varchar(64) PRIMARY KEY,
   type varchar(32) NOT NULL,

@@ -1,6 +1,6 @@
 # Phase 0 feasibility tests: how to re-run them
 
-Results and findings are in [docs/feasibility.md](../../docs/feasibility.md). Run from the repo root
+Results and findings are in [docs/index.html#phase0](../../docs/index.html#phase0). Run from the repo root
 with the `ridepulse` Databricks CLI profile logged in.
 
 `sql.sh FILE.sql` runs one SQL statement on the SQL warehouse (one statement per file).
@@ -41,7 +41,7 @@ databricks apps delete ridepulse-hello --profile ridepulse    # frees one of the
 ```
 
 ## S9 · Lakeflow Connect query-based pull from Neon
-Needs the Neon URL in SSM `/ridepulse/dev/neon/url` (see docs/journal.md for how to store it safely).
+Needs the Neon URL in SSM `/ridepulse/dev/neon/url` (see docs/index.html#secrets for how to store it safely).
 ```bash
 scripts/feasibility/neon.sh scripts/feasibility/s9_neon_setup.sql          # test table in Neon
 scripts/feasibility/neon_secret_to_databricks.sh                             # password -> secret scope

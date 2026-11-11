@@ -1,4 +1,4 @@
-"""Gold (#29): the star schema of docs/design/erd.md §2, with Unity Catalog keys and the metric view for Genie.
+"""Gold (#29): the star schema of docs/index.html#gold, with Unity Catalog keys and the metric view for Genie.
 
     fct_trips          one row per trip, from silver.tlc_trips; driver_sk for the trips the stream replayed
     fct_driver_shifts  one row per driver shift, from the driver state history (CDC, path B)
@@ -373,7 +373,7 @@ def agg_recon_daily(completeness: DataFrame, payouts: DataFrame | None, fees: Da
 MARTS = ["agg_zone_hourly", "agg_daily_economics", "agg_driver_weekly", "agg_cbd_impact", "recon_completeness", "recon_payouts",
          "recon_fees", "agg_recon_daily"]
 # Account-level groups: Unity Catalog grants only to those, and Free Edition makes them through the workspace's
-# /api/2.0/account/scim/v2 (no account console). docs/security.md has how they were made.
+# /api/2.0/account/scim/v2 (no account console). docs/index.html#security has how they were made.
 OPS_GROUP = "ridepulse-ops"   # may see per-driver rows (NFR-9, #38)
 PII = ["dim_driver", "fct_driver_shifts", "recon_payouts"]   # driver_id tagged pii: NULL outside ops; agg_driver_weekly is row-filtered
 PRIMARY = {"dim_zone": "zone_id", "dim_provider": "provider_code", "dim_date": "date", "dim_hour": "hour",
@@ -528,7 +528,7 @@ class Gold:
 
         - Columns tagged pii = driver_id read as NULL outside ridepulse-ops: one ABAC policy on the gold schema, so a new
           table is covered by tagging its column (consumers group by driver_sk instead). The governed tag `pii` is a
-          tag policy made once through /api/2.1/tag-policies (docs/security.md).
+          tag policy made once through /api/2.1/tag-policies (docs/index.html#security).
         - agg_driver_weekly shows a driver only their own rows, through ops.driver_accounts (user -> driver; empty here,
           the drivers are synthetic). Its driver_id isn't tagged: a driver sees their own id.
         - Consumers read gold only: finance for the economics and reconciliations, RideDesk (project 2) for its support

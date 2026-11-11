@@ -427,7 +427,7 @@ REEMIT_REACH = timedelta(hours=24)
 
 def reemit(conn: psycopg.Connection, store: Store, after: datetime, until: datetime, *, require_slot: str | None = None) -> Counter:
     """Write the trip events of the ticks in (after, until] to the outbox again, exactly as they were written: the
-    repair after a dropped replication slot lost them (NFR-4, docs/runbooks/slot-dropped.md).
+    repair after a dropped replication slot lost them (NFR-4, docs/index.html#rb-slot).
 
     The transitions are guarded and in order, so a trip that has reached a status applied every event up to it, once;
     the events come from the same slices and stadium copies, and the driver from the trip's row. The same ids,

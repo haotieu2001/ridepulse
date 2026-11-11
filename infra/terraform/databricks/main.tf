@@ -69,7 +69,7 @@ resource "databricks_permission_assignment" "group" {
 
 # Membership is not here: an account group's members can only change at the account level ("can only be managed in
 # account"), and with no account console the provider's account API answers Not Found. It's one CLI call, the one
-# #38 used (docs/security.md):
+# #38 used (docs/index.html#security):
 #
 #   databricks api patch /api/2.0/account/scim/v2/Groups/<group id> --json '{"schemas":
 #     ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],"Operations":[{"op":"add","path":"members","value":[{"value":"<id>"}]}]}'

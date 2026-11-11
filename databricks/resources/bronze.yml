@@ -38,7 +38,7 @@ resources:
         ridepulse.secret_scope: ridepulse
         ridepulse.ping_schema_path: ${workspace.file_path}/src/bronze/driver_location.avsc
         ridepulse.ping_schema_ids: "100002"
-        # A new Kafka cluster gets a new suffix, e.g. "_c2": docs/runbooks/confluent-new-account.md.
+        # A new Kafka cluster gets a new suffix, e.g. "_c2": docs/index.html#rb-confluent.
         ridepulse.kafka.flow_suffix: ""
         ridepulse.catalog: ${var.catalog}
         ridepulse.silver_dir: ${workspace.file_path}/src/silver

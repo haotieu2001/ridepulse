@@ -14,7 +14,7 @@ YEAR        ?= 2025
 
 export AWS_PROFILE
 
-.PHONY: help identity-plan identity-apply ci-secret bootstrap-plan bootstrap-apply landing-plan landing-apply confluent-plan confluent-apply debezium-plan debezium-up debezium-down build-lambdas replayer-plan replayer-apply up down window-status replay bronze land-month forward files refpull gold land-zones land-noaa prep db-status db-migrate db-test db-seed catalog deploy s10-upload s10-run s10 diagrams
+.PHONY: help identity-plan identity-apply ci-secret bootstrap-plan bootstrap-apply landing-plan landing-apply confluent-plan confluent-apply debezium-plan debezium-up debezium-down build-lambdas replayer-plan replayer-apply up down window-status replay bronze land-month forward files refpull gold land-zones land-noaa prep db-status db-migrate db-test db-seed catalog deploy s10-upload s10-run s10
 
 help:
 	@echo "bootstrap-plan / bootstrap-apply  Terraform: state bucket, GitHub OIDC role, budget"
@@ -38,7 +38,6 @@ help:
 	@echo "db-seed [DRIVERS=N]               zones and fare rules on the dev Neon database"
 	@echo "catalog                           create the $(CATALOG) catalog (once)"
 	@echo "deploy                            break-glass: the dev bundle as ridepulse-ci (CI deploys it after approval)"
-	@echo "diagrams                          rebuild the architecture SVGs in docs/design/diagrams"
 	@echo "identity-plan / identity-apply    Databricks identities, secrets and grants (infra/terraform/databricks)"
 	@echo "ci-secret                         copy the CI secret from SSM into the GitHub repository secret"
 	@echo "s10                               feasibility test S10: one TLC month into bronze"
@@ -161,7 +160,7 @@ catalog:
 	    | jq -e '.status.state == "SUCCEEDED"' >/dev/null && echo "created catalog $(CATALOG)"; }
 
 # Break-glass (#78): dev is deployed by deploy.yml after the `live` approval. By hand, it runs as the same identity,
-# ridepulse-ci (scripts/as_ci.sh), which owns the jobs: docs/runbooks/break-glass-deploy.md.
+# ridepulse-ci (scripts/as_ci.sh), which owns the jobs: docs/index.html#rb-break-glass.
 # The window Lambda finds the two jobs by the ids published here (#25). A deploy resets both to the bundle's PAUSED,
 # so if a window is open (the replayer's schedule on) it's opened again, which unpauses them.
 deploy:
@@ -199,6 +198,3 @@ s10-run:
 	cd databricks && databricks bundle run -t dev s10_tlc_month
 
 s10: catalog deploy s10-upload s10-run
-
-diagrams:
-	uv run python docs/design/diagrams/build.py

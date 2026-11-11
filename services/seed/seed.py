@@ -3,7 +3,7 @@
     make db-seed                     # zones + fare rules on the dev Neon database
     make db-seed DRIVERS=100         # plus the first 100 synthetic drivers
 
-Zones come from the landed TLC lookup, fee rates from ref/fare_rules.csv (docs/DATA_SOURCES.md). Rerunning
+Zones come from the landed TLC lookup, fee rates from ref/fare_rules.csv (docs/index.html#data). Rerunning
 changes nothing: a row is written only if it is new or differs, so updated_at (path C's cursor) stays put.
 
 Drivers are not seeded by default. The pool is an output of the replay (ADR-0003): it starts empty and

@@ -1,5 +1,5 @@
 """The supply model: its rules one by one, then the same assignments as simulate_supply.py on a crafted
-month that exercises shifts, repositioning and the awkward trips. The real month is docs/design/supply/parity.py."""
+month that exercises shifts, repositioning and the awkward trips. The real month is scripts/design/supply/parity.py."""
 import importlib.util
 import json
 import pathlib
@@ -157,7 +157,7 @@ def crafted_month(n=1500):
 
 
 def test_the_same_driver_for_every_trip_as_the_simulator(tmp_path, monkeypatch):
-    spec = importlib.util.spec_from_file_location("simulate_supply", ROOT / "docs/design/supply/simulate_supply.py")
+    spec = importlib.util.spec_from_file_location("simulate_supply", ROOT / "scripts/design/supply/simulate_supply.py")
     sim = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(sim)
     rows = crafted_month()

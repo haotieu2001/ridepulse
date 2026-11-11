@@ -1,6 +1,6 @@
 """Replay through the real slices, inputs, window walk and supply model with no database: driver state goes
 through plain rows between ticks, as it does through dispatch.drivers. For comparing with the simulator over
-a whole month, which at about 5 s a tick on Neon would take hours. docs/design/supply/parity.py uses it."""
+a whole month, which at about 5 s a tick on Neon would take hours. scripts/design/supply/parity.py uses it."""
 from __future__ import annotations
 
 from dataclasses import astuple
