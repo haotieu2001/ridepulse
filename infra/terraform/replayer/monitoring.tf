@@ -5,7 +5,7 @@
 # window writes a few MB per simulated hour (sizing.md), so crossing it means Debezium has stopped reading.
 resource "aws_cloudwatch_metric_alarm" "slot_wal" {
   alarm_name          = "ridepulse-slot-retained-wal"
-  alarm_description   = "Debezium's replication slot holds over 256 MB of WAL: is Debezium reading? docs/runbooks/debezium-killed.md"
+  alarm_description   = "Debezium's replication slot holds over 256 MB of WAL: is Debezium reading? docs/index.html#rb-debezium"
   namespace           = "RidePulse"
   metric_name         = "SlotRetainedWalBytes"
   dimensions          = { Slot = "ridepulse_debezium" }
@@ -22,7 +22,7 @@ resource "aws_cloudwatch_metric_alarm" "slot_wal" {
 # The slot inactive for 5 minutes while the replayer ticks: the ticks wait (CdcNotReady), the window does nothing.
 resource "aws_cloudwatch_metric_alarm" "slot_inactive" {
   alarm_name          = "ridepulse-slot-inactive"
-  alarm_description   = "Debezium's slot inactive for 5 min during a window: ticks are waiting. docs/runbooks/debezium-killed.md"
+  alarm_description   = "Debezium's slot inactive for 5 min during a window: ticks are waiting. docs/index.html#rb-debezium"
   namespace           = "RidePulse"
   metric_name         = "SlotActive"
   dimensions          = { Slot = "ridepulse_debezium" }

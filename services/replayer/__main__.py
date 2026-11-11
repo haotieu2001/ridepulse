@@ -51,7 +51,7 @@ def main() -> int:
     t.add_argument("--no-slot-check", action="store_true",
                    help="tick even with nothing reading the WAL: its trip events are lost if the slot goes (the #24 drill)")
     r = sub.add_parser("reemit", help="write the trip events of ticks in (FROM, TO] to the outbox again, after a dropped "
-                                      "slot lost them (docs/runbooks/slot-dropped.md)")
+                                      "slot lost them (docs/index.html#rb-slot)")
     r.add_argument("after", metavar="FROM", type=datetime.fromisoformat, help="simulated time, exclusive")
     r.add_argument("until", metavar="TO", type=datetime.fromisoformat, help="simulated time, inclusive")
     r.add_argument("--slot", default="ridepulse_debezium", help="refuse unless this replication slot is active")

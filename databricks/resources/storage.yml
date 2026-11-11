@@ -19,7 +19,7 @@ resources:
     gold:
       catalog_name: ${var.catalog}
       name: gold
-      comment: The star schema (docs/design/erd.md §2) with its keys, and the metric view for Genie.
+      comment: The star schema (docs/index.html#gold) with its keys, and the metric view for Genie.
     ops:
       catalog_name: ${var.catalog}
       name: ops

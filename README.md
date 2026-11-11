@@ -17,15 +17,17 @@ Everything is code: Terraform, Databricks Asset Bundles, contracts, tests, and a
 
 It runs on free tiers (Databricks Free Edition, Neon, Confluent Basic, AWS) for a few dollars a month. Every place where
 that falls short of production is written down, with the reason and the production design
-([production.md](docs/production.md)).
+([the production design](docs/index.html#production)).
 
 How to read it: the **top box stands in for the rider and driver apps** a real company would have. It replays real
 TLC trips through the dispatch database as if they were happening now. Everything in the box below is what a real
 ride-hailing platform runs: the dispatch database, CDC into Kafka, the lakehouse, and the alerts.
 
-![RidePulse at a glance: the replayer stands in for the apps; below it, what a real platform runs](docs/design/diagrams/overview.svg)
+![RidePulse at a glance: the replayer stands in for the apps; below it, what a real platform runs](docs/overview.svg)
 
-The detailed diagrams are in [c4.md](docs/design/c4.md); the production design in [production.md](docs/production.md).
+Everything else, from requirements and every layer to the 15 architecture decisions, runbooks, cost and the production
+design, is one page with all the diagrams: [docs/index.html](docs/index.html) (English) and
+[docs/index.vi.html](docs/index.vi.html) (Vietnamese). Open it in a browser; the section links below point into it.
 
 ## Results
 
@@ -33,19 +35,19 @@ All measured, on real runs. The evidence is linked.
 
 | What | Result | Evidence |
 |---|---|---|
-| Surge alert latency, request commit in Postgres to email | R1 p50 **15.2 min**, p95 **19.1 min** (R3 p95 18.1; R2 27.2, waiting its join by design). Free Edition's ~20-minute limit per pipeline update rules out continuous mode; the 12-minute target is the production one | [journal #25](docs/journal.md), [ADR-0008](docs/adr/0008-streaming-latency.md) |
-| Injected incidents detected | **8 of 8**, each in its first window: stadium surges, app outages, late pings. False alarms on clean windows: R1 1.2%, R2 1.1%, R4 0.1% | [journal #25](docs/journal.md) |
-| Debezium killed, replication slot dropped | **0 events lost or repeated** after recovery | [slot-dropped.md](docs/runbooks/slot-dropped.md), [debezium-killed.md](docs/runbooks/debezium-killed.md) |
-| Log-based vs query-based CDC | Debezium saw **76 of 76** planted changes; a cursor-based pull **56 of 76** (no intermediate versions, no deletes) | [ADR-0005](docs/adr/0005-log-based-vs-query-based-cdc.md) |
-| Silver against the dispatch database | **Equal:** 293,213 events, 2,834 drivers, none missing, extra or repeated | [rebuild.md](docs/runbooks/rebuild.md) |
-| Stream against the regulator's file | every replayed trip found once in the TLC file, copies excluded; the BCF within 2% a day, flat fees exact | [journal #30](docs/journal.md) |
-| Platform rebuilt from code (Debezium destroyed with its slot) | healthy end to end in **12.5 min**, target 30 | [rebuild.md](docs/runbooks/rebuild.md) |
-| A table onboarded to CDC with its existing rows | **27 of 27** rows by incremental snapshot, none quarantined | [onboard-cdc-table.md](docs/runbooks/onboard-cdc-table.md) |
-| Driver data outside ops | **0 driver ids** visible to a finance user; own rows only for a driver; silver, bronze and ops denied | [security.md](docs/security.md) |
-| Cost | **$0.95** billed for November 1-8 (AWS). The surprise was Kafka capacity, now capped: ~$50/month avoided | [cost.md](docs/cost.md) |
+| Surge alert latency, request commit in Postgres to email | R1 p50 **15.2 min**, p95 **19.1 min** (R3 p95 18.1; R2 27.2, waiting its join by design). Free Edition's ~20-minute limit per pipeline update rules out continuous mode; the 12-minute target is the production one | [alert latency](docs/index.html#alert-latency), [ADR-0008](docs/index.html#adr) |
+| Injected incidents detected | **8 of 8**, each in its first window: stadium surges, app outages, late pings. False alarms on clean windows: R1 1.2%, R2 1.1%, R4 0.1% | [the four rules](docs/index.html#rules) |
+| Debezium killed, replication slot dropped | **0 events lost or repeated** after recovery | [drills](docs/index.html#drills) |
+| Log-based vs query-based CDC | Debezium saw **76 of 76** planted changes; a cursor-based pull **56 of 76** (no intermediate versions, no deletes) | [two CDC paths](docs/index.html#paths) |
+| Silver against the dispatch database | **Equal:** 293,213 events, 2,834 drivers, none missing, extra or repeated | [rebuild runbook](docs/index.html#rb-rebuild) |
+| Stream against the regulator's file | every replayed trip found once in the TLC file, copies excluded; the BCF within 2% a day, flat fees exact | [reconciliations](docs/index.html#recon) |
+| Platform rebuilt from code (Debezium destroyed with its slot) | healthy end to end in **12.5 min**, target 30 | [rebuild runbook](docs/index.html#rb-rebuild) |
+| A table onboarded to CDC with its existing rows | **27 of 27** rows by incremental snapshot, none quarantined | [onboarding runbook](docs/index.html#rb-onboard) |
+| Driver data outside ops | **0 driver ids** visible to a finance user; own rows only for a driver; silver, bronze and ops denied | [security](docs/index.html#security) |
+| Cost | **$0.95** billed for November 1-8 (AWS). The surprise was Kafka capacity, now capped: ~$50/month avoided | [cost](docs/index.html#cost) |
 
 What went wrong along the way is written down too, for example a 36-hour stretch with no alerts:
-[postmortem](docs/postmortems/2026-11-06-alerts-stopped.md).
+[postmortem](docs/index.html#postmortem).
 
 ## How it's built
 
@@ -57,7 +59,7 @@ What went wrong along the way is written down too, for example a 36-hour stretch
 | Lakehouse | one streaming pipeline (bronze, silver, supply, rules), file ingest, the daily gold job, views | `databricks/` |
 | Serving | AI/BI dashboard, Genie space, a metric view | `databricks/src/bi/` |
 | Platform | AWS (Lambdas, S3, SNS, EventBridge), Databricks identities and grants, CI and gated deploys | `infra/terraform/`, `.github/workflows/` |
-| Decisions | 15 ADRs, runbooks, a postmortem, the journal of every step | `docs/` |
+| Documentation | requirements, design, 15 ADRs, runbooks, a postmortem and the build history, in one page (English and Vietnamese) | `docs/` |
 
 Quality gates on every PR:
 - lint, unit, Spark and Postgres tests, and pyright;
@@ -66,13 +68,13 @@ Quality gates on every PR:
 - Terraform plans.
 
 A merge deploys stg, smoke-tests it, and waits for an approval before anything live changes
-([break-glass-deploy.md](docs/runbooks/break-glass-deploy.md)).
+([break-glass](docs/index.html#rb-break-glass)).
 
 ## Run it
 
 Prerequisites: an AWS account with an SSO profile `ridepulse`, a Databricks workspace with a CLI profile `ridepulse`,
 a Neon project, a Confluent Cloud account, Terraform 1.17, and `uv`. Setting up a machine is in
-[new-laptop.md](docs/new-laptop.md).
+[setting up a laptop](docs/index.html#setup).
 
 ```bash
 make bootstrap-plan && make bootstrap-apply   # state bucket, GitHub OIDC roles, budget (once)
@@ -97,4 +99,4 @@ After that, changes go through a PR: a merge deploys stg and, after an approval,
 
 Real: NYC TLC trip records and zones, NOAA daily weather. Synthetic: the drivers, their pings, the dispatch
 timeline, injected incidents and payout files. Which versions, and what exactly is made up:
-[DATA_SOURCES.md](docs/DATA_SOURCES.md). Trip data: NYC Taxi and Limousine Commission, via NYC Open Data.
+[the data](docs/index.html#data). Trip data: NYC Taxi and Limousine Commission, via NYC Open Data.

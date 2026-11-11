@@ -1,7 +1,7 @@
 # The ops rules' thresholds as data (FR-10): published as ref.ops_rules and read by the rules (#20), so tuning one is a
 # config change, not a code change. Windows are simulated time. Each surge area is a zone plus its neighbours
 # (ref.surge_areas). "status: calibrated (#25)" values were set from a replay of 2025-01-08 with injected incidents
-# (docs/journal.md #25): the alarm rate on windows no incident touched, against catching every incident.
+# (docs/index.html#rules): the alarm rate on windows no incident touched, against catching every incident.
 
 R1_surge:
   description: requests per idle driver in a surge area

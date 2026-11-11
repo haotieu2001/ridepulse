@@ -2,7 +2,7 @@
 
 - trip events: every trip in Neon implies its events up to its status (the transitions are guarded and in order),
   with deterministic ids (V001). Missing ones were lost; extra or repeated ones are duplicates. For missing events it
-  prints the simulated time range and the re-emit to run (docs/runbooks/slot-dropped.md).
+  prints the simulated time range and the re-emit to run (docs/index.html#rb-slot).
 - driver state: silver.driver_state against Neon's drivers, row for row (the snapshot after a lost slot repairs it).
 
 Run it with the replayer stopped and once the pipeline has caught up with Kafka, or the newest events read as missing:

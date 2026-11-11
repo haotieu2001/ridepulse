@@ -2,7 +2,7 @@
 
 On the first Sunday of November New York's clocks go from 01:59:59 EDT back to 01:00:00 EST, so 01:00-01:59 is lived
 twice and the file, with no offset, gives both the same timestamps. Measured on November 2024
-(docs/design/clock/measure_dst.py): the 01:00 hour holds 64,183 pickups (33,512 the next Sunday), and 9,829 trips have
+(scripts/design/clock/measure_dst.py): the 01:00 hour holds 64,183 pickups (33,512 the next Sunday), and 9,829 trips have
 a wall-clock duration exactly an hour shorter than their reported trip_time: they ended after the clocks went back
 (9,653 of them "before" their pickup).
 

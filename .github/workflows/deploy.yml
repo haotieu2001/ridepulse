@@ -5,10 +5,10 @@ name: deploy
 #   stg_smoke  a validate-only update of stg's streaming pipeline: Lakeflow resolves and plans the whole graph against
 #              stg (imports, schemas, flows, the Kafka source) without processing data
 #   live       after a required reviewer approves the `live` environment: Terraform applies for the stacks CI may apply,
-#              then the dev bundle. dev is the live environment here (one workspace, docs/production.md §6).
+#              then the dev bundle. dev is the live environment here (one workspace, docs/index.html#prod-gaps).
 # Not here, by design: the bootstrap stack (it holds the roles this workflow uses) and the databricks identity stack
 # (a workspace admin applies it). Both, and any apply that replaces a stateful resource, are break-glass:
-# docs/runbooks/break-glass-deploy.md.
+# docs/index.html#rb-break-glass.
 on:
   push:
     branches: [main]

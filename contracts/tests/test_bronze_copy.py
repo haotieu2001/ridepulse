@@ -15,4 +15,4 @@ def test_the_pipelines_ping_schema_is_the_contract():
 def test_the_pipeline_accepts_the_registered_schema_id():
     resources = yaml.safe_load((ROOT / "databricks/resources/bronze.yml").read_text())["resources"]
     conf = resources["pipelines"]["bronze_ingest"]["configuration"]
-    assert conf["ridepulse.ping_schema_ids"] == "100002"   # driver.locations.v1-value version 1 (journal, #10)
+    assert conf["ridepulse.ping_schema_ids"] == "100002"   # driver.locations.v1-value version 1 (#10)

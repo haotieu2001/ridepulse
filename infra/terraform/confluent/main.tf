@@ -38,7 +38,7 @@ resource "confluent_kafka_cluster" "this" {
   cloud        = "AWS"
   region       = "us-east-2"
   # Free: Basic, which includes one eCKU and bills $0.135/hour for each above it. Uncapped (the default, 50), demo days
-  # billed 1-5 dollars of eCKUs for a load of ~24 requests/s: ~$50/month, five times NFR-10 (docs/cost.md).
+  # billed 1-5 dollars of eCKUs for a load of ~24 requests/s: ~$50/month, five times NFR-10 (docs/index.html#cost).
   dynamic "basic" {
     for_each = var.edition == "free" ? [1] : []
     content {
@@ -46,7 +46,7 @@ resource "confluent_kafka_cluster" "this" {
     }
   }
   # Paid: Enterprise, across zones, private networking (ADR-0007). A change of cluster type replaces the cluster:
-  # planned, then applied through break-glass, with docs/runbooks/confluent-new-account.md's steps after it.
+  # planned, then applied through break-glass, with docs/index.html#rb-confluent's steps after it.
   dynamic "enterprise" {
     for_each = var.edition == "paid" ? [1] : []
     content {}
@@ -185,7 +185,7 @@ resource "confluent_api_key" "app_schema_registry" {
 }
 
 # --- topics -----------------------------------------------------------------------------------
-# The RidePulse topics, from docs/design/sizing.md. The three feasibility.* / cdc.dispatch.trips topics below
+# The RidePulse topics, from docs/index.html#topics. The three feasibility.* / cdc.dispatch.trips topics below
 # are Phase 0's, kept so those tests can be re-run.
 locals {
   day_ms = 86400000

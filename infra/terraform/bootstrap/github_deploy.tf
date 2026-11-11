@@ -5,7 +5,8 @@
 # Applying infrastructure needs broad permissions (EC2, Lambda, IAM roles for the Lambdas, S3, SSM, schedules, alarms),
 # so the role has them, with two walls: it can never change the GitHub roles or the OIDC provider (it can't widen
 # itself or the plan role), and it can't touch the state of the two stacks that stay on a laptop, bootstrap (this
-# role) and databricks (identities, applied by a workspace admin, ADR-0011). Those are break-glass, docs/runbooks.
+# role) and databricks (identities, applied by a workspace admin, ADR-0011). Those are break-glass:
+# docs/index.html#rb-break-glass.
 
 data "aws_iam_policy_document" "github_deploy_trust" {
   statement {

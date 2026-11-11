@@ -1,5 +1,5 @@
 -- V001: the RidePulse dispatch database (Neon Postgres), as the replayer and Debezium need it.
--- Design: docs/design/erd.md. Tables are unqualified so the same file can be applied to a test
+-- Design: docs/index.html#dispatch-db. Tables are unqualified so the same file can be applied to a test
 -- schema (SET search_path) before the real one.
 
 -- --- reference data (pulled daily by Lakeflow Connect's query-based connector, path C) ---------

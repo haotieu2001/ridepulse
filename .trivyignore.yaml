@@ -1,5 +1,5 @@
 # trivy config findings accepted on purpose (#38, reviewed 2026-11-08). CI (ci.yml, security job) fails on any HIGH or
-# CRITICAL not listed here. Each entry says why; docs/security.md has the review they came from.
+# CRITICAL not listed here. Each entry says why; docs/index.html#security has the review they came from.
 misconfigurations:
   - id: AWS-0104
     paths: ["debezium/main.tf"]   # relative to the scanned directory, infra/terraform

@@ -1,5 +1,5 @@
 """The prep job end to end on a small crafted month, through a directory store laid out like the
-landing bucket. The real January 2025 run and its numbers are in docs/journal.md."""
+landing bucket. The real January 2025 run and its numbers are in docs/index.html#prep."""
 import gzip
 import hashlib
 import json

@@ -6,7 +6,7 @@ Two zones are neighbours when their polygons touch, allowing a 10 ft gap for dig
 a river or bay keeps zones apart even where a bridge crosses it. Zones 264 and 265 (Unknown, Outside
 of NYC) have no geometry. Some IDs have several polygons in the file; they are merged first.
 
-Inputs (gitignored, see docs/new-laptop.md):
+Inputs (gitignored, see docs/index.html#setup):
   curl -sSfL -o data/taxi_zones.zip https://d37ci6vzurychx.cloudfront.net/misc/taxi_zones.zip
   unzip -oq data/taxi_zones.zip -d data
 Run from the repo root:
