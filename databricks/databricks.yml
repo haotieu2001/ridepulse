@@ -66,7 +66,7 @@ targets:
       # The AI/BI dashboard (#34): written by src/bi/build_dashboard.py. Dev only: its queries name ridepulse_dev.
       dashboards:
         ridepulse:
-          display_name: RidePulse
+          display_name: uber-nyc-lakehouse
           file_path: ./src/bi/ridepulse.lvdash.json
           # Viewers query with their own access, so Unity Catalog's grants and the pii policy apply to each of them;
           # embedded, it would run as whoever deployed last (#78: ridepulse-ci, which can't read the data).

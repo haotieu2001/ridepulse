@@ -1,10 +1,9 @@
-# RidePulse
+# uber-nyc-lakehouse
 
-**A ride-hailing operations and analytics platform for a fictional NYC operator, built on 61 million real trip
-records.**
+**A ride-hailing operations and analytics platform that plays Uber in New York, on Uber's real public trip records.**
 
-New York's taxi regulator publishes every Uber, Lyft and Via trip. RidePulse replays January 2025 through a dispatch
-database as if it were happening now, at 10x: trips are requested, assigned and completed, and synthetic drivers
+New York's taxi regulator publishes every Uber, Lyft and Via trip. This project takes Uber's trips from January 2025 (a
+5% sample) and replays them through a dispatch database as if they were happening now, at 10x: trips are requested, assigned and completed, and synthetic drivers
 move and ping. The changes stream out of Postgres by CDC (Debezium) into Kafka, and a Databricks lakehouse turns them
 into live ops alerts within minutes:
 - a surge with no drivers;
@@ -12,20 +11,25 @@ into live ops alerts within minutes:
 - an airport queue;
 - an app outage.
 
-The same platform builds a daily star schema and reconciles it against the regulator's own file and the payouts.
+The same platform builds a daily star schema from the app's own trips, with one metric view behind the dashboard and
+Genie, and reconciles the app against the regulator's file and the payouts.
 Everything is code: Terraform, Databricks Asset Bundles, contracts, tests, and a gated deploy.
 
 It runs on free tiers (Databricks Free Edition, Neon, Confluent Basic, AWS) for a few dollars a month. Every place where
 that falls short of production is written down, with the reason and the production design
 ([the production design](docs/index.html#production)).
 
+Not affiliated with or endorsed by Uber Technologies: the trips are the TLC's public records. The project was first
+called RidePulse; inside the platform (catalogs, secrets, buckets, identities) things still carry that name, as
+`ridepulse_*`.
+
 How to read it: the **top box stands in for the rider and driver apps** a real company would have. It replays real
 TLC trips through the dispatch database as if they were happening now. Everything in the box below is what a real
 ride-hailing platform runs: the dispatch database, CDC into Kafka, the lakehouse, and the alerts.
 
-![RidePulse at a glance: the replayer stands in for the apps; below it, what a real platform runs](docs/overview.svg)
+![uber-nyc-lakehouse at a glance: the replayer stands in for the apps; below it, what a real platform runs](docs/overview.svg)
 
-Everything else, from requirements and every layer to the 15 architecture decisions, runbooks, cost and the production
+Everything else, from requirements and every layer to the 16 architecture decisions, runbooks, cost and the production
 design, is one page with all the diagrams: [docs/index.html](docs/index.html) (English) and
 [docs/index.vi.html](docs/index.vi.html) (Vietnamese). Open it in a browser; the section links below point into it.
 
@@ -59,7 +63,7 @@ What went wrong along the way is written down too, for example a 36-hour stretch
 | Lakehouse | one streaming pipeline (bronze, silver, supply, rules), file ingest, the daily gold job, views | `databricks/` |
 | Serving | AI/BI dashboard, Genie space, a metric view | `databricks/src/bi/` |
 | Platform | AWS (Lambdas, S3, SNS, EventBridge), Databricks identities and grants, CI and gated deploys | `infra/terraform/`, `.github/workflows/` |
-| Documentation | requirements, design, 15 ADRs, runbooks, a postmortem and the build history, in one page (English and Vietnamese) | `docs/` |
+| Documentation | requirements, design, 16 ADRs, runbooks, a postmortem and the build history, in one page (English and Vietnamese) | `docs/` |
 
 Quality gates on every PR:
 - lint, unit, Spark and Postgres tests, and pyright;
@@ -82,7 +86,7 @@ make landing-plan && make landing-apply       # the landing bucket
 make confluent-plan && make confluent-apply   # topics, ACLs, schemas
 make db-migrate && make db-seed              # the dispatch schema, zones, fare rules
 make land-month MONTH=2025-01                 # one TLC month, pinned to its ETag (also land-zones, land-noaa)
-make prep MONTH=2025-01                       # contract check, 5% sample, event-time slices
+make prep MONTH=2025-01                       # contract check, Uber's 5% sample, event-time slices
 make replayer-plan && make replayer-apply     # replayer, notifier, the window Lambda
 make debezium-plan && make debezium-up        # Debezium; let its first boot finish
 make catalog                                  # the Databricks catalog (once); the bundle comes from CI
