@@ -5,6 +5,7 @@ import sys
 from datetime import date, datetime
 
 import pytest
+import yaml
 
 ROOT = pathlib.Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(ROOT / "databricks/src/gold"))
@@ -23,6 +24,7 @@ from build import (  # noqa: E402
     fct_driver_shifts,
     fct_trips,
     federal_holidays,
+    metric_view_yaml,
     recon_completeness,
     recon_fees,
     recon_payouts,
@@ -45,9 +47,6 @@ def t(text):
 def test_the_metric_view_is_valid_yaml_with_every_measure_the_dashboard_reads():
     # 2026-11-13: an unquoted comma in a flow mapping (COALESCE(x, 0)) split a measure in two, and only Databricks
     # noticed. Parse it here, and check the measures the dashboard and Genie name are all there.
-    import yaml
-
-    from build import metric_view_yaml
     spec = yaml.safe_load(metric_view_yaml("c"))
     measures = {m["name"]: m for m in spec["measures"]}
     assert all(set(m) == {"name", "expr"} for m in spec["measures"] + spec["dimensions"])
