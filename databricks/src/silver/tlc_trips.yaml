@@ -1,16 +1,17 @@
 # Data contract: TLC high-volume for-hire trips, as RidePulse's silver layer exposes them.
-# One contract for both paths: silver.tlc_trips (monthly file) and silver.trips_completed (stream)
-# have exactly these columns, so the reconciliation between them is a plain join on trip_key.
+# One contract for both paths: silver.tlc_trips (the monthly file, every licence) and the app's trips (the stream's
+# events, which carry these columns' values; gold puts each trip back together) share these names, so the
+# reconciliation between them is a plain join on trip_key. The app replays one company's trips: key.sample.
 #
 # Baselines were measured on the full January 2025 file (20,405,666 rows) on 2026-10-29 with
 # contracts/validation/profile_tlc_month.sql and profile_details.sql. Column meanings and earlier
 # sample measurements: ridepulse-data-sources.html (the column guide).
 
 contract: tlc_trips
-version: 1.0.0
+version: 2.0.0   # 2.0.0 (2026-11-13): the replay sample is one company's (Uber, HV0003), so in_sample changed meaning
 status: active
 owner: platform (Hao Tieu)
-consumers: [silver.tlc_trips, silver.trips_completed, gold.*, RideDesk (read-only UC grant)]
+consumers: [silver.tlc_trips, silver.trip_events, gold.*, RideDesk (read-only UC grant)]
 change_policy: >
   Additive changes (a new nullable column) are a minor version. Renaming, retyping, removing a
   column, or changing the key definition is a major version, announced here before it ships.
@@ -35,7 +36,9 @@ key:
     fractional_seconds: 0             # so whole-second serialisation is lossless
   sample:
     column: in_sample
-    rule: int(first 8 hex digits of the base key, base 16) % modulus = 0, with modulus from contracts/sample.json (20, the 5% replay sample)
+    rule: >
+      the app's trips: licence = provider and int(first 8 hex digits of the base key, base 16) % modulus = 0, with
+      provider (HV0003, Uber) and modulus (20, 5%) from contracts/sample.json
 
 columns:
   # --- identity and lineage -------------------------------------------------------------------

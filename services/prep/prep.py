@@ -8,7 +8,8 @@ replayer can apply tick by tick.
 2. Applies the blocking checks: the contract's `fail` expectations (contracts/tlc_trips.yaml) and the
    V001 CHECKs a replayed row could break. A failing row is quarantined with the first reason it
    fails, and counted, instead of being replayed: a bad source row can't fail a tick.
-3. Keeps the 5% sample (`in_sample`) and builds each trip's 4 lifecycle events. Their due times are
+3. Keeps the app's sample (`in_replay`: Uber's trips in the 5% bucket; another licence's trip in the bucket is
+   counted as sample_other_company and skipped) and builds each trip's 4 lifecycle events. Their due times are
    forced into lifecycle order (ADR-0004 §5); payloads carry the raw TLC values.
 4. Writes each event into the hourly slice in which it is due, under a prefix pinned to the source
    ETag:  derived/replay/<month>/etag=<etag>/events/YYYY/MM/DD/HH.jsonl.gz
@@ -45,12 +46,12 @@ import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 from contracts.dst import arrow_corrected_dropoff
-from contracts.trip_key import KEY_FIELDS, SAMPLE_MODULUS, SEPARATOR
+from contracts.trip_key import APP_PROVIDER, KEY_FIELDS, SAMPLE_MODULUS, SEPARATOR
 
 from .store import EVENT_TYPES, DirStore, S3Store, Store, output_prefix, pointer_key, slice_name, source_manifest_key  # noqa: F401  (re-exported)
 from .supply import DEFAULT_TARGET_UTILISATION, heat_map, sign_on_zones, staffing
 
-FORMAT_VERSION = 3      # bump when the outputs' layout or content change (3: sign-on zones)
+FORMAT_VERSION = 4      # bump when the outputs' layout or content change (3: sign-on zones; 4: Uber's trips only)
 ASSIGN_DELAY = timedelta(seconds=30)
 PROVIDERS = ("HV0002", "HV0003", "HV0004", "HV0005")
 BATCH_ROWS = 50_000
@@ -189,8 +190,8 @@ def _gzip(lines: list[str]) -> bytes:
 # --- the job ----------------------------------------------------------------------------------------
 
 def read_month(path: pathlib.Path, month: str, stats: Counter) -> tuple[pa.Table, list[dict]]:
-    """The month's sampled rows that pass every blocking check, each with its trip_key, plus the
-    quarantined sampled rows. Counts every row, sampled or not."""
+    """The app's sampled rows (APP_PROVIDER's, in the bucket) that pass every blocking check, each with its trip_key,
+    plus the quarantined ones. Counts every row, sampled or not."""
     source = pq.ParquetFile(path)
     kept, quarantined = [], []
     seen: Counter = Counter()   # base key -> rows so far, in file order (the key's collision suffix)
@@ -199,6 +200,7 @@ def read_month(path: pathlib.Path, month: str, stats: Counter) -> tuple[pa.Table
         keys = base_keys(t)   # on the published times, before the fall-back correction: keys never move
         t = t.set_column(t.schema.get_field_index("dropoff_datetime"), "dropoff_datetime", arrow_corrected_dropoff(t, month))
         reasons = first_failure(blocking_checks(t, month))
+        providers = t["hvfhs_license_num"].to_pylist()
         stats["rows"] += t.num_rows
         take, trip_keys = [], []
         for i, k in enumerate(keys):
@@ -206,6 +208,9 @@ def read_month(path: pathlib.Path, month: str, stats: Counter) -> tuple[pa.Table
             if reason:
                 stats[f"quarantined.all.{reason}"] += 1
             if int(k[:8], 16) % SAMPLE_MODULUS:
+                continue
+            if providers[i] != APP_PROVIDER:   # the licence is a key input: skipping never moves a collision suffix
+                stats["sample_other_company"] += 1
                 continue
             seen[k] += 1
             key = k if seen[k] == 1 else f"{k}-{seen[k]}"
@@ -301,7 +306,8 @@ def prep(month: str, store: Store, *, source_file: pathlib.Path | None = None, f
     manifest = {
         "month": month, "format_version": FORMAT_VERSION,
         "source": {"s3_key": current["s3_key"], "etag": current["etag"], "sha256": current["sha256"]},
-        "rows": stats["rows"], "sample_rows": stats["sample_rows"],
+        "rows": stats["rows"], "app_provider": APP_PROVIDER, "sample_rows": stats["sample_rows"],
+        "sample_other_company": stats["sample_other_company"],
         "sample_key_collisions": stats["sample_key_collisions"],
         "quarantined": {"all": by_reason("all"), "sample": by_reason("sample")},
         "trips": kept.num_rows, "events": events_total, "reordered": _out_of_order(kept),

@@ -4,23 +4,16 @@
       "name": "daily",
       "displayName": "Daily economics",
       "queryLines": [
-        "SELECT pickup_date, trips, gmv, driver_pay, take_rate, cbd_fees, cbd_trips FROM ridepulse_dev.gold.agg_daily_economics\n"
+        "SELECT pickup_date, MEASURE(trips) AS trips, MEASURE(gmv) AS gmv, MEASURE(driver_pay) AS driver_pay,\n",
+        "MEASURE(take_rate) AS take_rate, MEASURE(cbd_fees) AS cbd_fees, MEASURE(cbd_trips) AS cbd_trips\n",
+        "FROM ridepulse_dev.gold.mv_trip_economics GROUP BY pickup_date\n"
       ]
     },
     {
       "name": "hourly",
       "displayName": "Trips by hour and borough",
       "queryLines": [
-        "SELECT z.borough, h.pickup_hour, sum(h.trips) AS trips\n",
-        "FROM ridepulse_dev.gold.agg_zone_hourly h JOIN ridepulse_dev.gold.dim_zone z ON h.pickup_zone_id = z.zone_id GROUP BY ALL\n"
-      ]
-    },
-    {
-      "name": "cbd",
-      "displayName": "Congestion toll impact",
-      "queryLines": [
-        "SELECT period, cbd_relation, trips_per_day, avg_rider_total, avg_driver_pay, take_rate, avg_mph\n",
-        "FROM ridepulse_dev.gold.agg_cbd_impact\n"
+        "SELECT borough, pickup_hour, MEASURE(trips) AS trips FROM ridepulse_dev.gold.mv_trip_economics GROUP BY ALL\n"
       ]
     },
     {
@@ -50,7 +43,7 @@
       "displayName": "DQ: rows per snapshot",
       "queryLines": [
         "SELECT window.start AS snapshot_at, count AS row_count\n",
-        "FROM ridepulse_dev.ops.agg_daily_economics_profile_metrics WHERE column_name = ':table'\n"
+        "FROM ridepulse_dev.ops.fct_trips_profile_metrics WHERE column_name = ':table'\n"
       ]
     },
     {
@@ -58,9 +51,9 @@
       "displayName": "DQ: latest snapshot per column",
       "queryLines": [
         "SELECT column_name, round(percent_null, 1) AS percent_null,\n",
-        "round(percent_zeros, 1) AS percent_zeros, CASE WHEN column_name = 'cbd_fees' THEN 'expected: no CBD fee before 2025-01-05' END AS note\n",
-        "FROM ridepulse_dev.ops.agg_daily_economics_profile_metrics\n",
-        "WHERE column_name <> ':table' AND window.start = (SELECT max(window.start) FROM ridepulse_dev.ops.agg_daily_economics_profile_metrics)\n"
+        "round(percent_zeros, 1) AS percent_zeros, CASE WHEN column_name = 'cbd_fee' THEN 'expected: zero for trips outside the CBD' END AS note\n",
+        "FROM ridepulse_dev.ops.fct_trips_profile_metrics\n",
+        "WHERE column_name <> ':table' AND window.start = (SELECT max(window.start) FROM ridepulse_dev.ops.fct_trips_profile_metrics)\n"
       ]
     },
     {
@@ -420,338 +413,6 @@
             "x": 0,
             "y": 15,
             "width": 6,
-            "height": 7
-          }
-        }
-      ],
-      "pageType": "PAGE_TYPE_CANVAS"
-    },
-    {
-      "name": "congestion",
-      "displayName": "Congestion toll",
-      "layout": [
-        {
-          "widget": {
-            "name": "cbd_trips",
-            "queries": [
-              {
-                "name": "main_query",
-                "query": {
-                  "datasetName": "cbd",
-                  "fields": [
-                    {
-                      "name": "cbd_relation",
-                      "expression": "`cbd_relation`"
-                    },
-                    {
-                      "name": "sum(trips_per_day)",
-                      "expression": "SUM(`trips_per_day`)"
-                    },
-                    {
-                      "name": "period",
-                      "expression": "`period`"
-                    }
-                  ],
-                  "disaggregated": false
-                }
-              }
-            ],
-            "spec": {
-              "version": 3,
-              "widgetType": "bar",
-              "encodings": {
-                "x": {
-                  "fieldName": "cbd_relation",
-                  "scale": {
-                    "type": "categorical"
-                  },
-                  "displayName": "cbd relation"
-                },
-                "y": {
-                  "fieldName": "sum(trips_per_day)",
-                  "scale": {
-                    "type": "quantitative"
-                  },
-                  "displayName": "trips per day"
-                },
-                "color": {
-                  "fieldName": "period",
-                  "scale": {
-                    "type": "categorical"
-                  },
-                  "displayName": "period"
-                }
-              },
-              "frame": {
-                "showTitle": true,
-                "title": "Trips per day, by where they meet the CBD"
-              }
-            }
-          },
-          "position": {
-            "x": 0,
-            "y": 0,
-            "width": 6,
-            "height": 7
-          }
-        },
-        {
-          "widget": {
-            "name": "cbd_rider",
-            "queries": [
-              {
-                "name": "main_query",
-                "query": {
-                  "datasetName": "cbd",
-                  "fields": [
-                    {
-                      "name": "cbd_relation",
-                      "expression": "`cbd_relation`"
-                    },
-                    {
-                      "name": "sum(avg_rider_total)",
-                      "expression": "SUM(`avg_rider_total`)"
-                    },
-                    {
-                      "name": "period",
-                      "expression": "`period`"
-                    }
-                  ],
-                  "disaggregated": false
-                }
-              }
-            ],
-            "spec": {
-              "version": 3,
-              "widgetType": "bar",
-              "encodings": {
-                "x": {
-                  "fieldName": "cbd_relation",
-                  "scale": {
-                    "type": "categorical"
-                  },
-                  "displayName": "cbd relation"
-                },
-                "y": {
-                  "fieldName": "sum(avg_rider_total)",
-                  "scale": {
-                    "type": "quantitative"
-                  },
-                  "displayName": "avg rider total"
-                },
-                "color": {
-                  "fieldName": "period",
-                  "scale": {
-                    "type": "categorical"
-                  },
-                  "displayName": "period"
-                }
-              },
-              "frame": {
-                "showTitle": true,
-                "title": "Rider total per trip ($)"
-              }
-            }
-          },
-          "position": {
-            "x": 0,
-            "y": 7,
-            "width": 3,
-            "height": 7
-          }
-        },
-        {
-          "widget": {
-            "name": "cbd_driver",
-            "queries": [
-              {
-                "name": "main_query",
-                "query": {
-                  "datasetName": "cbd",
-                  "fields": [
-                    {
-                      "name": "cbd_relation",
-                      "expression": "`cbd_relation`"
-                    },
-                    {
-                      "name": "sum(avg_driver_pay)",
-                      "expression": "SUM(`avg_driver_pay`)"
-                    },
-                    {
-                      "name": "period",
-                      "expression": "`period`"
-                    }
-                  ],
-                  "disaggregated": false
-                }
-              }
-            ],
-            "spec": {
-              "version": 3,
-              "widgetType": "bar",
-              "encodings": {
-                "x": {
-                  "fieldName": "cbd_relation",
-                  "scale": {
-                    "type": "categorical"
-                  },
-                  "displayName": "cbd relation"
-                },
-                "y": {
-                  "fieldName": "sum(avg_driver_pay)",
-                  "scale": {
-                    "type": "quantitative"
-                  },
-                  "displayName": "avg driver pay"
-                },
-                "color": {
-                  "fieldName": "period",
-                  "scale": {
-                    "type": "categorical"
-                  },
-                  "displayName": "period"
-                }
-              },
-              "frame": {
-                "showTitle": true,
-                "title": "Driver pay per trip ($)"
-              }
-            }
-          },
-          "position": {
-            "x": 3,
-            "y": 7,
-            "width": 3,
-            "height": 7
-          }
-        },
-        {
-          "widget": {
-            "name": "cbd_take",
-            "queries": [
-              {
-                "name": "main_query",
-                "query": {
-                  "datasetName": "cbd",
-                  "fields": [
-                    {
-                      "name": "cbd_relation",
-                      "expression": "`cbd_relation`"
-                    },
-                    {
-                      "name": "sum(take_rate)",
-                      "expression": "SUM(`take_rate`)"
-                    },
-                    {
-                      "name": "period",
-                      "expression": "`period`"
-                    }
-                  ],
-                  "disaggregated": false
-                }
-              }
-            ],
-            "spec": {
-              "version": 3,
-              "widgetType": "bar",
-              "encodings": {
-                "x": {
-                  "fieldName": "cbd_relation",
-                  "scale": {
-                    "type": "categorical"
-                  },
-                  "displayName": "cbd relation"
-                },
-                "y": {
-                  "fieldName": "sum(take_rate)",
-                  "scale": {
-                    "type": "quantitative"
-                  },
-                  "displayName": "take rate"
-                },
-                "color": {
-                  "fieldName": "period",
-                  "scale": {
-                    "type": "categorical"
-                  },
-                  "displayName": "period"
-                }
-              },
-              "frame": {
-                "showTitle": true,
-                "title": "Take rate"
-              }
-            }
-          },
-          "position": {
-            "x": 0,
-            "y": 14,
-            "width": 3,
-            "height": 7
-          }
-        },
-        {
-          "widget": {
-            "name": "cbd_speed",
-            "queries": [
-              {
-                "name": "main_query",
-                "query": {
-                  "datasetName": "cbd",
-                  "fields": [
-                    {
-                      "name": "cbd_relation",
-                      "expression": "`cbd_relation`"
-                    },
-                    {
-                      "name": "sum(avg_mph)",
-                      "expression": "SUM(`avg_mph`)"
-                    },
-                    {
-                      "name": "period",
-                      "expression": "`period`"
-                    }
-                  ],
-                  "disaggregated": false
-                }
-              }
-            ],
-            "spec": {
-              "version": 3,
-              "widgetType": "bar",
-              "encodings": {
-                "x": {
-                  "fieldName": "cbd_relation",
-                  "scale": {
-                    "type": "categorical"
-                  },
-                  "displayName": "cbd relation"
-                },
-                "y": {
-                  "fieldName": "sum(avg_mph)",
-                  "scale": {
-                    "type": "quantitative"
-                  },
-                  "displayName": "avg mph"
-                },
-                "color": {
-                  "fieldName": "period",
-                  "scale": {
-                    "type": "categorical"
-                  },
-                  "displayName": "period"
-                }
-              },
-              "frame": {
-                "showTitle": true,
-                "title": "Average trip speed (mph)"
-              }
-            }
-          },
-          "position": {
-            "x": 3,
-            "y": 14,
-            "width": 3,
             "height": 7
           }
         }
@@ -1561,12 +1222,12 @@
               "encodings": {
                 "value": {
                   "fieldName": "max(row_count)",
-                  "displayName": "Data quality: days in agg_daily_economics (last snapshot)"
+                  "displayName": "Data quality: trips in fct_trips (last snapshot)"
                 }
               },
               "frame": {
                 "showTitle": true,
-                "title": "Data quality: days in agg_daily_economics (last snapshot)"
+                "title": "Data quality: trips in fct_trips (last snapshot)"
               }
             }
           },

@@ -1,14 +1,18 @@
 """Gold (#29): the star schema of docs/index.html#gold, with Unity Catalog keys and the metric view for Genie.
 
-    fct_trips          one row per trip, from silver.tlc_trips; driver_sk for the trips the stream replayed
+    fct_trips          one row per trip the app completed, put together from its events in silver.trip_events
     fct_driver_shifts  one row per driver shift, from the driver state history (CDC, path B)
     dim_driver         SCD2 from silver.driver_profile_changes (path B: every change and delete, ADR-0005)
     dim_zone           the 265 TLC zones, the CBD zones, surge-area neighbours
-    dim_provider       the four high-volume licences
     dim_date           the calendar: weekend, US federal holidays (observed), the congestion toll from 2025-01-05
     dim_hour           24 hours and their dayparts
     dim_weather_day    Central Park's day (silver.weather_day), rainy at >= 1 mm
-    mv_trip_economics  the metric view: ratios defined as ratios of sums, so nothing averages a ratio
+    mv_trip_economics  the metric view: every economics measure, defined once, for the dashboard and Genie alike;
+                       ratios as ratios of sums, so nothing averages a ratio
+
+Gold is the app's own data (2026-11-13): the app is one company's (Uber's trips, contracts/sample.json), and the TLC
+file is the regulator's record it is reconciled against, never a source of rows. Marts remain only where a table is
+needed: the reconciliations (comparison logic) and agg_driver_weekly (its row filter).
 
 Dimensions are rebuilt whole each run (they are small); facts are replaced for the run's pickup or shift dates
 (REPLACE WHERE), so any range can be rebuilt again with the same result (FR-15). Keys are informational
@@ -29,7 +33,6 @@ from datetime import date, timedelta
 from pyspark.sql import DataFrame, SparkSession, Window
 from pyspark.sql import functions as F
 
-PROVIDERS = [("HV0002", "Juno"), ("HV0003", "Uber"), ("HV0004", "Via"), ("HV0005", "Lyft")]
 DAYPARTS = [(range(0, 6), "night"), (range(6, 10), "morning_rush"), (range(10, 16), "midday"),
             (range(16, 20), "evening_rush"), (range(20, 24), "evening")]
 TOLL_START = date(2025, 1, 5)        # the congestion relief zone toll began on Sunday 2025-01-05
@@ -37,6 +40,9 @@ RAINY_MM = 1.0                       # a "wet day" in climatology: at least 1 mm
 LAT_96TH = 40.7851                   # 96th Street, Manhattan; zones by centroid, so approximate
 CALENDAR = (date(2024, 1, 1), date(2026, 12, 31))
 PROFILE_COLUMNS = ["vehicle_type", "base_license"]   # what dim_driver tracks (erd.md)
+MONEY = ["base_fare", "tolls", "bcf", "sales_tax", "congestion_surcharge", "airport_fee", "cbd_fee", "tips", "driver_pay"]
+# Tables gold had before it became the app's own data: dropped by the build, once.
+RETIRED = ["agg_cbd_impact", "agg_daily_economics", "agg_zone_hourly", "dim_provider"]
 
 
 # --- the calendar ------------------------------------------------------------------------------------------------
@@ -137,15 +143,41 @@ def driver_at(df: DataFrame, at: str, drivers: DataFrame) -> DataFrame:
     return out.withColumn("driver_sk", sk).drop("_d", "valid_from", "valid_to", "_e", "_first_sk", "_first_from")
 
 
-def fct_trips(trips: DataFrame, events: DataFrame, drivers: DataFrame) -> DataFrame:
-    completed = (events.where("event_type = 'TripCompleted' AND incident_id IS NULL")
-                 .select("trip_key", "driver_id", F.col("occurred_at").alias("completed_at")).dropDuplicates(["trip_key"]))
-    t = trips.join(completed, "trip_key", "left")
-    t = driver_at(t, "completed_at", drivers)
-    return t.select("trip_key", "pickup_zone_id", "dropoff_zone_id", "provider_code", "pickup_date",
-                    F.hour("pickup_hour").alias("pickup_hour"), "driver_sk", "duration_s", "trip_miles", "base_fare",
-                    "driver_pay", "tips", "rider_total", "platform_take", "cbd_fee", "congestion_surcharge",
-                    "touches_cbd", "shared_match", "in_sample")
+def app_trips(events: DataFrame, cbd_zone_ids: list[int]) -> DataFrame:
+    """The app's completed trips, one row each, put back together from their events (silver.trip_events, each event
+    once): the request gives the zones, the start the arrival and pickup, the completion the dropoff, the money and the
+    driver. A trip without its completion isn't over and has no row. Stadium copies (#21) are injected demand, not
+    trips the app served: dropped by key, as the completeness check does. Column names are the contract's
+    (silver.tlc_trips'), so the fee check runs on these rows as it would on the file's."""
+    copies = events.where("incident_id IS NOT NULL").select("trip_key").distinct()
+    e = events.join(copies, "trip_key", "left_anti")
+    at = lambda kind, c: F.max(F.when(F.col("event_type") == kind, F.col(c))).alias(c)  # noqa: E731   one event per kind
+    t = (e.groupBy("trip_key")
+         .agg(at("TripRequested", "pickup_zone_id"), at("TripRequested", "dropoff_zone_id"),
+              at("TripRequested", "requested_at"), at("TripStarted", "driver_arrived_at"), at("TripStarted", "picked_up_at"),
+              at("TripCompleted", "dropped_off_at"), at("TripCompleted", "driver_id"), at("TripCompleted", "trip_miles"),
+              at("TripCompleted", "shared_match"), *[at("TripCompleted", c) for c in MONEY],
+              F.max(F.when(F.col("event_type") == "TripCompleted", F.col("occurred_at"))).alias("completed_at"))
+         .where("completed_at IS NOT NULL AND picked_up_at IS NOT NULL"))
+    seconds = F.unix_timestamp(F.col("dropped_off_at").cast("timestamp")) - F.unix_timestamp(F.col("picked_up_at").cast("timestamp"))
+    m = {c: F.col(c) for c in MONEY}
+    total = (m["base_fare"] + m["tolls"] + m["bcf"] + m["sales_tax"] + m["congestion_surcharge"] + m["airport_fee"]
+             + F.coalesce(m["cbd_fee"], F.lit(0)) + m["tips"])   # as silver.tlc_trips.rider_total
+    cbd = F.col("pickup_zone_id").isin(cbd_zone_ids) | F.col("dropoff_zone_id").isin(cbd_zone_ids)
+    return t.select("trip_key", "pickup_zone_id", "dropoff_zone_id", "requested_at", "driver_arrived_at", "picked_up_at",
+                    "dropped_off_at", "completed_at", "driver_id", F.to_date("picked_up_at").alias("pickup_date"),
+                    F.hour("picked_up_at").alias("pickup_hour"), seconds.cast("int").alias("duration_s"), "trip_miles",
+                    *MONEY, total.cast("decimal(10,2)").alias("rider_total"),
+                    (m["base_fare"] - m["driver_pay"]).cast("decimal(10,2)").alias("platform_take"),
+                    cbd.alias("touches_cbd"), "shared_match")
+
+
+def fct_trips(trips: DataFrame, drivers: DataFrame) -> DataFrame:
+    """app_trips with the driver's profile version at completion: every app trip has a driver, so driver_sk is set."""
+    t = driver_at(trips, "completed_at", drivers)
+    return t.select("trip_key", "pickup_zone_id", "dropoff_zone_id", "pickup_date", "pickup_hour", "driver_sk",
+                    "duration_s", "trip_miles", "base_fare", "driver_pay", "tips", "rider_total", "platform_take",
+                    "cbd_fee", "congestion_surcharge", "touches_cbd", "shared_match")
 
 
 def fct_driver_shifts(history: DataFrame, events: DataFrame, drivers: DataFrame) -> DataFrame:
@@ -185,29 +217,7 @@ def fct_driver_shifts(history: DataFrame, events: DataFrame, drivers: DataFrame)
                       (F.coalesce(F.col("on_trip_s"), F.lit(0)) / 60).cast("int").alias("on_trip_min"), "earnings")
 
 
-# --- marts (#30): grain in the name ---------------------------------------------------------------------------------
-
-def money_sums(*extra):
-    return [F.count("*").alias("trips"), F.sum("rider_total").alias("gmv"), F.sum("base_fare").alias("base_fare"),
-            F.sum("driver_pay").alias("driver_pay"), F.sum("tips").alias("tips"), F.sum("platform_take").alias("platform_take"),
-            F.sum("duration_s").alias("duration_s"), F.sum("trip_miles").alias("trip_miles"), *extra]
-
-
-def take_rate(df: DataFrame) -> DataFrame:
-    """The take rate as a ratio of sums, kept next to its sums so anything rolling the mart up can recompute it."""
-    # try_divide: a zone-hour can have no fare at all (null, not an error); decimal(12,4): a tiny fare makes a huge ratio
-    return df.withColumn("take_rate", (1 - F.try_divide(F.col("driver_pay"), F.col("base_fare"))).cast("decimal(12,4)"))
-
-
-def agg_zone_hourly(trips: DataFrame) -> DataFrame:
-    return take_rate(trips.groupBy("pickup_zone_id", "pickup_date", "pickup_hour").agg(*money_sums()))
-
-
-def agg_daily_economics(trips: DataFrame) -> DataFrame:
-    return take_rate(trips.groupBy("pickup_date").agg(*money_sums(
-        F.sum(F.coalesce("cbd_fee", F.lit(0))).alias("cbd_fees"), F.sum("congestion_surcharge").alias("congestion_surcharges"),
-        F.sum(F.col("touches_cbd").cast("int")).alias("cbd_trips"))))
-
+# --- marts (#30): grain in the name. The economics are mv_trip_economics' measures, not marts. ------------------------
 
 def agg_driver_weekly(shifts: DataFrame) -> DataFrame:
     week = F.date_trunc("WEEK", "shift_date").cast("date")
@@ -215,33 +225,6 @@ def agg_driver_weekly(shifts: DataFrame) -> DataFrame:
             .agg(F.count("*").alias("shifts"), F.sum("trips").alias("trips"), F.sum("online_min").alias("online_min"),
                  F.sum("on_trip_min").alias("on_trip_min"), F.sum("earnings").alias("earnings"))
             .withColumn("utilization", F.try_divide(F.col("on_trip_min"), F.col("online_min")).cast("decimal(12,4)")))
-
-
-PERIODS = [("jan_2024", date(2024, 1, 1), date(2024, 1, 31)), ("dec_2024", date(2024, 12, 1), date(2024, 12, 31)),
-           ("jan_2025_before_toll", date(2025, 1, 1), date(2025, 1, 4)), ("jan_2025_toll", date(2025, 1, 5), date(2025, 1, 31))]
-
-
-def agg_cbd_impact(trips: DataFrame, cbd_zone_ids: list[int]) -> DataFrame:
-    """The congestion toll's effect, per period x where a trip met the CBD: everything per day, so periods of
-    different lengths compare, and as ratios of sums."""
-    period = F.lit(None).cast("string")
-    for name, start, end in reversed(PERIODS):
-        period = F.when(F.col("pickup_date").between(F.lit(start), F.lit(end)), F.lit(name)).otherwise(period)
-    pu, do = F.col("pickup_zone_id").isin(cbd_zone_ids), F.col("dropoff_zone_id").isin(cbd_zone_ids)
-    relation = (F.when(pu & do, "within_cbd").when(pu, "from_cbd").when(do, "into_cbd").otherwise("outside_cbd"))
-    days = {name: (end - start).days + 1 for name, start, end in PERIODS}
-    out = (trips.withColumn("period", period).where("period IS NOT NULL").withColumn("cbd_relation", relation)
-           .groupBy("period", "cbd_relation").agg(*money_sums(F.sum(F.coalesce("cbd_fee", F.lit(0))).alias("cbd_fees"))))
-    n_days = F.create_map(*[x for name, d in days.items() for x in (F.lit(name), F.lit(d))])[F.col("period")]
-    return take_rate(out).select(
-        "period", n_days.alias("days"), "cbd_relation", "trips", (F.col("trips") / n_days).cast("decimal(12,1)").alias("trips_per_day"),
-        (F.col("base_fare") / F.col("trips")).cast("decimal(8,2)").alias("avg_base_fare"),
-        (F.col("driver_pay") / F.col("trips")).cast("decimal(8,2)").alias("avg_driver_pay"),
-        (F.col("gmv") / F.col("trips")).cast("decimal(8,2)").alias("avg_rider_total"),
-        (F.col("cbd_fees") / F.col("trips")).cast("decimal(8,2)").alias("avg_cbd_fee"),
-        (F.col("trip_miles") / F.col("trips")).cast("decimal(8,2)").alias("avg_miles"),
-        (F.col("duration_s") / F.col("trips") / 60).cast("decimal(8,1)").alias("avg_minutes"),
-        F.try_divide(F.col("trip_miles"), F.col("duration_s") / 3600).cast("decimal(12,1)").alias("avg_mph"), "take_rate")
 
 
 # --- reconciliations (#32, FR-14) ---------------------------------------------------------------------------------
@@ -370,32 +353,29 @@ def agg_recon_daily(completeness: DataFrame, payouts: DataFrame | None, fees: Da
 
 # --- keys and the metric view -----------------------------------------------------------------------------------
 
-MARTS = ["agg_zone_hourly", "agg_daily_economics", "agg_driver_weekly", "agg_cbd_impact", "recon_completeness", "recon_payouts",
-         "recon_fees", "agg_recon_daily"]
+MARTS = ["agg_driver_weekly", "recon_completeness", "recon_payouts", "recon_fees", "agg_recon_daily"]
 # Account-level groups: Unity Catalog grants only to those, and Free Edition makes them through the workspace's
 # /api/2.0/account/scim/v2 (no account console). docs/index.html#security has how they were made.
 OPS_GROUP = "ridepulse-ops"   # may see per-driver rows (NFR-9, #38)
 PII = ["dim_driver", "fct_driver_shifts", "recon_payouts"]   # driver_id tagged pii: NULL outside ops; agg_driver_weekly is row-filtered
-PRIMARY = {"dim_zone": "zone_id", "dim_provider": "provider_code", "dim_date": "date", "dim_hour": "hour",
+PRIMARY = {"dim_zone": "zone_id", "dim_date": "date", "dim_hour": "hour",
            "dim_weather_day": "date", "dim_driver": "driver_sk", "fct_trips": "trip_key", "fct_driver_shifts": "shift_id"}
 FOREIGN = [("fct_trips", "pickup_zone_id", "dim_zone"), ("fct_trips", "dropoff_zone_id", "dim_zone"),
-           ("fct_trips", "provider_code", "dim_provider"), ("fct_trips", "pickup_date", "dim_date"),
+           ("fct_trips", "pickup_date", "dim_date"),
            ("fct_trips", "pickup_hour", "dim_hour"), ("fct_trips", "driver_sk", "dim_driver"),
            ("fct_driver_shifts", "driver_sk", "dim_driver"), ("fct_driver_shifts", "shift_date", "dim_date")]
+RETIRED_KEYS = [("fct_trips", "provider_code")]   # the provider dimension's key, gone with it
 
 
 def metric_view_yaml(catalog: str) -> str:
     g = f"{catalog}.gold"
     return f"""version: 1.1
-comment: "Trip economics over fct_trips (#29): ratios are ratios of sums, so Genie never averages a ratio"
+comment: "Trip economics over the app's trips (fct_trips): the one definition the dashboard and Genie share; ratios are ratios of sums"
 source: {g}.fct_trips
 joins:
   - name: pickup_zone
     source: {g}.dim_zone
     on: source.pickup_zone_id = pickup_zone.zone_id
-  - name: provider
-    source: {g}.dim_provider
-    on: source.provider_code = provider.provider_code
   - name: day
     source: {g}.dim_date
     on: source.pickup_date = day.date
@@ -409,7 +389,6 @@ dimensions:
   - {{name: borough, expr: pickup_zone.borough}}
   - {{name: zone, expr: pickup_zone.zone}}
   - {{name: service_zone, expr: pickup_zone.service_zone}}
-  - {{name: provider, expr: provider.company}}
   - {{name: pickup_date, expr: source.pickup_date}}
   - {{name: day_of_week, expr: day.day_of_week}}
   - {{name: is_weekend, expr: day.is_weekend}}
@@ -421,7 +400,11 @@ dimensions:
 measures:
   - {{name: trips, expr: COUNT(1)}}
   - {{name: gmv, expr: SUM(source.rider_total)}}
+  - {{name: base_fare, expr: SUM(source.base_fare)}}
   - {{name: driver_pay, expr: SUM(source.driver_pay)}}
+  - {{name: platform_take, expr: SUM(source.platform_take)}}
+  - {{name: cbd_fees, expr: "SUM(COALESCE(source.cbd_fee, 0))"}}   # quoted: a comma ends a flow-mapping value
+  - {{name: cbd_trips, expr: COUNT_IF(source.touches_cbd)}}
   - {{name: take_rate, expr: 1 - SUM(source.driver_pay) / SUM(source.base_fare)}}
   - {{name: tip_rate, expr: SUM(source.tips) / SUM(source.base_fare)}}
   - {{name: avg_duration_min, expr: SUM(source.duration_s) / COUNT(1) / 60}}
@@ -442,7 +425,7 @@ class Gold:
         return self.spark.catalog.tableExists(self.t("gold", name))
 
     def drop_keys(self) -> None:
-        for fact, column, _ in FOREIGN:
+        for fact, column, _ in [*FOREIGN, *[(f, c, None) for f, c in RETIRED_KEYS]]:
             if self.exists(fact):
                 self.spark.sql(f"ALTER TABLE {self.t('gold', fact)} DROP CONSTRAINT IF EXISTS fk_{fact}_{column}")
         for name in PRIMARY:
@@ -478,7 +461,8 @@ class Gold:
             raise SystemExit(f"the gold build must run as a member of {OPS_GROUP}: it would read masked driver ids")
         self.drop_keys()
         s = self.spark
-        self.whole(s.createDataFrame(PROVIDERS, "provider_code STRING, company STRING"), "dim_provider", "The four HVFHV licences")
+        for name in RETIRED:
+            s.sql(f"DROP TABLE IF EXISTS {self.t('gold', name)}")
         self.whole(s.createDataFrame([(h, daypart(h)) for h in range(24)], "hour INT, daypart STRING"), "dim_hour",
                    "Hours of the day and their dayparts")
         self.whole(s.createDataFrame(calendar_rows(), "date DATE, day_of_week INT, is_weekend BOOLEAN, is_holiday BOOLEAN, "
@@ -492,8 +476,15 @@ class Gold:
         self.whole(drivers, "dim_driver", "Driver profile versions from CDC (SCD2); valid_from/valid_to in simulated time")
         drivers = self.read("gold", "dim_driver")
         events = self.read("silver", "trip_events")
-        self.dates(fct_trips(self.read("silver", "tlc_trips"), events, drivers), "fct_trips", "pickup_date", start, end,
-                   "One row per trip from the TLC file; driver_sk for trips the stream replayed")
+        trips = fct_trips(self.app_trips(), drivers)
+        comment = "One row per trip the app completed (Uber, the replay sample), with its driver"
+        if self.exists("fct_trips") and "provider_code" in self.read("gold", "fct_trips").columns:
+            # Once: the table held the whole TLC file. Overwritten whole (schema too), not dropped, so the quality
+            # monitor on it keeps its table.
+            trips.write.mode("overwrite").option("overwriteSchema", "true").saveAsTable(self.t("gold", "fct_trips"))
+            s.sql(f"COMMENT ON TABLE {self.t('gold', 'fct_trips')} IS '{comment}'")
+        else:
+            self.dates(trips, "fct_trips", "pickup_date", start, end, comment)
         self.dates(fct_driver_shifts(self.read("silver", "driver_state_history"), events, drivers), "fct_driver_shifts",
                    "shift_date", start, end, "One row per driver shift: minutes online and on a trip, trips, earnings")
         self.add_keys()
@@ -503,22 +494,21 @@ class Gold:
         for name in [*PRIMARY, *MARTS]:
             print(name, s.read.table(self.t("gold", name)).count())
 
+    def app_trips(self) -> DataFrame:
+        cbd = [r[0] for r in self.read("ref", "cbd_zones").select("zone_id").collect()]
+        return app_trips(self.read("silver", "trip_events"), cbd)
+
     def marts(self) -> None:
         """Rebuilt whole from the facts each run. agg_driver_weekly is row-filtered: a driver's own pay is personal,
         so only the ridepulse-ops group sees driver rows (NFR-9)."""
-        trips, shifts = self.read("gold", "fct_trips"), self.read("gold", "fct_driver_shifts")
-        cbd = [r[0] for r in self.read("ref", "cbd_zones").select("zone_id").collect()]
+        shifts = self.read("gold", "fct_driver_shifts")
         weekly = self.t("gold", "agg_driver_weekly")
         if self.spark.catalog.tableExists(weekly):   # an overwrite can't replace a filtered table
             try:
                 self.spark.sql(f"ALTER TABLE {weekly} DROP ROW FILTER")
             except Exception as e:  # noqa: BLE001   none set yet
                 print(f"{weekly}: no row filter to drop ({type(e).__name__})")
-        self.whole(agg_zone_hourly(trips), "agg_zone_hourly", "Trips and money per pickup zone x date x hour")
-        self.whole(agg_daily_economics(trips), "agg_daily_economics", "Trips, money and fees per pickup date")
         self.whole(agg_driver_weekly(shifts), "agg_driver_weekly", "Shifts, minutes and earnings per driver x week (row-filtered)")
-        self.whole(agg_cbd_impact(trips, cbd), "agg_cbd_impact",
-                   "The congestion toll per period x CBD relation (per day, ratios of sums)")
         self.reconcile()
         self.secure()
         self.refresh_monitors()
@@ -562,7 +552,7 @@ class Gold:
         except Exception as e:  # noqa: BLE001   outside Databricks (tests)
             print(f"no workspace client ({type(e).__name__}): monitors not refreshed")
             return
-        for table in ["agg_daily_economics"]:
+        for table in ["fct_trips"]:
             name = self.t("gold", table)
             try:
                 run = w.quality_monitors.run_refresh(table_name=name)
@@ -571,14 +561,15 @@ class Gold:
                 print(f"monitor refresh {name} skipped: {type(e).__name__}: {str(e)[:120]}")
 
     def reconcile(self) -> None:
-        """FR-14's three reconciliations, rebuilt whole: per closed day, per paid week, per day and fee."""
+        """FR-14's three reconciliations, rebuilt whole: per closed day, per paid week, per day and fee. The TLC file is
+        the regulator's record: the app's trips are checked against it, the fees against the rules."""
         trips, events = self.read("silver", "tlc_trips"), self.read("silver", "trip_events")
         days = closed_days(self.read("silver", "replay_runs_changes"), self.read("silver", "replay_watermark"))
         completeness = recon_completeness(trips, events, days)
         payouts = (recon_payouts(self.read("gold", "fct_driver_shifts"), self.read("silver", "payouts"))
                    if self.spark.catalog.tableExists(self.t("silver", "payouts")) else None)
-        fees = recon_fees(trips, self.read("bronze", "neon_fare_rules").where("__END_AT IS NULL"))
-        self.whole(completeness, "recon_completeness", "Per closed day: the file sample against the stream (FR-14, SLA-5)")
+        fees = recon_fees(self.app_trips(), self.read("bronze", "neon_fare_rules").where("__END_AT IS NULL"))
+        self.whole(completeness, "recon_completeness", "Per closed day: the app trips in the file against the stream (FR-14, SLA-5)")
         if payouts is not None:
             self.whole(payouts, "recon_payouts", "Per driver x paid week: earned against the payout file")
         self.whole(fees, "recon_fees", "Per day x fee: collected against the fare_rules rate in effect")

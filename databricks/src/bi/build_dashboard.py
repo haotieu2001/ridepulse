@@ -3,8 +3,9 @@ dashboard JSON itself, and a test checks every widget points at a dataset and a 
 
     python databricks/src/bi/build_dashboard.py      (then `make deploy`; the bundle ships the .lvdash.json)
 
-Three pages: daily economics (C2), the congestion toll (C2), reconciliations (C3). One measure per chart, never two
-y-axes; ratios come from the marts as ratios of sums.
+Pages: daily economics (C2), reconciliations (C3), platform health. One measure per chart, never two y-axes. The
+economics read the metric view (MEASURE()), the one definition Genie uses too, so the two can't disagree; ratios are
+its ratios of sums. Only what isn't a measure reads a mart: the reconciliations.
 """
 from __future__ import annotations
 
@@ -12,25 +13,26 @@ import json
 import pathlib
 
 G = "ridepulse_dev.gold"
+MV = f"{G}.mv_trip_economics"
+DQ = "ridepulse_dev.ops.fct_trips_profile_metrics"   # the quality monitor's output on gold.fct_trips (#36)
 OUT = pathlib.Path(__file__).with_name("ridepulse.lvdash.json")
 
 DATASETS = {
-    "daily": ("Daily economics", f"SELECT pickup_date, trips, gmv, driver_pay, take_rate, cbd_fees, cbd_trips FROM {G}.agg_daily_economics"),
-    "hourly": ("Trips by hour and borough", f"""SELECT z.borough, h.pickup_hour, sum(h.trips) AS trips
-FROM {G}.agg_zone_hourly h JOIN {G}.dim_zone z ON h.pickup_zone_id = z.zone_id GROUP BY ALL"""),
-    "cbd": ("Congestion toll impact", f"""SELECT period, cbd_relation, trips_per_day, avg_rider_total, avg_driver_pay, take_rate, avg_mph
-FROM {G}.agg_cbd_impact"""),
+    "daily": ("Daily economics", f"""SELECT pickup_date, MEASURE(trips) AS trips, MEASURE(gmv) AS gmv, MEASURE(driver_pay) AS driver_pay,
+MEASURE(take_rate) AS take_rate, MEASURE(cbd_fees) AS cbd_fees, MEASURE(cbd_trips) AS cbd_trips
+FROM {MV} GROUP BY pickup_date"""),
+    "hourly": ("Trips by hour and borough", f"SELECT borough, pickup_hour, MEASURE(trips) AS trips FROM {MV} GROUP BY ALL"),
     "recon": ("Reconciliations", f"SELECT reconciliation, day, checked, breaks FROM {G}.agg_recon_daily"),
     "fees": ("Fee checks", f"""SELECT fee, sum(trips_charged) AS trips_charged, sum(collected) AS collected, sum(expected) AS expected,
 sum(breaks) AS breaks FROM {G}.recon_fees WHERE breaks IS NOT NULL GROUP BY fee"""),
     "health": ("Platform health", "SELECT checked_at, metric, value, limit_value, ok FROM ridepulse_dev.ops.platform_health"),
-    # Data quality (#36): the monitor's profile of the daily economics mart, one snapshot per gold build.
-    "dq_rows": ("DQ: rows per snapshot", """SELECT window.start AS snapshot_at, count AS row_count
-FROM ridepulse_dev.ops.agg_daily_economics_profile_metrics WHERE column_name = ':table'"""),
-    "dq_latest": ("DQ: latest snapshot per column", """SELECT column_name, round(percent_null, 1) AS percent_null,
-round(percent_zeros, 1) AS percent_zeros, CASE WHEN column_name = 'cbd_fees' THEN 'expected: no CBD fee before 2025-01-05' END AS note
-FROM ridepulse_dev.ops.agg_daily_economics_profile_metrics
-WHERE column_name <> ':table' AND window.start = (SELECT max(window.start) FROM ridepulse_dev.ops.agg_daily_economics_profile_metrics)"""),
+    # Data quality (#36): the monitor's profile of the app's trips, one snapshot per gold build.
+    "dq_rows": ("DQ: rows per snapshot", f"""SELECT window.start AS snapshot_at, count AS row_count
+FROM {DQ} WHERE column_name = ':table'"""),
+    "dq_latest": ("DQ: latest snapshot per column", f"""SELECT column_name, round(percent_null, 1) AS percent_null,
+round(percent_zeros, 1) AS percent_zeros, CASE WHEN column_name = 'cbd_fee' THEN 'expected: zero for trips outside the CBD' END AS note
+FROM {DQ}
+WHERE column_name <> ':table' AND window.start = (SELECT max(window.start) FROM {DQ})"""),
     "payout_breaks": ("Payout breaks", f"SELECT week_start, driver_id, break, earned_cents, paid_cents FROM {G}.recon_payouts WHERE break IS NOT NULL"),
 }
 
@@ -108,17 +110,6 @@ PAGES = [
         at(chart("hourly_by_borough", "hourly", "line", "pickup_hour", "trips", "Trips by hour of day, per borough",
                  color="borough", x_scale="quantitative"), 0, 15, 6, 7),
     ]),
-    ("congestion", "Congestion toll", [
-        at(chart("cbd_trips", "cbd", "bar", "cbd_relation", "trips_per_day", "Trips per day, by where they meet the CBD",
-                 color="period", x_scale="categorical"), 0, 0, 6, 7),
-        at(chart("cbd_rider", "cbd", "bar", "cbd_relation", "avg_rider_total", "Rider total per trip ($)",
-                 color="period", x_scale="categorical"), 0, 7, 3, 7),
-        at(chart("cbd_driver", "cbd", "bar", "cbd_relation", "avg_driver_pay", "Driver pay per trip ($)",
-                 color="period", x_scale="categorical"), 3, 7, 3, 7),
-        at(chart("cbd_take", "cbd", "bar", "cbd_relation", "take_rate", "Take rate", color="period", x_scale="categorical"), 0, 14, 3, 7),
-        at(chart("cbd_speed", "cbd", "bar", "cbd_relation", "avg_mph", "Average trip speed (mph)",
-                 color="period", x_scale="categorical"), 3, 14, 3, 7),
-    ]),
     ("reconciliation", "Reconciliations", [
         at(chart("recon_breaks", "recon", "bar", "reconciliation", "breaks", "Breaks per reconciliation", x_scale="categorical"), 0, 0, 3, 6),
         at(chart("recon_checked", "recon", "bar", "reconciliation", "checked", "Checked per reconciliation", x_scale="categorical"), 3, 0, 3, 6),
@@ -130,7 +121,7 @@ PAGES = [
         at(chart("health_value", "health", "line", "checked_at", "value", "Each check over time (limits: silver lag 20 min, rules lag 45 "
                  "simulated min, streaming run 17 min, completeness 0)", color="metric", agg="MAX"), 0, 0, 6, 7),
         at(table("health_rows", "health", ["checked_at", "metric", "value", "limit_value", "ok"], "Checks"), 0, 7, 6, 7),
-        at(counter("dq_row_count", "dq_rows", "row_count", "Data quality: days in agg_daily_economics (last snapshot)", agg="MAX"), 0, 14, 2, 4),
+        at(counter("dq_row_count", "dq_rows", "row_count", "Data quality: trips in fct_trips (last snapshot)", agg="MAX"), 0, 14, 2, 4),
         at(chart("dq_rows_over_time", "dq_rows", "line", "snapshot_at", "row_count", "Rows per data quality snapshot", agg="MAX"), 2, 14, 4, 4),
         at(table("dq_columns", "dq_latest", ["column_name", "percent_null", "percent_zeros", "note"],
                  "Data quality: % null and % zero per column, last snapshot"), 0, 18, 6, 7),

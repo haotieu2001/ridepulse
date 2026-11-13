@@ -14,7 +14,7 @@ pyspark = pytest.importorskip("pyspark")
 
 from ingest import control_mismatches, etag_of, fail_counts, month_of, payouts, positions, tlc_trips, weather_day  # noqa: E402
 
-from contracts.trip_key import in_sample, trip_key  # noqa: E402
+from contracts.trip_key import in_replay, trip_key  # noqa: E402
 
 CONTRACT = yaml.safe_load((ROOT / "contracts/tlc_trips.yaml").read_text())
 FILE = "dbfs:/Volumes/c/raw/landing/raw/tlc_fhvhv/2025-01/etag=abc-94/fhvhv_tripdata_2025-01.parquet"
@@ -51,6 +51,24 @@ def source(r):
             "PULocationID": r[7], "DOLocationID": r[8]}
 
 
+def in_bucket(i, provider):
+    """A row of `provider` whose key is in the sample's bucket: the request minute is nudged until it is."""
+    from contracts.trip_key import in_sample
+    for minute in range(600):
+        r = row(i, provider=provider, request=f"2025-01-10 {minute // 60:02d}:{minute % 60:02d}:00")
+        if in_sample(trip_key(source(r))):
+            return r
+    raise AssertionError("no minute found")
+
+
+def test_in_sample_is_the_apps_trips_only(spark):
+    # Contract 2.0: the app replays Uber's trips, so a Lyft trip in the bucket isn't in the sample.
+    rows = [in_bucket(0, "HV0003"), in_bucket(1, "HV0005")]
+    out = {r.provider_code: r.in_sample for r in tlc_trips(spark.createDataFrame(rows, TLC), positions(spark, [2]),
+                                                             [161], CONTRACT, "abc-94").collect()}
+    assert out == {"HV0003": True, "HV0005": False}
+
+
 def test_paths_carry_the_etag_and_the_month():
     assert etag_of(FILE) == "abc-94" and month_of(FILE) == "2025-01"
 
@@ -62,7 +80,7 @@ def test_silver_rows_follow_the_contract_and_the_python_key(spark):
 
     assert out[0].trip_key == trip_key(source(rows[0])) and out[2].trip_key == trip_key(source(rows[2]), 2)
     assert out[2].trip_key == out[0].trip_key + "-2"   # the second of the collision, in file order
-    assert all(out[i].in_sample == in_sample(trip_key(source(rows[i]))) for i in out)
+    assert all(out[i].in_sample == in_replay(trip_key(source(rows[i])), rows[i][0]) for i in out)
     assert [(out[i].row_group, out[i].row_offset) for i in range(4)] == [(0, 0), (0, 1), (1, 0), (1, 1)]
 
     r = out[0]
