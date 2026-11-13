@@ -54,11 +54,12 @@ targets:
           grants:
             - principal: e3aee6fd-086b-40d1-9916-c46e9611d6d9   # ridepulse-forwarder
               privileges: [READ_VOLUME, WRITE_VOLUME]
-      # Data quality monitoring (#36): available on Free Edition (checked 2026-11-08). A snapshot profile of the daily
-      # economics mart; gold_build refreshes it after each build, so it costs compute only when gold changes.
+      # Data quality monitoring (#36): available on Free Edition (checked 2026-11-08). A snapshot profile of the app's
+      # trips (the economics' one source since the marts went, 2026-11-13); gold_build refreshes it after each build,
+      # so it costs compute only when gold changes.
       quality_monitors:
-        daily_economics:
-          table_name: ${var.catalog}.gold.agg_daily_economics
+        trips:
+          table_name: ${var.catalog}.gold.fct_trips
           assets_dir: /Workspace/Users/haokimtieu2001@gmail.com/ridepulse_monitors   # the same whoever deploys
           output_schema_name: ${var.catalog}.ops
           snapshot: {}

@@ -3,7 +3,8 @@
 
     trip_key  = sha256 hex of  licence|request|pickup|dropoff|pickup zone|dropoff zone
                 + "-<n>" for the n-th row (n >= 2, in file order) sharing those six values
-    in_sample = first 8 hex digits of the base key, as an integer, % modulus == 0   (sample.json: 20, the 5% replay sample)
+    in_sample = first 8 hex digits of the base key, as an integer, % modulus == 0   (sample.json: 20, a 5% hash bucket)
+    in_replay = licence == the app's provider (sample.json: HV0003, Uber) and in_sample: the trips the app replays
 
 Why these six: on the full January 2025 month the five columns without the dropoff time collide
 271 times; with it, 3 times. Those 3 are different pooled riders in the same car (same times and
@@ -35,7 +36,10 @@ SEPARATOR = "|"
 TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"  # Spark: yyyy-MM-dd HH:mm:ss
 # The replay sample's modulus, from sample.json beside this file (#80): one value for prep, the replayer, Spark and the
 # tests. Part of the key contract, so changing it is a contract version (contracts/tests/test_sample.py).
-SAMPLE_MODULUS: int = json.loads((pathlib.Path(__file__).with_name("sample.json")).read_text())["modulus"]
+_SAMPLE = json.loads((pathlib.Path(__file__).with_name("sample.json")).read_text())
+SAMPLE_MODULUS: int = _SAMPLE["modulus"]
+# The one company the app stands for: only its trips replay (the TLC file has every licence's).
+APP_PROVIDER: str = _SAMPLE["provider"]
 
 
 def _canonical(value: object, kind: str) -> str:
@@ -67,8 +71,15 @@ def trip_key(row: dict, occurrence: int = 1) -> str:
 
 
 def in_sample(key: str) -> bool:
-    """Whether a trip is in the replay sample (1 in SAMPLE_MODULUS). Uses the base key, so collided rows share it."""
+    """Whether a trip's key is in the sample's hash bucket (1 in SAMPLE_MODULUS). Uses the base key, so collided rows
+    share it."""
     return int(key[:8], 16) % SAMPLE_MODULUS == 0
+
+
+def in_replay(key: str, provider: str) -> bool:
+    """Whether the app replays a trip: its licence is the app's provider and its key is in the sample's bucket. The
+    licence is one of the key's inputs, so filtering on it never changes another trip's collision suffix."""
+    return provider == APP_PROVIDER and in_sample(key)
 
 
 def _spark_field(name: str, kind: str) -> str:
@@ -91,3 +102,8 @@ SPARK_IN_SAMPLE_SQL = (
 def spark_in_sample_sql(key_column: str = "trip_key") -> str:
     """The in_sample predicate for a Spark SQL key column."""
     return SPARK_IN_SAMPLE_SQL.format(key=key_column)
+
+
+def spark_in_replay_sql(key_column: str = "trip_key", provider_column: str = "provider_code") -> str:
+    """The in_replay predicate for Spark SQL: the app's provider and the sample's bucket."""
+    return f"({provider_column} = '{APP_PROVIDER}' AND {spark_in_sample_sql(key_column)})"

@@ -1,40 +1,39 @@
 {
   "_comment": "The Genie space (#34), applied by scripts/bi/genie_space.py. Each question carries the SQL that answers it independently, so `check` can compare Genie's answer with a known one.",
   "title": "RidePulse trip economics",
-  "description": "NYC for-hire trips (TLC, Jan 2024, Dec 2024, Jan 2025): trips, bookings, driver pay, take rate, the congestion toll.",
+  "description": "The app's own trips: Uber's NYC trips the app replayed (TLC public data, the 5% sample, the week of 6-12 January 2025): trips, bookings, driver pay, take rate, fees.",
   "tables": [
     "ridepulse_dev.gold.mv_trip_economics",
-    "ridepulse_dev.gold.agg_cbd_impact",
-    "ridepulse_dev.gold.agg_daily_economics",
-    "ridepulse_dev.gold.dim_zone"
+    "ridepulse_dev.gold.dim_zone",
+    "ridepulse_dev.gold.agg_recon_daily"
   ],
   "instructions": [
-    "Trips, gmv, driver_pay, take_rate, tip_rate and avg_duration_min are measures of the metric view mv_trip_economics: use MEASURE(), never AVG of a ratio.",
-    "take_rate is 1 - driver pay / base fare, the platform's share of the fare. gmv is what riders paid in total.",
-    "The congestion toll (the CBD fee) began on 2025-01-05; toll_in_effect is true from that day. The CBD is Manhattan south of and including 60th Street.",
-    "The provider dimension holds company names: filter with provider = 'Uber' or 'Lyft', never a licence code like HV0003. Dates are pickup dates in New York time.",
-    "For the toll's effect compare January 2024 with 5-31 January 2025 (agg_cbd_impact periods jan_2024 and jan_2025_toll), per day."
+    "Trips, gmv, base_fare, driver_pay, platform_take, take_rate, tip_rate, cbd_fees, cbd_trips and avg_duration_min are measures of the metric view mv_trip_economics: use MEASURE(), never AVG of a ratio.",
+    "take_rate is 1 - driver pay / base fare, the app's share of the fare. gmv is what riders paid in total, fees and tips included.",
+    "Every trip is the app's: there is no provider or company dimension. Dates are pickup dates in New York time; the data covers the days the app replayed.",
+    "cbd_fees is the congestion relief zone fee ($1.50 a trip that enters it, from 2025-01-05). The CBD is Manhattan south of and including 60th Street.",
+    "agg_recon_daily has one row per day and reconciliation (completeness, fees, payouts): checked and breaks. Zero breaks means the day reconciled."
   ],
   "questions": [
     {
-      "question": "How many trips were there in January 2025?",
-      "answer_sql": "SELECT MEASURE(trips) FROM ridepulse_dev.gold.mv_trip_economics WHERE pickup_date BETWEEN '2025-01-01' AND '2025-01-31'"
+      "question": "How many trips did the app complete in the week of 6 January 2025?",
+      "answer_sql": "SELECT MEASURE(trips) FROM ridepulse_dev.gold.mv_trip_economics WHERE pickup_date BETWEEN '2025-01-06' AND '2025-01-12'"
     },
     {
-      "question": "What was Uber's take rate in January 2025?",
-      "answer_sql": "SELECT MEASURE(take_rate) FROM ridepulse_dev.gold.mv_trip_economics WHERE provider = 'Uber' AND pickup_date BETWEEN '2025-01-01' AND '2025-01-31'"
+      "question": "What was the take rate that week?",
+      "answer_sql": "SELECT MEASURE(take_rate) FROM ridepulse_dev.gold.mv_trip_economics WHERE pickup_date BETWEEN '2025-01-06' AND '2025-01-12'"
     },
     {
-      "question": "Which pickup borough had the most trips in January 2025?",
-      "answer_sql": "SELECT borough FROM ridepulse_dev.gold.mv_trip_economics WHERE pickup_date BETWEEN '2025-01-01' AND '2025-01-31' GROUP BY borough ORDER BY MEASURE(trips) DESC LIMIT 1"
+      "question": "Which pickup borough had the most trips that week?",
+      "answer_sql": "SELECT borough FROM ridepulse_dev.gold.mv_trip_economics WHERE pickup_date BETWEEN '2025-01-06' AND '2025-01-12' GROUP BY borough ORDER BY MEASURE(trips) DESC LIMIT 1"
     },
     {
-      "question": "How many trips per day started and ended inside the CBD after the toll began, compared with January 2024?",
-      "answer_sql": "SELECT period, trips_per_day FROM ridepulse_dev.gold.agg_cbd_impact WHERE cbd_relation = 'within_cbd' AND period IN ('jan_2024', 'jan_2025_toll') ORDER BY period"
+      "question": "How much in CBD fees did the app collect that week?",
+      "answer_sql": "SELECT MEASURE(cbd_fees) FROM ridepulse_dev.gold.mv_trip_economics WHERE pickup_date BETWEEN '2025-01-06' AND '2025-01-12'"
     },
     {
-      "question": "How much in CBD fees was collected in January 2025?",
-      "answer_sql": "SELECT sum(cbd_fees) FROM ridepulse_dev.gold.agg_daily_economics WHERE pickup_date BETWEEN '2025-01-01' AND '2025-01-31'"
+      "question": "How many reconciliation breaks were there that week?",
+      "answer_sql": "SELECT sum(breaks) FROM ridepulse_dev.gold.agg_recon_daily WHERE day BETWEEN '2025-01-06' AND '2025-01-12'"
     }
   ]
 }

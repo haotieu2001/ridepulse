@@ -1,20 +1,19 @@
-"""Gold (#29) on a local Spark: the calendar, dim_driver's versions across the two clocks, a trip's driver at its
-time, shifts, and the zone dimension."""
+"""Gold (#29) on a local Spark: the app's trips from their events, the calendar, dim_driver's versions across the two
+clocks, a trip's driver at its time, shifts, the zone dimension and the reconciliations."""
 import pathlib
 import sys
 from datetime import date, datetime
 
 import pytest
-from pyspark.sql import functions as F
+import yaml
 
 ROOT = pathlib.Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(ROOT / "databricks/src/gold"))
 pyspark = pytest.importorskip("pyspark")
 
 from build import (  # noqa: E402
-    agg_cbd_impact,
     agg_driver_weekly,
-    agg_zone_hourly,
+    app_trips,
     calendar_rows,
     closed_days,
     daypart,
@@ -23,7 +22,9 @@ from build import (  # noqa: E402
     dim_zone,
     driver_at,
     fct_driver_shifts,
+    fct_trips,
     federal_holidays,
+    metric_view_yaml,
     recon_completeness,
     recon_fees,
     recon_payouts,
@@ -41,6 +42,17 @@ def spark():
 
 def t(text):
     return datetime.fromisoformat(text)
+
+
+def test_the_metric_view_is_valid_yaml_with_every_measure_the_dashboard_reads():
+    # 2026-11-13: an unquoted comma in a flow mapping (COALESCE(x, 0)) split a measure in two, and only Databricks
+    # noticed. Parse it here, and check the measures the dashboard and Genie name are all there.
+    spec = yaml.safe_load(metric_view_yaml("c"))
+    measures = {m["name"]: m for m in spec["measures"]}
+    assert all(set(m) == {"name", "expr"} for m in spec["measures"] + spec["dimensions"])
+    assert {"trips", "gmv", "driver_pay", "take_rate", "cbd_fees", "cbd_trips", "platform_take"} <= set(measures)
+    assert measures["cbd_fees"]["expr"] == "SUM(COALESCE(source.cbd_fee, 0))"
+    assert "provider" not in {d["name"] for d in spec["dimensions"]}
 
 
 def test_federal_holidays_with_their_observed_days():
@@ -125,23 +137,48 @@ def test_zones_and_weather(spark):
     assert [r.is_rainy for r in dim_weather_day(w).orderBy("date").collect()] == [False, True]
 
 
-TRIPS = ("pickup_zone_id INT, dropoff_zone_id INT, pickup_date DATE, rider_total DOUBLE, base_fare DOUBLE, driver_pay DOUBLE, "
-         "tips DOUBLE, platform_take DOUBLE, duration_s INT, trip_miles DOUBLE, cbd_fee DOUBLE")
+EVENTS = ("trip_key STRING, event_type STRING, occurred_at TIMESTAMP_NTZ, pickup_zone_id INT, dropoff_zone_id INT, "
+          "requested_at TIMESTAMP_NTZ, driver_arrived_at TIMESTAMP_NTZ, picked_up_at TIMESTAMP_NTZ, dropped_off_at TIMESTAMP_NTZ, "
+          "driver_id STRING, trip_miles DECIMAL(8,3), shared_match BOOLEAN, incident_id BIGINT, base_fare DECIMAL(10,2), "
+          "tolls DECIMAL(10,2), bcf DECIMAL(10,2), sales_tax DECIMAL(10,2), congestion_surcharge DECIMAL(10,2), "
+          "airport_fee DECIMAL(10,2), cbd_fee DECIMAL(10,2), tips DECIMAL(10,2), driver_pay DECIMAL(10,2)")
 
 
-def test_cbd_impact_is_per_day_and_per_relation(spark):
-    rows = [(161, 230, date(2025, 1, 6), 30.0, 20.0, 15.0, 0.0, 5.0, 1200, 2.0, 1.5),   # both ends in the CBD
-            (161, 74, date(2025, 1, 6), 40.0, 30.0, 24.0, 0.0, 6.0, 1800, 6.0, 1.5),     # leaves it
-            (74, 161, date(2025, 1, 7), 40.0, 30.0, 21.0, 0.0, 9.0, 1800, 6.0, 1.5),     # enters it
-            (74, 75, date(2025, 1, 6), 20.0, 10.0, 8.0, 0.0, 2.0, 600, 2.0, None),       # never touches it
-            (161, 230, date(2024, 12, 9), 25.0, 18.0, 14.0, 0.0, 4.0, 1500, 2.0, None)]  # before the toll
-    out = {(r.period, r.cbd_relation): r for r in agg_cbd_impact(spark.createDataFrame(rows, TRIPS), [161, 230]).collect()}
-    within = out[("jan_2025_toll", "within_cbd")]
-    assert (within.days, within.trips, float(within.trips_per_day), float(within.avg_cbd_fee)) == (27, 1, 0.0, 1.5)
-    assert {k[1] for k in out if k[0] == "jan_2025_toll"} == {"within_cbd", "from_cbd", "into_cbd", "outside_cbd"}
-    assert out[("dec_2024", "within_cbd")].days == 31 and float(out[("dec_2024", "within_cbd")].avg_cbd_fee) == 0.0
-    assert float(out[("jan_2025_toll", "into_cbd")].take_rate) == 0.3   # 1 - 21 / 30
-    assert float(out[("jan_2025_toll", "outside_cbd")].avg_mph) == 12.0  # 2 miles in 10 minutes
+def trip_events(key, pu=74, do=161, incident=None, completed=True):
+    """A trip's events as silver.trip_events holds them: each carries only its own fields."""
+    from decimal import Decimal as D
+    none9 = (None,) * 9
+    rows = [(key, "TripRequested", t("2025-01-09 08:00:00"), pu, do, t("2025-01-09 08:00:00"), None, None, None, None, None,
+             None, incident, *none9),
+            (key, "DriverAssigned", t("2025-01-09 08:00:30"), None, None, None, None, None, None, "drv-000001", None, None,
+             None, *none9),
+            (key, "TripStarted", t("2025-01-09 08:05:00"), None, None, None, t("2025-01-09 08:03:00"), t("2025-01-09 08:05:00"),
+             None, "drv-000001", None, None, None, *none9)]
+    if completed:
+        rows.append((key, "TripCompleted", t("2025-01-09 08:25:00"), None, None, None, None, None, t("2025-01-09 08:25:00"),
+                     "drv-000001", D("3.250"), False, None, D("20.00"), D("0.00"), D("0.55"), D("1.78"), D("2.75"), D("0.00"),
+                     D("1.50"), D("3.00"), D("15.00")))
+    return rows
+
+
+def test_an_app_trip_is_its_four_events_put_together(spark):
+    events = spark.createDataFrame(trip_events("k1") + trip_events("open", completed=False)
+                                   + trip_events("copy", incident=11) + trip_events("out", pu=74, do=75), EVENTS)
+    trips = {r.trip_key: r for r in app_trips(events, [161, 230]).collect()}
+    assert set(trips) == {"k1", "out"}   # the open trip has no row yet; the stadium copy is injected demand, not a trip
+    k = trips["k1"]
+    assert (k.pickup_zone_id, k.dropoff_zone_id, k.pickup_date, k.pickup_hour, k.duration_s) == (74, 161, date(2025, 1, 9), 8, 1200)
+    assert (k.driver_id, k.completed_at, k.driver_arrived_at) == ("drv-000001", t("2025-01-09 08:25:00"), t("2025-01-09 08:03:00"))
+    assert (float(k.rider_total), float(k.platform_take)) == (29.58, 5.0)   # 20 + 0.55 + 1.78 + 2.75 + 1.50 + 3; 20 - 15
+    assert k.touches_cbd and not trips["out"].touches_cbd
+
+
+def test_every_app_trip_has_its_driver(spark):
+    events = spark.createDataFrame(trip_events("k1"), EVENTS)
+    drivers = spark.createDataFrame([(7, "drv-000001", t("2025-01-09 00:00:00"), None)],
+                                    "driver_sk BIGINT, driver_id STRING, valid_from TIMESTAMP_NTZ, valid_to TIMESTAMP_NTZ")
+    r = fct_trips(app_trips(events, [161]), drivers).first()
+    assert r.driver_sk == 7 and "provider_code" not in r.asDict() and "in_sample" not in r.asDict()
 
 
 def test_a_drivers_week_sums_its_shifts(spark):
@@ -152,15 +189,6 @@ def test_a_drivers_week_sums_its_shifts(spark):
     w = weeks[date(2025, 1, 6)]
     assert (w.shifts, w.trips, w.online_min, w.on_trip_min, float(w.earnings), float(w.utilization)) == (2, 5, 180, 75, 60.0, 0.4167)
     assert weeks[date(2025, 1, 13)].shifts == 1
-
-
-def test_a_zone_hour_with_no_fare_has_no_take_rate_rather_than_an_error(spark):
-    rows = [(4, 79, date(2025, 1, 6), 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0.0, None)]   # a zero-fare, zero-second trip
-    trips = spark.createDataFrame(rows, TRIPS).withColumn("pickup_hour", F.lit(3))
-    spark.conf.set("spark.sql.ansi.enabled", "true")   # as on Databricks serverless
-    r = agg_zone_hourly(trips).first()
-    assert r.trips == 1 and r.take_rate is None
-    assert agg_cbd_impact(trips, [79]).first().avg_mph is None
 
 
 RUNS = "run_id BIGINT, started_from TIMESTAMP_NTZ, ended_at TIMESTAMP_NTZ, op STRING, committed_at TIMESTAMP, source_lsn BIGINT"

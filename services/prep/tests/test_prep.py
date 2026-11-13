@@ -75,8 +75,8 @@ def read_slices(store, manifest):
 D = datetime(2025, 1, 6, 8, 10)
 NORMAL = row(D)
 PRE_ARRANGED = row(D + timedelta(minutes=5), pickup_after_s=-400, arrival_after_s=-500)
-LYFT_NO_ARRIVAL = row(D + timedelta(minutes=50), hvfhs_license_num="HV0005", on_scene_datetime=None,
-                      originating_base_num=None, trip_s=1200)
+NO_ARRIVAL = row(D + timedelta(minutes=50), on_scene_datetime=None, originating_base_num=None, trip_s=1200)
+LYFT = row(D + timedelta(minutes=55), hvfhs_license_num="HV0005", trip_s=1200)     # in the bucket, not the app's
 EARLY = row(datetime(2024, 12, 31, 23, 40), pickup_after_s=25 * 60)                # requested the day before
 LATE = row(datetime(2025, 1, 31, 22, 30), trip_s=3 * 3600)                        # completes in February
 POOLED = row(D + timedelta(hours=2), shared_request_flag="Y", shared_match_flag="Y")
@@ -87,9 +87,10 @@ OTHER_MONTH = row(datetime(2025, 2, 1, 0, 5))
 NO_FARE = row(D + timedelta(hours=5), base_passenger_fare=None)
 NOT_SAMPLED = row(D + timedelta(hours=6), sampled=False)
 NOT_SAMPLED_BAD = row(D + timedelta(hours=7), sampled=False, trip_s=-60)
-ROWS = [NORMAL, PRE_ARRANGED, LYFT_NO_ARRIVAL, EARLY, LATE, POOLED, NOT_SAMPLED, DROPOFF_FIRST,
+ROWS = [NORMAL, PRE_ARRANGED, NO_ARRIVAL, LYFT, EARLY, LATE, POOLED, NOT_SAMPLED, DROPOFF_FIRST,
         UNKNOWN_PROVIDER, POOLED_2, OTHER_MONTH, NO_FARE, NOT_SAMPLED_BAD]
-REPLAYED = [NORMAL, PRE_ARRANGED, LYFT_NO_ARRIVAL, EARLY, LATE, POOLED, POOLED_2]
+REPLAYED = [NORMAL, PRE_ARRANGED, NO_ARRIVAL, EARLY, LATE, POOLED, POOLED_2]
+OTHER_COMPANIES = [LYFT, UNKNOWN_PROVIDER]   # in the bucket, but not Uber's: skipped, never quarantined
 
 
 @pytest.fixture
@@ -102,17 +103,18 @@ def run(tmp_path):
 
 def test_counts_and_quarantine(run):
     store, m, _ = run
-    assert m["rows"] == len(ROWS) and m["sample_rows"] == len(ROWS) - 2
+    assert m["rows"] == len(ROWS) and m["app_provider"] == "HV0003"
+    assert m["sample_other_company"] == len(OTHER_COMPANIES) and m["sample_rows"] == len(ROWS) - 2 - len(OTHER_COMPANIES)
     assert m["trips"] == len(REPLAYED) and m["events"] == 4 * len(REPLAYED)
     assert m["sample_key_collisions"] == 1
-    assert m["quarantined"]["sample"] == {"pickup_in_file_month": 1, "provider_known": 1,
-                                          "v001_completed_has_fare": 1, "v001_dropoff_not_before_pickup": 1}
+    assert m["quarantined"]["sample"] == {"pickup_in_file_month": 1, "v001_completed_has_fare": 1,
+                                          "v001_dropoff_not_before_pickup": 1}
     assert m["quarantined"]["all"]["v001_dropoff_not_before_pickup"] == 2   # one of them isn't sampled
+    assert m["quarantined"]["all"]["provider_known"] == 1                   # counted over the file, not replayed
     q = [json.loads(x) for x in gzip.decompress((store.root / output_prefix(MONTH, "etag-1")
                                                   / "quarantine.jsonl.gz").read_bytes()).splitlines()]
     assert {x["reason"] for x in q} == set(m["quarantined"]["sample"])
-    unknown = next(x for x in q if x["reason"] == "provider_known")
-    assert unknown["trip_key"] == trip_key(UNKNOWN_PROVIDER) and unknown["row"]["hvfhs_license_num"] == "HV0009"
+    assert not {x["trip_key"] for x in q} & {trip_key(r) for r in OTHER_COMPANIES}
     assert m["reordered"]["pickup_before_request"] == 1
 
 
@@ -159,7 +161,7 @@ def test_schedule_follows_adr_0004(run):
     assert done["base_fare"] == 18.21 and done["cbd_fee"] == 1.5 and done["wav_match"] is True
     assert events[(k, "TripRequested")]["payload"]["shared_request"] is False
 
-    k = trip_key(LYFT_NO_ARRIVAL)
+    k = trip_key(NO_ARRIVAL)
     assert events[(k, "TripStarted")]["payload"]["driver_arrived_at"] is None
     assert events[(k, "TripRequested")]["payload"]["originating_base_num"] is None
 

@@ -14,7 +14,7 @@ import pytest
 
 from contracts.trip_key import trip_key
 from services.prep.prep import prep
-from services.prep.tests.test_prep import LATE, LYFT_NO_ARRIVAL, MONTH, NORMAL, POOLED_2, PRE_ARRANGED, REPLAYED, ROWS, land
+from services.prep.tests.test_prep import LATE, MONTH, NO_ARRIVAL, NORMAL, POOLED_2, PRE_ARRANGED, REPLAYED, ROWS, land
 from services.replayer.tick import NotPrepared, Slices, _months_around, event_id, start, tick
 from services.seed.seed import seed_sql
 
@@ -151,7 +151,7 @@ def test_out_of_order_trip_keeps_raw_values_and_moves_forward(conn, store):
 @needs_postgres
 def test_events_carry_deterministic_ids_and_raw_nulls(conn, store):
     run_to_end(conn, store)
-    key = trip_key(LYFT_NO_ARRIVAL)
+    key = trip_key(NO_ARRIVAL)
     rows = conn.execute("SELECT id, type, payload FROM outbox_log WHERE aggregateid = %s", (key,)).fetchall()
     assert {str(i): t for i, t, _ in rows} == {event_id(key, t): t for _, t, _ in rows}
     assert next(p for _, t, p in rows if t == "TripStarted")["driver_arrived_at"] is None
@@ -228,7 +228,7 @@ def test_a_forward_jump_cancels_open_trips_and_frees_their_drivers(conn, store):
     for _ in range(9):
         tick(conn, store)   # to 09:00: NORMAL is completed
     start(conn, None, 10)
-    tick(conn, store)       # to 09:10: the Lyft trip requested just after 09:00 is in flight
+    tick(conn, store)       # to 09:10: the trip requested at 09:00 (no arrival time) is in flight
     open_trips = conn.execute("SELECT count(*) FROM trips WHERE status <> 'completed'").fetchone()[0]
     assert open_trips == 1
     start(conn, datetime(2025, 1, 7), 60)

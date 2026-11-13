@@ -40,7 +40,7 @@ def _here() -> str:
 
 sys.path.insert(0, _here())
 from dst import spark_corrected_dropoff_sql  # noqa: E402
-from trip_key import SPARK_BASE_TRIP_KEY_SQL, spark_in_sample_sql  # noqa: E402
+from trip_key import SPARK_BASE_TRIP_KEY_SQL, spark_in_replay_sql  # noqa: E402
 
 CENTRAL_PARK = "USW00094728"
 NOAA_COLUMNS = "station STRING, date STRING, element STRING, value INT, m_flag STRING, q_flag STRING, s_flag STRING, obs_time STRING"
@@ -109,7 +109,7 @@ def tlc_trips(raw: DataFrame, groups: DataFrame, cbd_zone_ids: list[int], contra
     flags = [F.coalesce(~F.expr(sql), F.lit(True)).alias(f"dq_{name}") for name, sql in flag_checks(contract).items()]
     return df.select(
         "trip_key",
-        F.expr(spark_in_sample_sql("_base_key")).alias("in_sample"),
+        F.expr(spark_in_replay_sql("_base_key", "hvfhs_license_num")).alias("in_sample"),   # the app's trips (contract 2.0)
         F.col("hvfhs_license_num").alias("provider_code"), "dispatching_base_num",
         F.nullif(F.col("originating_base_num"), F.lit("")).alias("originating_base_num"),
         F.col("_source_file").alias("source_file"), F.lit(etag).alias("source_etag"), "row_group",
