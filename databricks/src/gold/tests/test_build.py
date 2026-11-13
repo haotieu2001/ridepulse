@@ -55,6 +55,11 @@ def test_the_metric_view_is_valid_yaml_with_every_measure_the_dashboard_reads():
     assert "provider" not in {d["name"] for d in spec["dimensions"]}
 
 
+def test_the_apps_company_is_the_contracts():
+    import json
+    assert __import__("build").APP_PROVIDER == json.loads((ROOT / "contracts/sample.json").read_text())["provider"]
+
+
 def test_federal_holidays_with_their_observed_days():
     assert federal_holidays(2025) == {date(2025, 1, 1), date(2025, 1, 20), date(2025, 2, 17), date(2025, 5, 26),
                                       date(2025, 6, 19), date(2025, 7, 4), date(2025, 9, 1), date(2025, 10, 13),
@@ -137,25 +142,25 @@ def test_zones_and_weather(spark):
     assert [r.is_rainy for r in dim_weather_day(w).orderBy("date").collect()] == [False, True]
 
 
-EVENTS = ("trip_key STRING, event_type STRING, occurred_at TIMESTAMP_NTZ, pickup_zone_id INT, dropoff_zone_id INT, "
+EVENTS = ("trip_key STRING, event_type STRING, occurred_at TIMESTAMP_NTZ, provider_code STRING, pickup_zone_id INT, dropoff_zone_id INT, "
           "requested_at TIMESTAMP_NTZ, driver_arrived_at TIMESTAMP_NTZ, picked_up_at TIMESTAMP_NTZ, dropped_off_at TIMESTAMP_NTZ, "
           "driver_id STRING, trip_miles DECIMAL(8,3), shared_match BOOLEAN, incident_id BIGINT, base_fare DECIMAL(10,2), "
           "tolls DECIMAL(10,2), bcf DECIMAL(10,2), sales_tax DECIMAL(10,2), congestion_surcharge DECIMAL(10,2), "
           "airport_fee DECIMAL(10,2), cbd_fee DECIMAL(10,2), tips DECIMAL(10,2), driver_pay DECIMAL(10,2)")
 
 
-def trip_events(key, pu=74, do=161, incident=None, completed=True):
+def trip_events(key, pu=74, do=161, incident=None, completed=True, provider="HV0003"):
     """A trip's events as silver.trip_events holds them: each carries only its own fields."""
     from decimal import Decimal as D
     none9 = (None,) * 9
-    rows = [(key, "TripRequested", t("2025-01-09 08:00:00"), pu, do, t("2025-01-09 08:00:00"), None, None, None, None, None,
-             None, incident, *none9),
-            (key, "DriverAssigned", t("2025-01-09 08:00:30"), None, None, None, None, None, None, "drv-000001", None, None,
-             None, *none9),
-            (key, "TripStarted", t("2025-01-09 08:05:00"), None, None, None, t("2025-01-09 08:03:00"), t("2025-01-09 08:05:00"),
-             None, "drv-000001", None, None, None, *none9)]
+    rows = [(key, "TripRequested", t("2025-01-09 08:00:00"), provider, pu, do, t("2025-01-09 08:00:00"), None, None, None,
+             None, None, None, incident, *none9),
+            (key, "DriverAssigned", t("2025-01-09 08:00:30"), None, None, None, None, None, None, None, "drv-000001", None,
+             None, None, *none9),
+            (key, "TripStarted", t("2025-01-09 08:05:00"), None, None, None, None, t("2025-01-09 08:03:00"),
+             t("2025-01-09 08:05:00"), None, "drv-000001", None, None, None, *none9)]
     if completed:
-        rows.append((key, "TripCompleted", t("2025-01-09 08:25:00"), None, None, None, None, None, t("2025-01-09 08:25:00"),
+        rows.append((key, "TripCompleted", t("2025-01-09 08:25:00"), None, None, None, None, None, None, t("2025-01-09 08:25:00"),
                      "drv-000001", D("3.250"), False, None, D("20.00"), D("0.00"), D("0.55"), D("1.78"), D("2.75"), D("0.00"),
                      D("1.50"), D("3.00"), D("15.00")))
     return rows
@@ -163,9 +168,11 @@ def trip_events(key, pu=74, do=161, incident=None, completed=True):
 
 def test_an_app_trip_is_its_four_events_put_together(spark):
     events = spark.createDataFrame(trip_events("k1") + trip_events("open", completed=False)
-                                   + trip_events("copy", incident=11) + trip_events("out", pu=74, do=75), EVENTS)
+                                   + trip_events("copy", incident=11) + trip_events("out", pu=74, do=75)
+                                   + trip_events("lyft", provider="HV0005"), EVENTS)
     trips = {r.trip_key: r for r in app_trips(events, [161, 230]).collect()}
-    assert set(trips) == {"k1", "out"}   # the open trip has no row yet; the stadium copy is injected demand, not a trip
+    # the open trip has no row yet; the stadium copy is injected demand, not a trip; another company's trip isn't the app's
+    assert set(trips) == {"k1", "out"}
     k = trips["k1"]
     assert (k.pickup_zone_id, k.dropoff_zone_id, k.pickup_date, k.pickup_hour, k.duration_s) == (74, 161, date(2025, 1, 9), 8, 1200)
     assert (k.driver_id, k.completed_at, k.driver_arrived_at) == ("drv-000001", t("2025-01-09 08:25:00"), t("2025-01-09 08:03:00"))

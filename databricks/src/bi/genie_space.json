@@ -1,7 +1,7 @@
 {
   "_comment": "The Genie space (#34), applied by scripts/bi/genie_space.py. Each question carries the SQL that answers it independently, so `check` can compare Genie's answer with a known one.",
   "title": "uber-nyc-lakehouse trip economics",
-  "description": "The app's own trips: Uber's NYC trips the app replayed (TLC public data, the 5% sample, the week of 6-12 January 2025): trips, bookings, driver pay, take rate, fees.",
+  "description": "The app's own trips: Uber's NYC trips the app replayed (TLC public data, the 5% sample, the week of 13-19 January 2025): trips, bookings, driver pay, take rate, fees.",
   "tables": [
     "ridepulse_dev.gold.mv_trip_economics",
     "ridepulse_dev.gold.dim_zone",
@@ -16,24 +16,24 @@
   ],
   "questions": [
     {
-      "question": "How many trips did the app complete in the week of 6 January 2025?",
-      "answer_sql": "SELECT MEASURE(trips) FROM ridepulse_dev.gold.mv_trip_economics WHERE pickup_date BETWEEN '2025-01-06' AND '2025-01-12'"
+      "question": "How many trips did the app complete in the week of 13 January 2025?",
+      "answer_sql": "SELECT MEASURE(trips) FROM ridepulse_dev.gold.mv_trip_economics WHERE pickup_date BETWEEN '2025-01-13' AND '2025-01-19'"
     },
     {
       "question": "What was the take rate that week?",
-      "answer_sql": "SELECT MEASURE(take_rate) FROM ridepulse_dev.gold.mv_trip_economics WHERE pickup_date BETWEEN '2025-01-06' AND '2025-01-12'"
+      "answer_sql": "SELECT MEASURE(take_rate) FROM ridepulse_dev.gold.mv_trip_economics WHERE pickup_date BETWEEN '2025-01-13' AND '2025-01-19'"
     },
     {
       "question": "Which pickup borough had the most trips that week?",
-      "answer_sql": "SELECT borough FROM ridepulse_dev.gold.mv_trip_economics WHERE pickup_date BETWEEN '2025-01-06' AND '2025-01-12' GROUP BY borough ORDER BY MEASURE(trips) DESC LIMIT 1"
+      "answer_sql": "SELECT borough FROM ridepulse_dev.gold.mv_trip_economics WHERE pickup_date BETWEEN '2025-01-13' AND '2025-01-19' GROUP BY borough ORDER BY MEASURE(trips) DESC LIMIT 1"
     },
     {
       "question": "How much in CBD fees did the app collect that week?",
-      "answer_sql": "SELECT MEASURE(cbd_fees) FROM ridepulse_dev.gold.mv_trip_economics WHERE pickup_date BETWEEN '2025-01-06' AND '2025-01-12'"
+      "answer_sql": "SELECT MEASURE(cbd_fees) FROM ridepulse_dev.gold.mv_trip_economics WHERE pickup_date BETWEEN '2025-01-13' AND '2025-01-19'"
     },
     {
       "question": "How many reconciliation breaks were there that week?",
-      "answer_sql": "SELECT sum(breaks) FROM ridepulse_dev.gold.agg_recon_daily WHERE day BETWEEN '2025-01-06' AND '2025-01-12'"
+      "answer_sql": "SELECT sum(breaks) FROM ridepulse_dev.gold.agg_recon_daily WHERE day BETWEEN '2025-01-13' AND '2025-01-19'"
     }
   ]
 }

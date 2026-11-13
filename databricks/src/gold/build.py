@@ -40,6 +40,9 @@ RAINY_MM = 1.0                       # a "wet day" in climatology: at least 1 mm
 LAT_96TH = 40.7851                   # 96th Street, Manhattan; zones by centroid, so approximate
 CALENDAR = (date(2024, 1, 1), date(2026, 12, 31))
 PROFILE_COLUMNS = ["vehicle_type", "base_license"]   # what dim_driver tracks (erd.md)
+# The one company the app stands for: contracts/sample.json's provider (a test holds the two equal). Gold is that
+# company's trips only, whatever else the event stream may carry.
+APP_PROVIDER = "HV0003"
 MONEY = ["base_fare", "tolls", "bcf", "sales_tax", "congestion_surcharge", "airport_fee", "cbd_fee", "tips", "driver_pay"]
 # Tables gold had before it became the app's own data: dropped by the build, once.
 RETIRED = ["agg_cbd_impact", "agg_daily_economics", "agg_zone_hourly", "dim_provider"]
@@ -143,12 +146,19 @@ def driver_at(df: DataFrame, at: str, drivers: DataFrame) -> DataFrame:
     return out.withColumn("driver_sk", sk).drop("_d", "valid_from", "valid_to", "_e", "_first_sk", "_first_from")
 
 
+def app_events(events: DataFrame) -> DataFrame:
+    """The events of the app's own trips: those requested on APP_PROVIDER's licence (the request carries it)."""
+    own = events.where((F.col("event_type") == "TripRequested") & (F.col("provider_code") == APP_PROVIDER)).select("trip_key")
+    return events.join(own.distinct(), "trip_key", "left_semi")
+
+
 def app_trips(events: DataFrame, cbd_zone_ids: list[int]) -> DataFrame:
     """The app's completed trips, one row each, put back together from their events (silver.trip_events, each event
     once): the request gives the zones, the start the arrival and pickup, the completion the dropoff, the money and the
     driver. A trip without its completion isn't over and has no row. Stadium copies (#21) are injected demand, not
     trips the app served: dropped by key, as the completeness check does. Column names are the contract's
     (silver.tlc_trips'), so the fee check runs on these rows as it would on the file's."""
+    events = app_events(events)
     copies = events.where("incident_id IS NOT NULL").select("trip_key").distinct()
     e = events.join(copies, "trip_key", "left_anti")
     at = lambda kind, c: F.max(F.when(F.col("event_type") == kind, F.col(c))).alias(c)  # noqa: E731   one event per kind
@@ -475,7 +485,7 @@ class Gold:
         drivers = dim_driver(self.read("silver", "driver_profile_changes"), self.read("ops", "tick_watermarks"))
         self.whole(drivers, "dim_driver", "Driver profile versions from CDC (SCD2); valid_from/valid_to in simulated time")
         drivers = self.read("gold", "dim_driver")
-        events = self.read("silver", "trip_events")
+        events = app_events(self.read("silver", "trip_events"))   # shifts earn from the app's trips only
         trips = fct_trips(self.app_trips(), drivers)
         comment = "One row per trip the app completed (Uber, the replay sample), with its driver"
         if self.exists("fct_trips") and "provider_code" in self.read("gold", "fct_trips").columns:
