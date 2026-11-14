@@ -110,7 +110,7 @@ resource "confluent_service_account" "app" {
 # only: a new topic gets access by being added to local.topics. Consumer groups by prefix: Spark's default
 # group ids start with spark-kafka-source-, and anything else must start with ridepulse-.
 locals {
-  app_topics = concat(keys(local.topics), ["feasibility.smoke.v1", "feasibility.avro.v1", "cdc.dispatch.trips"])
+  app_topics = keys(local.topics)
   app_acls = merge(
     { for pair in setproduct(local.app_topics, ["READ", "WRITE", "DESCRIBE"]) :
       "topic/${pair[0]}/${pair[1]}" => { resource_type = "TOPIC", resource_name = pair[0], pattern_type = "LITERAL", operation = pair[1] }
@@ -185,8 +185,7 @@ resource "confluent_api_key" "app_schema_registry" {
 }
 
 # --- topics -----------------------------------------------------------------------------------
-# The RidePulse topics, from docs/index.html#topics. The three feasibility.* / cdc.dispatch.trips topics below
-# are Phase 0's, kept so those tests can be re-run.
+# The RidePulse topics, from docs/index.html#topics. (Phase 0's three test topics went with its code, 2026-11-14.)
 locals {
   day_ms = 86400000
   # One topic per CDC table, from the registry (config/cdc_tables.json, #79): onboarding a table adds its topic here.
@@ -228,56 +227,6 @@ resource "confluent_kafka_topic" "app" {
     secret = confluent_api_key.manager_kafka.secret
   }
   config = { for k, v in each.value.config : k => tostring(v) }
-}
-
-resource "confluent_kafka_topic" "smoke" {
-  kafka_cluster {
-    id = confluent_kafka_cluster.this.id
-  }
-  topic_name       = "feasibility.smoke.v1"
-  partitions_count = 1
-  rest_endpoint    = confluent_kafka_cluster.this.rest_endpoint
-  credentials {
-    key    = confluent_api_key.manager_kafka.id
-    secret = confluent_api_key.manager_kafka.secret
-  }
-  config = {
-    "retention.ms" = "86400000" # 1 day: a test topic
-  }
-}
-
-# S2: Avro messages framed by Schema Registry (magic byte + schema id + payload).
-resource "confluent_kafka_topic" "avro_smoke" {
-  kafka_cluster {
-    id = confluent_kafka_cluster.this.id
-  }
-  topic_name       = "feasibility.avro.v1"
-  partitions_count = 1
-  rest_endpoint    = confluent_kafka_cluster.this.rest_endpoint
-  credentials {
-    key    = confluent_api_key.manager_kafka.id
-    secret = confluent_api_key.manager_kafka.secret
-  }
-  config = {
-    "retention.ms" = "86400000"
-  }
-}
-
-# S8: Debezium's change events for dispatch.trips (topic.prefix "cdc").
-resource "confluent_kafka_topic" "cdc_trips" {
-  kafka_cluster {
-    id = confluent_kafka_cluster.this.id
-  }
-  topic_name       = "cdc.dispatch.trips"
-  partitions_count = 1
-  rest_endpoint    = confluent_kafka_cluster.this.rest_endpoint
-  credentials {
-    key    = confluent_api_key.manager_kafka.id
-    secret = confluent_api_key.manager_kafka.secret
-  }
-  config = {
-    "retention.ms" = "86400000"
-  }
 }
 
 # --- schemas: registered here, from contracts/, so producers never auto-register -----------------
