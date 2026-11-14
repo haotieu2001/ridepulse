@@ -314,7 +314,6 @@ NYC Open Data; weather from NOAA NCEI GHCN-Daily via the NOAA Open Data Dissemin
 <tr><td>C1 Marketplace ops on-call</td><td>Where is demand outrunning supply right now? Which areas have long waits? Is the JFK/LGA queue building? Did the driver app stop sending pings in a borough?</td><td>Alert emails (SNS), <code>ops.alerts</code>, live surge table, dashboard</td></tr>
 <tr><td>C2 Strategy and city analyst</td><td>How did trips, fares, driver pay and take rate move by zone and hour? How does rain shift demand?</td><td>AI/BI dashboard and Genie over the gold metric view</td></tr>
 <tr><td>C3 Finance</td><td>Did the real-time path capture every trip in the official record? Do weekly payouts match earned pay? Are the fees right?</td><td>Reconciliation dashboard page</td></tr>
-<tr><td>C4 Rider and driver support</td><td>Why this fee, why surge, how much did I earn?</td><td>RideDesk (a separate project) through read-only Unity Catalog grants on gold</td></tr>
 <tr><td>C5 Platform team</td><td>Is the platform healthy, complete, correct and cheap?</td><td>Ops dashboard, failure emails, health checks, runbooks</td></tr>
 </tbody></table></div>
 
@@ -384,7 +383,7 @@ by the tick itself).</p>
 <tr><td>AWS</td><td>Lambdas, S3, SNS, DynamoDB, Debezium EC2 only in windows</td><td>budget $10, alert at $5</td><td>~$3.50/month</td></tr>
 </tbody></table></div>
 <p class="small muted">Out of scope: real identities (none exist in the data), ML models for ETA or pricing, routing
-engines, several cities, production SLAs on free tiers, and the support copilot (RideDesk).</p>
+engines, several cities, production SLAs on free tiers.</p>
 </section>
 
 <section>
@@ -831,7 +830,6 @@ exits 1 on any difference.</p>
 <tbody>
 <tr><td><code>ridepulse-ops</code></td><td>everything</td><td>yes (the gold build runs as a member)</td></tr>
 <tr><td><code>ridepulse-finance</code></td><td>gold only</td><td>no (NULL)</td></tr>
-<tr><td><code>ridedesk</code></td><td>gold only</td><td>no (NULL)</td></tr>
 <tr><td>a driver (mapped in <code>ops.driver_accounts</code>)</td><td>own rows of <code>agg_driver_weekly</code></td><td>own only</td></tr>
 </tbody></table></div>
 <ul>

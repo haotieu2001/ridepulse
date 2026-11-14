@@ -314,7 +314,6 @@ NYC Open Data; thời tiết từ NOAA NCEI GHCN-Daily qua NOAA Open Data Dissem
 <tr><td>C1 Marketplace ops on-call</td><td>Chỗ nào nhu cầu đang vượt nguồn cung? Khu nào chờ lâu? Hàng chờ ở JFK/LGA có đang dài ra? App driver có ngừng gửi ping ở borough nào không?</td><td>Email alert (SNS), <code>ops.alerts</code>, bảng surge live, dashboard</td></tr>
 <tr><td>C2 Analyst chiến lược và đô thị</td><td>Số trip, giá, tiền trả driver và take rate thay đổi thế nào theo zone và giờ? Mưa làm nhu cầu dịch chuyển ra sao?</td><td>AI/BI dashboard và Genie trên gold metric view</td></tr>
 <tr><td>C3 Finance</td><td>Luồng real-time có bắt đủ mọi trip trong hồ sơ chính thức? Payout hằng tuần có khớp thu nhập? Phí có đúng không?</td><td>Trang đối soát trên dashboard</td></tr>
-<tr><td>C4 Hỗ trợ rider và driver</td><td>Vì sao bị tính phí này, vì sao có surge, tôi kiếm được bao nhiêu?</td><td>RideDesk (một dự án riêng) qua read-only Unity Catalog grant trên gold</td></tr>
 <tr><td>C5 Platform team</td><td>Platform có healthy, đầy đủ, đúng và rẻ không?</td><td>Ops dashboard, email báo lỗi, health check, runbooks</td></tr>
 </tbody></table></div>
 
@@ -384,7 +383,7 @@ kiểm tra).</p>
 <tr><td>AWS</td><td>Lambdas, S3, SNS, DynamoDB, Debezium EC2 chỉ trong window</td><td>budget $10, cảnh báo ở $5</td><td>~$3.50/tháng</td></tr>
 </tbody></table></div>
 <p class="small muted">Ngoài phạm vi: danh tính thật (dữ liệu không có), mô hình ML cho ETA hay pricing, routing engine,
-nhiều thành phố, SLA production trên free tier, và support copilot (RideDesk).</p>
+nhiều thành phố, SLA production trên free tier.</p>
 </section>
 
 <section>
@@ -821,7 +820,6 @@ khác biệt nào.</p>
 <tbody>
 <tr><td><code>ridepulse-ops</code></td><td>mọi thứ</td><td>có (gold build chạy với tư cách thành viên)</td></tr>
 <tr><td><code>ridepulse-finance</code></td><td>chỉ gold</td><td>không (NULL)</td></tr>
-<tr><td><code>ridedesk</code></td><td>chỉ gold</td><td>không (NULL)</td></tr>
 <tr><td>một driver (map trong <code>ops.driver_accounts</code>)</td><td>các row của chính mình trong <code>agg_driver_weekly</code></td><td>chỉ của mình</td></tr>
 </tbody></table></div>
 <ul>

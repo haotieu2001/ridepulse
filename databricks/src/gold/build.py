@@ -534,8 +534,8 @@ class Gold:
           tag policy made once through /api/2.1/tag-policies (docs/index.html#security).
         - agg_driver_weekly shows a driver only their own rows, through ops.driver_accounts (user -> driver; empty here,
           the drivers are synthetic). Its driver_id isn't tagged: a driver sees their own id.
-        - Consumers read gold only: finance for the economics and reconciliations, RideDesk (project 2) for its support
-          answers. Those grants are Terraform's (infra/terraform/databricks, #77): long-lived access, not part of a build.
+        - Consumers read gold only: finance, for the economics and reconciliations. That grant is Terraform's
+          (infra/terraform/databricks, #77): long-lived access, not part of a build.
 
         Tags, the policy and the row filter survive the overwrites (checked 2026-11-08); setting them each build is for
         a new table, and costs nothing when they're already there."""

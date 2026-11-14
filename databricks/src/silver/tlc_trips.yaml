@@ -12,7 +12,7 @@ contract: tlc_trips
 version: 2.0.0   # 2.0.0 (2026-11-13): the replay sample became one company's (Uber), so in_sample changed meaning
 status: active
 owner: platform (Hao Tieu)
-consumers: [silver.tlc_trips, silver.trip_events, gold.*, RideDesk (read-only UC grant)]
+consumers: [silver.tlc_trips, silver.trip_events, gold.*]
 change_policy: >
   Additive changes (a new nullable column) are a minor version. Renaming, retyping, removing a
   column, or changing the key definition is a major version, announced here before it ships.
