@@ -19,8 +19,8 @@ locals {
 
   # Account groups: Unity Catalog grants only to account groups (#38). Readers see gold only, driver ids masked.
   groups = {
-    ops      = { name = "ridepulse-ops", id = "81688477101432", sql = false }
-    finance  = { name = "ridepulse-finance", id = "83395392296216", sql = true }
+    ops     = { name = "ridepulse-ops", id = "81688477101432", sql = false }
+    finance = { name = "ridepulse-finance", id = "83395392296216", sql = true }
   }
   readers = ["finance"]
 }
