@@ -1,8 +1,11 @@
-# Data contract for NYC TLC high-volume for-hire trips, as silver exposes them.
-# Two paths carry these columns under the same names: silver.tlc_trips (the monthly file, every licence) and the
-# app's trip events (gold rebuilds each trip from them). Reconciling the two is a join on trip_key.
+# Data contract: one NYC TLC high-volume for-hire trip (Uber, Lyft, Via, Juno), column by column.
 #
-# Baselines: the full January 2025 file (20,405,666 rows), measured 2026-10-29 with contracts/validation/.
+# Two kinds of data follow it, under the same column names:
+#   - silver.tlc_trips: the TLC monthly file, every company's trips.
+#   - the app's trip events: the trips the app replayed; gold rebuilds each one in this shape.
+# Same names on both sides, so checking the app against the file is a join on trip_key.
+#
+# Baselines below: measured on the January 2025 file (20,405,666 rows) on 2026-10-29, by contracts/validation/.
 # What each column means: docs/index.html#data.
 
 contract: tlc_trips
