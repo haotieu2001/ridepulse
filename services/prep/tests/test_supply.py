@@ -1,4 +1,4 @@
-"""The supply inputs against their reference, scripts/design/supply/simulate_supply.py, on the crafted
+"""The supply inputs against their reference, scripts/supply/simulate_supply.py, on the crafted
 month's replayed trips (the awkward ones included), plus how they are written. The same comparison on
 all of January 2025 is in docs/index.html#supply."""
 import importlib.util
@@ -22,7 +22,7 @@ PREFIX = output_prefix(MONTH, "etag-1")
 
 @pytest.fixture
 def simulator(tmp_path, monkeypatch):
-    spec = importlib.util.spec_from_file_location("simulate_supply", ROOT / "scripts/design/supply/simulate_supply.py")
+    spec = importlib.util.spec_from_file_location("simulate_supply", ROOT / "scripts/supply/simulate_supply.py")
     sim = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(sim)
     sample = tmp_path / "sample.parquet"

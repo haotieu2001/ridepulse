@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Run a shell command on the Debezium EC2 through SSM Run Command (no SSH) and print its output.
-# Usage: scripts/feasibility/ec2_run.sh 'systemctl status debezium'
+# Usage: scripts/ec2_run.sh 'systemctl status debezium'
 set -euo pipefail
-id="$(terraform -chdir="$(dirname "$0")/../../infra/terraform/debezium" output -raw instance_id)"
+id="$(terraform -chdir="$(dirname "$0")/../infra/terraform/debezium" output -raw instance_id)"
 params="$(jq -n --arg c "$1" '{commands: [$c]}')"
 cmd="$(aws ssm send-command --instance-ids "$id" --document-name AWS-RunShellScript \
         --parameters "$params" --query Command.CommandId --output text)"

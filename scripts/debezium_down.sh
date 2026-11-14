@@ -11,7 +11,7 @@ TF=infra/terraform/debezium
 id="$(terraform -chdir="$TF" output -raw instance_id 2>/dev/null || true)"
 if [[ "$id" == i-* ]]; then
   echo "stopping Debezium on $id"
-  scripts/feasibility/ec2_run.sh 'systemctl stop debezium' || echo "could not reach the instance; waiting for the slot anyway"
+  scripts/ec2_run.sh 'systemctl stop debezium' || echo "could not reach the instance; waiting for the slot anyway"
 fi
 
 active() { scripts/db.sh psql -X -A -t -c "SELECT count(*) FROM pg_replication_slots WHERE slot_name = '$SLOT' AND active"; }

@@ -3,7 +3,7 @@
 WITH k AS (
   SELECT *, count(*) OVER (PARTITION BY hvfhs_license_num, request_datetime, pickup_datetime,
                                          dropoff_datetime, PULocationID, DOLocationID) AS n
-  FROM ridepulse_dev.bronze.tlc_fhvhv_s10
+  FROM ridepulse_dev.bronze.tlc_fhvhv
 )
 SELECT hvfhs_license_num, request_datetime, pickup_datetime, dropoff_datetime, PULocationID, DOLocationID,
        trip_miles, base_passenger_fare, driver_pay, tips, shared_match_flag

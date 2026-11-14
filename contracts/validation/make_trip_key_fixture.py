@@ -23,7 +23,7 @@ WITH src AS (
   SELECT {cols}, base_passenger_fare,
          {SPARK_BASE_TRIP_KEY_SQL} AS spark_base_key,
          count(*) OVER (PARTITION BY {cols}) AS dup
-  FROM ridepulse_dev.bronze.tlc_fhvhv_s10
+  FROM ridepulse_dev.bronze.tlc_fhvhv
 ),
 picked AS (
   SELECT *, 'collision' AS why FROM src WHERE dup > 1
@@ -50,7 +50,7 @@ ORDER BY why, spark_base_key, base_passenger_fare
 def main():
     with tempfile.NamedTemporaryFile("w", suffix=".sql", delete=False) as f:
         f.write(SQL)
-    out = subprocess.run([str(ROOT / "scripts/feasibility/sql.sh"), f.name],
+    out = subprocess.run([str(ROOT / "scripts/sql.sh"), f.name],
                          check=True, capture_output=True, text=True).stdout.splitlines()
     rows = [line for line in out if " | " in line]
     header, data = rows[0].split(" | "), [r.split(" | ") for r in rows[1:]]

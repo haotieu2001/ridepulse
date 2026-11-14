@@ -259,7 +259,7 @@ ty thật sẽ có. Mọi thứ trong khung bên dưới là những gì một p
 <tr><td>Lakehouse</td><td>Một streaming pipeline (bronze, silver, supply, rules), file ingestion, daily gold job, views</td><td><code>databricks/</code></td></tr>
 <tr><td>Serving</td><td>AI/BI dashboard, Genie space, một metric view</td><td><code>databricks/src/bi/</code></td></tr>
 <tr><td>Platform</td><td>AWS (Lambdas, S3, SNS, EventBridge, DynamoDB), Databricks identities và grants, CI và gated deploy</td><td><code>infra/terraform/</code>, <code>.github/workflows/</code></td></tr>
-<tr><td>Script đo đạc</td><td>Supply simulator, các phép đo clock và sizing đứng sau các quyết định thiết kế</td><td><code>scripts/design/</code></td></tr>
+<tr><td>Supply simulator</td><td>Bản tham chiếu độc lập để kiểm tra dispatch của replayer, cùng phép đối chiếu cả tháng</td><td><code>scripts/supply/</code></td></tr>
 </tbody></table></div>
 <p>Các platform: Databricks Free Edition, Neon Free (Postgres), Confluent Cloud Basic (Kafka), AWS ở us-east-2. Vì sao
 chọn chúng, và vì sao chỉ một region, xem <a href="#adr">ADR-0001</a>.</p>
@@ -520,7 +520,7 @@ id nhỏ nhất.</li>
 request dự kiến trên mỗi driver idle nhất, nếu nó hơn zone hiện tại 1.5 lần (heat map của prep). ~12,000 lần di chuyển mỗi
 ngày simulated.</li>
 <li><strong>Vị trí là zone;</strong> chỉ driver đang bận mới gửi ping (~510 trung bình).</li>
-<li><strong>Deterministic:</strong> không có randomness thiếu seed. <code>scripts/design/supply/simulate_supply.py</code> là
+<li><strong>Deterministic:</strong> không có randomness thiếu seed. <code>scripts/supply/simulate_supply.py</code> là
 một bản cài đặt tham chiếu độc lập: replayer giao cho cả 1,020,410 trip của tháng 1 đúng cùng driver
 (<code>parity.py</code>), và CI kiểm tra điều tương tự trên một tháng dựng sẵn.</li>
 </ul>
@@ -1219,6 +1219,7 @@ tắt; số đo đứng sau mỗi quyết định nằm ở các mục được 
 <section>
 <h2 id="history"><span class="num">16</span>Dự án được xây thế nào</h2>
 <h3 id="phase0">16.1 Phase 0: feasibility, kiểm tra mọi giả định</h3>
+<p class="small muted">Code của Phase 0 và các script đo đạc thiết kế đã được gỡ ngày 14/11/2026, sau khi mọi kết quả đã ghi ở đây; chúng vẫn nằm trong lịch sử git ở tag <code>phase0-feasibility</code>.</p>
 <div class="tbl"><table>
 <thead><tr><th>Test</th><th>Chứng minh</th><th>Kết quả (2026-10-28)</th></tr></thead>
 <tbody>
@@ -1301,7 +1302,7 @@ Confluent). Một laptop chỉ cần công cụ và đăng nhập; không bao gi
 <li>Terraform: <code>init</code> và <code>plan</code> các stack bootstrap và confluent; cả hai phải báo "No changes". Không bao giờ
 apply từ hai laptop cùng lúc.</li>
 <li>Chỉ khi cần chạy lại các phép đo thiết kế: tải file Parquet 01/2025 và <code>taxi_zones.zip</code> vào <code>data/</code>
-(gitignored); các script trong <code>scripts/design/</code> và <code>ref/build_zone_geo.py</code> đọc chúng.</li>
+(gitignored); supply simulator trong <code>scripts/supply/</code> và <code>ref/build_zone_geo.py</code> đọc chúng.</li>
 </ol>
 <h3 id="repo">17.3 Bản đồ repository</h3>
 <div class="tbl"><table>
@@ -1313,7 +1314,7 @@ apply từ hai laptop cùng lúc.</li>
 <tr><td><code>services/</code></td><td><code>tlc_downloader</code>, <code>prep</code>, <code>seed</code>, <code>replayer</code>, <code>notifier</code>, <code>forwarder</code>, <code>window</code>, <code>payouts</code></td></tr>
 <tr><td><code>databricks/</code></td><td>Bundle: <code>src/bronze</code>, <code>silver</code>, <code>ref</code>, <code>ops</code> (supply, rules, alerts), <code>views</code>, <code>files</code>, <code>gold</code>, <code>daily</code>, <code>bi</code></td></tr>
 <tr><td><code>infra/terraform/</code></td><td>bootstrap, landing, confluent, debezium, replayer, databricks</td></tr>
-<tr><td><code>scripts/</code></td><td><code>drills/</code> (completeness, redelivery, planted profiles), <code>measure/</code> (alert latency và chấm điểm), <code>bi/</code>, <code>design/</code> (supply simulator, đo clock và sizing), <code>feasibility/</code> (Phase 0)</td></tr>
+<tr><td><code>scripts/</code></td><td><code>drills/</code> (completeness, redelivery, planted profiles), <code>measure/</code> (alert latency và chấm điểm), <code>bi/</code>, <code>supply/</code> (supply simulator tham chiếu); các công cụ vận hành ở ngoài cùng: <code>sql.sh</code>, <code>ec2_run.sh</code>, <code>db.sh</code>, các script chép secret</td></tr>
 <tr><td><code>ref/</code></td><td>Zone lookup, centroids, neighbours, CBD zones, fare rules</td></tr>
 <tr><td><code>ci/</code>, <code>.github/</code></td><td>Properties cho CDC test; <code>ci.yml</code>, <code>deploy.yml</code>, <code>prep.yml</code>, Dependabot</td></tr>
 </tbody></table></div>

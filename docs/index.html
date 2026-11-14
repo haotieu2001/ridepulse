@@ -259,7 +259,7 @@ real company has. Everything in the box below is what a real platform runs.</fig
 <tr><td>Lakehouse</td><td>One streaming pipeline (bronze, silver, supply, rules), file ingestion, the daily gold job, views</td><td><code>databricks/</code></td></tr>
 <tr><td>Serving</td><td>AI/BI dashboard, Genie space, a metric view</td><td><code>databricks/src/bi/</code></td></tr>
 <tr><td>Platform</td><td>AWS (Lambdas, S3, SNS, EventBridge, DynamoDB), Databricks identities and grants, CI and gated deploys</td><td><code>infra/terraform/</code>, <code>.github/workflows/</code></td></tr>
-<tr><td>Measurement scripts</td><td>The supply simulator, clock and sizing measurements behind the design decisions</td><td><code>scripts/design/</code></td></tr>
+<tr><td>The supply simulator</td><td>The independent reference the replayer's dispatch is checked against, and its month parity check</td><td><code>scripts/supply/</code></td></tr>
 </tbody></table></div>
 <p>Platforms: Databricks Free Edition, Neon Free (Postgres), Confluent Cloud Basic (Kafka), AWS in us-east-2. Why
 these, and why one region, is <a href="#adr">ADR-0001</a>.</p>
@@ -519,7 +519,7 @@ then the lowest id.</li>
 <li><strong>Repositioning every tick:</strong> each driver idle 10+ minutes moves to the zone within 3 miles with the most
 expected requests per idle driver if it beats its own by 1.5x (prep's heat map). ~12,000 moves a simulated day.</li>
 <li><strong>Positions are zones;</strong> pings only for busy drivers (~510 on average).</li>
-<li><strong>Deterministic:</strong> no unseeded randomness. <code>scripts/design/supply/simulate_supply.py</code> is an
+<li><strong>Deterministic:</strong> no unseeded randomness. <code>scripts/supply/simulate_supply.py</code> is an
 independent reference: the replayer gives every one of January's 1,020,410 trips the same driver
 (<code>parity.py</code>), and CI checks the same on a crafted month.</li>
 </ul>
@@ -1235,6 +1235,7 @@ are summarised here; the measurements behind each are in the sections linked.</p
 <section>
 <h2 id="history"><span class="num">16</span>How it was built</h2>
 <h3 id="phase0">16.1 Phase 0: feasibility, every assumption tested</h3>
+<p class="small muted">The Phase 0 code and the design measurement scripts were removed on 2026-11-14, once every result was written here; they are in the git history at tag <code>phase0-feasibility</code>.</p>
 <div class="tbl"><table>
 <thead><tr><th>Test</th><th>Proves</th><th>Result (2026-10-28)</th></tr></thead>
 <tbody>
@@ -1317,7 +1318,7 @@ Confluent). A laptop needs only tools and logins; nothing secret is ever copied 
 <li>Terraform: <code>init</code> and <code>plan</code> the bootstrap and confluent stacks; both must say "No changes". Never
 apply from two laptops at once.</li>
 <li>Only to rerun the design measurements: download the January 2025 Parquet and <code>taxi_zones.zip</code> into
-<code>data/</code> (gitignored); the scripts in <code>scripts/design/</code> and <code>ref/build_zone_geo.py</code> read
+<code>data/</code> (gitignored); the supply simulator in <code>scripts/supply/</code> and <code>ref/build_zone_geo.py</code> read
 them.</li>
 </ol>
 <h3 id="repo">17.3 Repository map</h3>
@@ -1330,7 +1331,7 @@ them.</li>
 <tr><td><code>services/</code></td><td><code>tlc_downloader</code>, <code>prep</code>, <code>seed</code>, <code>replayer</code>, <code>notifier</code>, <code>forwarder</code>, <code>window</code>, <code>payouts</code></td></tr>
 <tr><td><code>databricks/</code></td><td>The bundle: <code>src/bronze</code>, <code>silver</code>, <code>ref</code>, <code>ops</code> (supply, rules, alerts), <code>views</code>, <code>files</code>, <code>gold</code>, <code>daily</code>, <code>bi</code></td></tr>
 <tr><td><code>infra/terraform/</code></td><td>bootstrap, landing, confluent, debezium, replayer, databricks</td></tr>
-<tr><td><code>scripts/</code></td><td><code>drills/</code> (completeness, redelivery, planted profiles), <code>measure/</code> (alert latency and scoring), <code>bi/</code>, <code>design/</code> (supply simulator, clock and sizing measurements), <code>feasibility/</code> (Phase 0)</td></tr>
+<tr><td><code>scripts/</code></td><td><code>drills/</code> (completeness, redelivery, planted profiles), <code>measure/</code> (alert latency and scoring), <code>bi/</code>, <code>supply/</code> (the reference supply simulator); the operator tools at the top: <code>sql.sh</code>, <code>ec2_run.sh</code>, <code>db.sh</code>, the secret copies</td></tr>
 <tr><td><code>ref/</code></td><td>Zone lookup, centroids, neighbours, CBD zones, fare rules</td></tr>
 <tr><td><code>ci/</code>, <code>.github/</code></td><td>The CDC test's properties; <code>ci.yml</code>, <code>deploy.yml</code>, <code>prep.yml</code>, Dependabot</td></tr>
 </tbody></table></div>
