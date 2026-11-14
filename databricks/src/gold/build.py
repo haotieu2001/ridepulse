@@ -363,6 +363,9 @@ def agg_recon_daily(completeness: DataFrame, payouts: DataFrame | None, fees: Da
 
 # --- keys and the metric view -----------------------------------------------------------------------------------
 
+# A snapshot profile of the app's trips, the economics' one source; its tables land in ops (<table>_profile_metrics).
+MONITORED = ["fct_trips"]
+MONITOR_ASSETS = "/Workspace/Shared/ridepulse_monitors"   # writable by the jobs' identity, whoever deploys
 MARTS = ["agg_driver_weekly", "recon_completeness", "recon_payouts", "recon_fees", "agg_recon_daily"]
 # Account-level groups: Unity Catalog grants only to those, and Free Edition makes them through the workspace's
 # /api/2.0/account/scim/v2 (no account console). docs/index.html#security has how they were made.
@@ -555,20 +558,30 @@ class Gold:
               "FOR TABLES MATCH COLUMNS has_tag_value('pii', 'driver_id') AS c ON COLUMN c")
 
     def refresh_monitors(self) -> None:
-        """Refresh the data quality monitors on gold (#36), where they exist: a missing one is skipped, not a failure."""
+        """The data quality monitor on gold.fct_trips (#36): made here when missing, then refreshed after each build.
+        Here and not in the bundle: a monitor needs rights on its table, which the gold build has as the tables' owner
+        and the deploy identity (ridepulse-ci) never gets (ADR-0002). A monitor problem is printed, never a failed build."""
         try:
             from databricks.sdk import WorkspaceClient
+            from databricks.sdk.errors import NotFound
+            from databricks.sdk.service.catalog import MonitorSnapshot
             w = WorkspaceClient()
         except Exception as e:  # noqa: BLE001   outside Databricks (tests)
             print(f"no workspace client ({type(e).__name__}): monitors not refreshed")
             return
-        for table in ["fct_trips"]:
+        for table in MONITORED:
             name = self.t("gold", table)
             try:
+                try:
+                    w.quality_monitors.get(table_name=name)
+                except NotFound:
+                    w.quality_monitors.create(table_name=name, assets_dir=MONITOR_ASSETS, output_schema_name=f"{self.catalog}.ops",
+                                              snapshot=MonitorSnapshot())
+                    print(f"monitor created on {name}")
                 run = w.quality_monitors.run_refresh(table_name=name)
                 print(f"monitor refresh {name}: {run.refresh_id}")
             except Exception as e:  # noqa: BLE001
-                print(f"monitor refresh {name} skipped: {type(e).__name__}: {str(e)[:120]}")
+                print(f"monitor on {name} skipped: {type(e).__name__}: {str(e)[:160]}")
 
     def reconcile(self) -> None:
         """FR-14's three reconciliations, rebuilt whole: per closed day, per paid week, per day and fee. The TLC file is
