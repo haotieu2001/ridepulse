@@ -21,9 +21,8 @@ locals {
   groups = {
     ops      = { name = "ridepulse-ops", id = "81688477101432", sql = false }
     finance  = { name = "ridepulse-finance", id = "83395392296216", sql = true }
-    ridedesk = { name = "ridedesk", id = "86555571096285", sql = true }
   }
-  readers = ["finance", "ridedesk"]
+  readers = ["finance"]
 }
 
 # --- service principals --------------------------------------------------------------------------------------
@@ -74,7 +73,7 @@ resource "databricks_permission_assignment" "group" {
 #   databricks api patch /api/2.0/account/scim/v2/Groups/<group id> --json '{"schemas":
 #     ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],"Operations":[{"op":"add","path":"members","value":[{"value":"<id>"}]}]}'
 #
-# ridepulse-ops: the owner (75683080020262) and ridepulse-jobs. ridepulse-finance and ridedesk: nobody yet.
+# ridepulse-ops: the owner (75683080020262) and ridepulse-jobs. ridepulse-finance: nobody yet.
 #
 # Also by hand, for the same reason (no resource, and the rule-set API needs the account id): ridepulse-jobs may
 # assign the pii tag, which the gold build does to every driver_id column. In SQL, as the owner:
