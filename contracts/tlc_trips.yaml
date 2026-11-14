@@ -9,7 +9,7 @@
 # What each column means: docs/index.html#data.
 
 contract: tlc_trips
-version: 2.0.0   # 2.0.0 (2026-11-13): the replay sample became one company's (Uber), so in_sample changed meaning
+version: 2.0.0
 status: active
 owner: platform (Hao Tieu)
 consumers: [silver.tlc_trips, silver.trip_events, gold.*]
