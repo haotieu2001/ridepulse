@@ -1,5 +1,5 @@
 {
-  "_doc": "The replay sample (#80): the app's trips. A trip is in it when its licence is `provider` (the one company the app stands for; HV0003 is Uber) and int(first 8 hex digits of its base key, base 16) % modulus == 0. 20 is the plan's 5%. Read by contracts/trip_key.py (and so by prep, the replayer and the Spark key expressions), and by the bundle's copy. Part of the trip-key contract (contracts/tlc_trips.yaml, key.sample): a new modulus or provider changes which trips replay, so it is a major contract version, and contract_version must match the contract's.",
+  "_doc": "Which trips the app replays: the provider's trips (HV0003 = Uber) whose trip key falls in the 1-in-modulus hash bucket (20 = 5%). Definition: contracts/trip_key.py, in_replay. Changing either value changes the sample, a major contract change: bump contract_version here and the version in contracts/tlc_trips.yaml together.",
   "contract_version": "2.0.0",
   "modulus": 20,
   "provider": "HV0003"

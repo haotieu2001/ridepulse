@@ -1,14 +1,12 @@
-# Data contract: TLC high-volume for-hire trips, as RidePulse's silver layer exposes them.
-# One contract for both paths: silver.tlc_trips (the monthly file, every licence) and the app's trips (the stream's
-# events, which carry these columns' values; gold puts each trip back together) share these names, so the
-# reconciliation between them is a plain join on trip_key. The app replays one company's trips: key.sample.
+# Data contract for NYC TLC high-volume for-hire trips, as silver exposes them.
+# Two paths carry these columns under the same names: silver.tlc_trips (the monthly file, every licence) and the
+# app's trip events (gold rebuilds each trip from them). Reconciling the two is a join on trip_key.
 #
-# Baselines were measured on the full January 2025 file (20,405,666 rows) on 2026-10-29 with
-# contracts/validation/profile_tlc_month.sql and profile_details.sql. Column meanings and earlier
-# sample measurements: ridepulse-data-sources.html (the column guide).
+# Baselines: the full January 2025 file (20,405,666 rows), measured 2026-10-29 with contracts/validation/.
+# What each column means: docs/index.html#data.
 
 contract: tlc_trips
-version: 2.0.0   # 2.0.0 (2026-11-13): the replay sample is one company's (Uber, HV0003), so in_sample changed meaning
+version: 2.0.0   # 2.0.0 (2026-11-13): the replay sample became one company's (Uber), so in_sample changed meaning
 status: active
 owner: platform (Hao Tieu)
 consumers: [silver.tlc_trips, silver.trip_events, gold.*, RideDesk (read-only UC grant)]
@@ -37,8 +35,8 @@ key:
   sample:
     column: in_sample
     rule: >
-      the app's trips: licence = provider and int(first 8 hex digits of the base key, base 16) % modulus = 0, with
-      provider (HV0003, Uber) and modulus (20, 5%) from contracts/sample.json
+      the app's trips: licence = provider and int(first 8 hex digits of the base key, base 16) % modulus = 0;
+      provider (HV0003, Uber) and modulus (20, 5%) come from contracts/sample.json
 
 columns:
   # --- identity and lineage -------------------------------------------------------------------
@@ -102,11 +100,12 @@ columns:
   - {name: wav_request, type: BOOLEAN, nullable: false, from: wav_request_flag}
   - {name: wav_match, type: BOOLEAN, nullable: false, from: wav_match_flag}
 
-# Expectations run in the silver pipeline. Severity:
-#   fail = stop the load (the file or batch is wrong)    flag = keep the row, set dq_<name> = true
-#   warn = keep everything, alert when the rate leaves its band
-# Rates are per provider where the providers differ. Bands are relative to a trailing 3-month
-# baseline once three months are loaded; until then, the Jan 2025 baseline below.
+# Expectations. Prep runs the fail checks; silver runs them all. Severity:
+#   fail  stop the load: the file or batch is wrong
+#   flag  keep the row, set dq_<name> = true
+#   warn  keep everything; alert when the rate leaves its band
+# Rates are per provider where providers differ. Bands come from the January 2025 baseline below until three months
+# are loaded, then from the trailing three months.
 expectations:
   - name: key_inputs_present
     severity: fail
@@ -136,7 +135,7 @@ expectations:
     severity: warn
     sql: "pickup_datetime >= request_datetime"
     baseline: {rate_failing: {HV0003: 0.00788, HV0005: 0.01561}, early_by_s: {p50: 356, p99: 1575}}
-    note: "Real: likely pre-arranged or re-dispatched trips. Kept; waits use request_to_pickup_min with care."
+    note: "Real trips, likely pre-arranged or re-dispatched: kept. Read request_to_pickup_min with care for them."
   - name: dropoff_after_pickup
     severity: flag
     sql: "dropoff_datetime > pickup_datetime"
