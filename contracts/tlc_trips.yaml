@@ -107,7 +107,7 @@ columns:
 #   fail  stop the load: the file or batch is wrong
 #   flag  keep the row, set dq_<name> = true
 #   warn  keep everything; alert when the rate leaves its band
-# Bands come from the January 2025 baseline below.
+
 expectations:
   - name: key_inputs_present
     severity: fail
