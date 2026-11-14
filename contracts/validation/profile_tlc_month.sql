@@ -1,5 +1,5 @@
 -- Profile one full TLC high-volume FHV month against the contract's rules (contracts/tlc_trips.yaml).
--- Run: scripts/feasibility/sql.sh contracts/validation/profile_tlc_month.sql
+-- Run: scripts/sql.sh contracts/validation/profile_tlc_month.sql
 -- Source: the January 2025 file loaded by feasibility test S10.
 SELECT
   count(*)                                                                         AS rows,
@@ -53,4 +53,4 @@ SELECT
   -- flags
   array_sort(collect_set(shared_request_flag))                                     AS shared_request_values,
   array_sort(collect_set(wav_match_flag))                                          AS wav_match_values
-FROM ridepulse_dev.bronze.tlc_fhvhv_s10
+FROM ridepulse_dev.bronze.tlc_fhvhv

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run one SQL statement from a file on the workspace's SQL warehouse and print the result.
-# Usage: scripts/feasibility/sql.sh path/to/statement.sql
+# Usage: scripts/sql.sh path/to/statement.sql
 set -euo pipefail
 PROFILE="${DBX_PROFILE:-ridepulse}"
 

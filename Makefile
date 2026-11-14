@@ -2,8 +2,6 @@ AWS_PROFILE ?= ridepulse
 DBX_PROFILE ?= ridepulse
 CATALOG     ?= ridepulse_dev
 MONTH       ?= 2025-01
-TLC_FILE    := fhvhv_tripdata_$(MONTH).parquet
-TLC_URL     := https://d37ci6vzurychx.cloudfront.net/trip-data/$(TLC_FILE)
 BOOTSTRAP   := infra/terraform/bootstrap
 LANDING     := infra/terraform/landing
 CONFLUENT   := infra/terraform/confluent
@@ -14,7 +12,7 @@ YEAR        ?= 2025
 
 export AWS_PROFILE
 
-.PHONY: help identity-plan identity-apply ci-secret bootstrap-plan bootstrap-apply landing-plan landing-apply confluent-plan confluent-apply debezium-plan debezium-up debezium-down build-lambdas replayer-plan replayer-apply up down window-status replay bronze land-month forward files refpull gold land-zones land-noaa prep db-status db-migrate db-test db-seed catalog deploy s10-upload s10-run s10
+.PHONY: help identity-plan identity-apply ci-secret bootstrap-plan bootstrap-apply landing-plan landing-apply confluent-plan confluent-apply debezium-plan debezium-up debezium-down build-lambdas replayer-plan replayer-apply up down window-status replay bronze land-month forward files refpull gold land-zones land-noaa prep db-status db-migrate db-test db-seed catalog deploy
 
 help:
 	@echo "bootstrap-plan / bootstrap-apply  Terraform: state bucket, GitHub OIDC role, budget"
@@ -40,7 +38,6 @@ help:
 	@echo "deploy                            break-glass: the dev bundle as ridepulse-ci (CI deploys it after approval)"
 	@echo "identity-plan / identity-apply    Databricks identities, secrets and grants (infra/terraform/databricks)"
 	@echo "ci-secret                         copy the CI secret from SSM into the GitHub repository secret"
-	@echo "s10                               feasibility test S10: one TLC month into bronze"
 
 bootstrap-plan:
 	terraform -chdir=$(BOOTSTRAP) init -input=false
@@ -188,13 +185,3 @@ ci-secret:
 	aws ssm get-parameter --name /ridepulse/ci/databricks_client_secret --with-decryption --query Parameter.Value --output text | \
 	  gh secret set DATABRICKS_CLIENT_SECRET
 
-# TLC's CloudFront answers 403 after bursts of downloads, so retry with a pause.
-s10-upload:
-	mkdir -p data
-	test -s data/$(TLC_FILE) || curl -fL --retry 5 --retry-delay 30 --retry-all-errors -o data/$(TLC_FILE) $(TLC_URL)
-	databricks fs cp --overwrite data/$(TLC_FILE) dbfs:/Volumes/$(CATALOG)/raw/tlc/$(TLC_FILE) --profile $(DBX_PROFILE)
-
-s10-run:
-	cd databricks && databricks bundle run -t dev s10_tlc_month
-
-s10: catalog deploy s10-upload s10-run

@@ -226,27 +226,6 @@ targets:
           permissions:
             - service_principal_name: 17447026-e680-4550-8b53-23a3b7ac2f13   # ridepulse-window
               level: CAN_MANAGE
-        # S1 + S2: Confluent Cloud -> Databricks, JSON and Schema Registry Avro.
-        # Dev only: the Kafka and Schema Registry keys sit in this workspace's
-        # `ridepulse` secret scope (copied from SSM by scripts/feasibility/ssm_to_secret.sh).
-        s1_s2_kafka:
-          name: s1_s2_kafka
-          tasks:
-            - task_key: read_kafka
-              environment_key: default
-              spark_python_task:
-                python_file: ./src/feasibility/s1_s2_kafka.py
-                parameters:
-                  - --catalog
-                  - ${var.catalog}
-                  - --bootstrap
-                  - pkc-921jm.us-east-2.aws.confluent.cloud:9092
-                  - --sr-url
-                  - https://psrc-zw2j3j2.us-east-2.aws.confluent.cloud
-          environments:
-            - environment_key: default
-              spec:
-                environment_version: "3"
 
   # Deployed only by GitHub Actions, as the ridepulse-ci service principal
   # (DATABRICKS_CLIENT_ID / DATABRICKS_CLIENT_SECRET). The default root path

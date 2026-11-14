@@ -12,7 +12,7 @@ import tempfile
 import yaml
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-TABLE = sys.argv[1] if len(sys.argv) > 1 else "ridepulse_dev.bronze.tlc_fhvhv_s10"
+TABLE = sys.argv[1] if len(sys.argv) > 1 else "ridepulse_dev.bronze.tlc_fhvhv"
 MONTH = sys.argv[2] if len(sys.argv) > 2 else "2025-01"
 
 
@@ -28,7 +28,7 @@ def main():
     sql = "SELECT " + ",\n  ".join(parts) + f"\nFROM {TABLE}"
     with tempfile.NamedTemporaryFile("w", suffix=".sql", delete=False) as f:
         f.write(sql)
-    out = subprocess.run([str(ROOT / "scripts/feasibility/sql.sh"), f.name],
+    out = subprocess.run([str(ROOT / "scripts/sql.sh"), f.name],
                          check=True, capture_output=True, text=True).stdout.splitlines()
     rows = [line for line in out if " | " in line]
     got = dict(zip(rows[0].split(" | "), (int(v) for v in rows[1].split(" | ")), strict=True))

@@ -27,8 +27,8 @@ package = false
 [tool.ruff]
 line-length = 140
 target-version = "py312"
-# Phase 0's feasibility scripts are kept as they ran; data/ and build/ are local scratch.
-extend-exclude = ["databricks/src/feasibility", "scripts/feasibility", "data", "build"]
+# data/ and build/ are local scratch.
+extend-exclude = ["data", "build"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP"]

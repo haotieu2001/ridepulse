@@ -1,7 +1,7 @@
 """#7: the replayer's supply model against the simulator on a real month: the same driver for every trip.
 
     uv run python -m services.prep 2025-01 --bucket <landing bucket> --source-file <file> --out-dir <dir>
-    uv run python scripts/design/supply/parity.py <dir>
+    uv run python scripts/supply/parity.py <dir>
 
 Replays from the warm-up day at 10x through services/replayer/offline.py (real slices and inputs, driver
 state round-tripped every tick) and runs simulate_supply.py from the same start with the same empty pool.
@@ -10,8 +10,8 @@ import pathlib
 import sys
 from datetime import datetime, timedelta
 
-ROOT = pathlib.Path(__file__).resolve().parents[3]
-sys.path[:0] = [str(ROOT), str(ROOT / "scripts/design/supply")]
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+sys.path[:0] = [str(ROOT), str(ROOT / "scripts/supply")]
 import simulate_supply as sim  # noqa: E402
 
 from services.prep.prep import DirStore  # noqa: E402

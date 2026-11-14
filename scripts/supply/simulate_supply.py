@@ -23,7 +23,7 @@ assignments in trip_key order, then dropoffs in trip_key order, then the boundar
 shared between the two.
 
 Run from the repo root (needs data/fhvhv_tripdata_2025-01.parquet and ref/zone_*.csv):
-  uv run --with pyarrow==21.0.0 python scripts/design/supply/simulate_supply.py
+  uv run --with pyarrow==21.0.0 python scripts/supply/simulate_supply.py
 """
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
-ROOT = pathlib.Path(__file__).resolve().parents[3]
+ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from contracts.trip_key import KEY_FIELDS, SAMPLE_MODULUS, SEPARATOR, base_trip_key  # noqa: E402
 from services.replayer.supply import sign_on_zone  # noqa: E402

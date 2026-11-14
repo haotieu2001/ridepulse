@@ -8,7 +8,7 @@ to the slices, so the replayer stays a stateless per-minute Lambda:
                  driver signing on starts, drawn with a hash of driver and time
 
 A driver is busy from DriverAssigned to TripCompleted as they replay (the ADR-0004 schedule). The
-reference is scripts/design/supply/simulate_supply.py; services/prep/tests/test_supply.py holds them equal.
+reference is scripts/supply/simulate_supply.py; services/prep/tests/test_supply.py holds them equal.
 """
 from __future__ import annotations
 

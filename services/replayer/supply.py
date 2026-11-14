@@ -2,7 +2,7 @@
 
 State lives in dispatch.drivers between ticks, so a tick loads it, walks its window and writes back only
 the drivers that changed. Nothing here reads a clock or an unseeded random source, so a retried tick
-makes the same choices. The reference is scripts/design/supply/simulate_supply.py, an independent
+makes the same choices. The reference is scripts/supply/simulate_supply.py, an independent
 implementation: the same assignments on all of January 2025 (docs/index.html#supply), and in CI on a crafted
 month (services/replayer/tests/test_supply.py).
 

@@ -9,7 +9,7 @@
 -- counts 37 zones, this gives 38. Battery Park (12, one intra-zone trip) is the weakest evidence.
 SELECT PULocationID AS zone_id, count(*) AS intra_zone_trips,
        round(avg(CASE WHEN cbd_congestion_fee > 0 THEN 1.0 ELSE 0.0 END), 4) AS paid_share
-FROM ridepulse_dev.bronze.tlc_fhvhv_s10
+FROM ridepulse_dev.bronze.tlc_fhvhv
 WHERE PULocationID = DOLocationID AND pickup_datetime >= '2025-01-05'
 GROUP BY PULocationID
 HAVING paid_share > 0.9

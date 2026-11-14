@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Copy SSM parameters into the Databricks secret scope `ridepulse`, without printing them.
-# Usage: scripts/feasibility/ssm_to_secret.sh SSM_NAME=SECRET_KEY [SSM_NAME=SECRET_KEY ...]
+# Usage: scripts/ssm_to_secret.sh SSM_NAME=SECRET_KEY [SSM_NAME=SECRET_KEY ...]
 #   e.g. ssm_to_secret.sh /ridepulse/confluent/dev/kafka_api_key=kafka-api-key
 set -euo pipefail
 umask 077

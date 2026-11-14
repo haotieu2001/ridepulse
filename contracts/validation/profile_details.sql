@@ -25,4 +25,4 @@ SELECT
   percentile(abs(trip_time - (unix_timestamp(dropoff_datetime) - unix_timestamp(pickup_datetime))), 0.5)
     FILTER (WHERE trip_time <> unix_timestamp(dropoff_datetime) - unix_timestamp(pickup_datetime)) AS trip_time_gap_p50_s,
   max(unix_timestamp(dropoff_datetime) - unix_timestamp(pickup_datetime))          AS duration_max_s
-FROM ridepulse_dev.bronze.tlc_fhvhv_s10
+FROM ridepulse_dev.bronze.tlc_fhvhv
