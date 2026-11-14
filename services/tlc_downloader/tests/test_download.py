@@ -150,8 +150,44 @@ def test_a_dropped_stream_is_downloaded_again(origin):
     assert status == "landed" and v.size == len(origin.body) and origin.requests.count("GET") == 2
 
 
+def trip_file(licences: list[str]) -> bytes:
+    """A small TLC-shaped Parquet file: one row per licence, numbered by position, two rows per row group."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    buf = io.BytesIO()
+    pq.write_table(pa.table({"hvfhs_license_num": licences, "trip_miles": [float(i) for i in range(len(licences))]}),
+                   buf, row_group_size=2)
+    return buf.getvalue()
+
+
+def test_a_trip_month_lands_with_the_apps_company_only(origin):
+    import pyarrow.parquet as pq
+    origin.body = trip_file(["HV0003", "HV0005", "HV0003", "HV0003", "HV0005"])
+    store = MemoryStore()
+    status, v = land(Source("tlc_fhvhv", "2025-01", origin.url, keep_provider="HV0003"), store, pause_s=0)
+    assert status == "landed"
+    assert v.s3_key == "raw/tlc_fhvhv/2025-01/etag=abc-1/provider=HV0003/fhvhv_tripdata_2025-01.parquet"
+    assert (v.provider, v.source_rows, v.rows) == ("HV0003", 5, 3)
+    landed = pq.read_table(io.BytesIO(store.objects[v.s3_key]))
+    assert landed["hvfhs_license_num"].to_pylist() == ["HV0003"] * 3
+    assert landed["trip_miles"].to_pylist() == [0.0, 2.0, 3.0]   # file order kept, so every trip key is unchanged
+    assert v.sha256 == hashlib.sha256(store.objects[v.s3_key]).hexdigest() and v.size == len(store.objects[v.s3_key])
+    assert store.metadata[v.s3_key]["source-etag"] == "abc-1"
+
+
+def test_a_month_landed_before_the_filter_lands_again(origin):
+    origin.body = trip_file(["HV0003", "HV0005"])
+    store = MemoryStore()
+    land(src(origin), store, pause_s=0)   # as published: no provider in the manifest
+    status, v = land(Source("tlc_fhvhv", "2025-01", origin.url, keep_provider="HV0003"), store, pause_s=0)
+    assert status == "landed" and v.rows == 1
+    assert land(Source("tlc_fhvhv", "2025-01", origin.url, keep_provider="HV0003"), store, pause_s=0)[0] == "unchanged"
+
+
 def test_source_kinds():
     assert sources("fhvhv", "2025-01")[0].url.endswith("/trip-data/fhvhv_tripdata_2025-01.parquet")
+    assert sources("fhvhv", "2025-01")[0].keep_provider == "HV0003"   # the app's company, from contracts/sample.json
+    assert sources("zones")[0].keep_provider is None
     assert [s.file_name for s in sources("zones")] == ["taxi_zone_lookup.csv", "taxi_zones.zip"]
     assert sources("noaa", "2025")[0].url.endswith("/csv.gz/by_year/2025.csv.gz")
     with pytest.raises(ValueError):

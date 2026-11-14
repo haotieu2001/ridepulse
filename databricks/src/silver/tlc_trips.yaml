@@ -1,11 +1,12 @@
-# Data contract: one NYC TLC high-volume for-hire trip (Uber, Lyft, Via, Juno), column by column.
+# Data contract: one Uber trip from the NYC TLC high-volume for-hire records, column by column.
 #
 # Two kinds of data follow it, under the same column names:
-#   - silver.tlc_trips: the TLC monthly file, every company's trips.
+#   - silver.tlc_trips: the TLC monthly file, Uber's trips only (the downloader drops other licences at landing).
 #   - the app's trip events: the trips the app replayed; gold rebuilds each one in this shape.
 # Same names on both sides, so checking the app against the file is a join on trip_key.
 #
-# Baselines below: measured on the January 2025 file (20,405,666 rows) on 2026-10-29, by contracts/validation/.
+# Baselines below: measured on the published January 2025 file (20,405,666 rows, every licence) on 2026-10-29,
+# by contracts/validation/; a rate is Uber's where one is given.
 # What each column means: docs/index.html#data.
 
 contract: tlc_trips
@@ -48,8 +49,7 @@ columns:
   - {name: provider_code, type: STRING, nullable: false, from: hvfhs_license_num,
      values: {HV0002: Juno, HV0003: Uber, HV0004: Via, HV0005: Lyft}}
   - {name: dispatching_base_num, type: STRING, nullable: false, from: dispatching_base_num}
-  - {name: originating_base_num, type: STRING, nullable: true, from: originating_base_num,
-     note: "Lyft leaves it empty (about 99.7% null)"}
+  - {name: originating_base_num, type: STRING, nullable: true, from: originating_base_num}
   - {name: source_file, type: STRING, nullable: false, from: "_metadata.file_path"}
   - {name: source_etag, type: STRING, nullable: false, from: download metadata}
   - {name: row_group, type: INT, nullable: false, from: parquet reader}
@@ -59,7 +59,7 @@ columns:
   - {name: requested_at, type: TIMESTAMP_NTZ, nullable: false, from: request_datetime,
      note: "2-4% fall exactly on :00 (minute-rounded requests)"}
   - {name: driver_arrived_at, type: TIMESTAMP_NTZ, nullable: true, from: on_scene_datetime,
-     note: "Null for 99.72% of Lyft trips in Jan 2025 (Lyft didn't report it before 2025); 0% Uber"}
+     note: "Never null for Uber in Jan 2025"}
   - {name: picked_up_at, type: TIMESTAMP_NTZ, nullable: false, from: pickup_datetime, note: "defines the file month"}
   - {name: dropped_off_at, type: TIMESTAMP_NTZ, nullable: false, from: dropoff_datetime, note: "can fall in the next month"}
   - {name: pickup_date, type: DATE, nullable: false, from: derived, rule: "to_date(picked_up_at)", note: "partition and reconciliation key"}
@@ -77,7 +77,7 @@ columns:
   - {name: dropoff_zone_id, type: INT, nullable: false, from: DOLocationID,
      note: "265 = Outside of NYC is valid (4.0% of dropoffs); only 264 is unknown"}
   - {name: trip_miles, type: "DECIMAL(8,3)", nullable: false, from: trip_miles,
-     note: "Lyft reports 3 decimals, Uber 2; max 507.22 mi in Jan 2025"}
+     note: "2 decimals for Uber"}
   - {name: touches_cbd, type: BOOLEAN, nullable: false, from: derived,
      rule: "pickup or dropoff zone in ref.cbd_zones (the 37 Congestion Relief Zone zones)"}
 
@@ -107,8 +107,7 @@ columns:
 #   fail  stop the load: the file or batch is wrong
 #   flag  keep the row, set dq_<name> = true
 #   warn  keep everything; alert when the rate leaves its band
-# Rates are per provider where providers differ. Bands come from the January 2025 baseline below until three months
-# are loaded, then from the trailing three months.
+# Bands come from the January 2025 baseline below.
 expectations:
   - name: key_inputs_present
     severity: fail
@@ -117,7 +116,8 @@ expectations:
   - name: provider_known
     severity: fail
     sql: "hvfhs_license_num IN ('HV0002', 'HV0003', 'HV0004', 'HV0005')"
-    baseline: {rows_failing: 0, share: {HV0003: 0.7526, HV0005: 0.2474}}
+    baseline: {rows_failing: 0}
+    note: "The landed file is HV0003 only; in the published one, HV0003 is 75.26% of rows (HV0005 the rest)"
   - name: pickup_in_file_month
     severity: fail
     sql: "date_trunc('MONTH', pickup_datetime) = <file month>"
@@ -137,7 +137,7 @@ expectations:
   - name: pickup_after_request
     severity: warn
     sql: "pickup_datetime >= request_datetime"
-    baseline: {rate_failing: {HV0003: 0.00788, HV0005: 0.01561}, early_by_s: {p50: 356, p99: 1575}}
+    baseline: {rate_failing: {HV0003: 0.00788}, early_by_s: {p50: 356, p99: 1575}}
     note: "Real trips, likely pre-arranged or re-dispatched: kept. Read request_to_pickup_min with care for them."
   - name: dropoff_after_pickup
     severity: flag
@@ -147,7 +147,7 @@ expectations:
     severity: flag
     sql: "trip_time = unix_timestamp(dropoff_datetime) - unix_timestamp(pickup_datetime)"
     baseline: {rate_failing: 0.000488, gap_s_p50: 1}
-    note: "Lyft's trip_time drifts in 2026 (20.6% of Aug 2026 trips); duration_s is authoritative"
+    note: "duration_s is authoritative"
   - name: miles_positive
     severity: flag
     sql: "trip_miles > 0"
@@ -156,7 +156,6 @@ expectations:
     severity: flag
     sql: "base_passenger_fare > 0"
     baseline: {rate_failing: 0.000843, negative_rows: 2427}
-    note: "Dec 2024 had 1.40% Lyft zeros: judge per provider and month, not with one fixed threshold"
   - name: driver_pay_positive
     severity: flag
     sql: "driver_pay > 0"

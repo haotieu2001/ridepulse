@@ -268,15 +268,17 @@ these, and why one region, is <a href="#adr">ADR-0001</a>.</p>
 <section>
 <h2 id="data"><span class="num">2</span>The data: what is real, what is made up</h2>
 <h3 id="data-real">Real data, pinned to a version</h3>
-<p>Every downloaded file is pinned: the downloader streams it into S3 under
-<code>raw/&lt;source&gt;/&lt;id&gt;/etag=&lt;etag&gt;/&lt;file&gt;</code> and writes a manifest beside it with the URL,
-ETag, Last-Modified, size and SHA-256. A changed ETag is a re-publication, landed as a new version, never an
-overwrite. The trip columns and how they behave are the contract <code>contracts/tlc_trips.yaml</code>.</p>
+<p>Every downloaded file is pinned: it lands in S3 under
+<code>raw/&lt;source&gt;/&lt;id&gt;/etag=&lt;etag&gt;/&lt;file&gt;</code> with a manifest beside it (URL, ETag,
+Last-Modified, size, SHA-256). A changed ETag is a re-publication, landed as a new version, never an overwrite. A trip
+month lands as <strong>Uber's trips only</strong>: the downloader drops the other licences' rows, keeps the rest in
+file order (so every trip key stays the same), and lands the result under <code>.../provider=HV0003/</code>; the
+manifest keeps the published file's ETag and both row counts. From landing on, the lakehouse holds no other company's
+trips. The trip columns and how they behave are the contract <code>contracts/tlc_trips.yaml</code>.</p>
 <div class="tbl"><table>
 <thead><tr><th>Source</th><th>What</th><th>Version</th><th>Used for</th></tr></thead>
 <tbody>
-<tr><td>NYC TLC high-volume for-hire trips</td><td>One row per trip (a pooled ride is a row per rider): times, zones, miles, fares, fees, driver pay. Monthly, about two months after the month ends</td><td>2025-01: 20,405,666 rows, ETag <code>82b3922b...-94</code>; 2024-12: 21,068,851; 2024-01: 19,663,930</td><td>Uber's trips of January 2025 are replayed (the 5% sample) and reconciled against this file. December and
-January 2024 are landed for the file pipeline; gold doesn't read them</td></tr>
+<tr><td>NYC TLC high-volume for-hire trips</td><td>One row per trip (a pooled ride is a row per rider): times, zones, miles, fares, fees, driver pay. Monthly, about two months after the month ends</td><td>2025-01: 20,405,666 rows published, ETag <code>82b3922b...-94</code>; Uber's 75.26% of them land</td><td>Only January 2025, and only Uber's trips (HV0003): the 5% sample of them is replayed and reconciled against the rest of this file</td></tr>
 <tr><td>NYC TLC taxi zones</td><td>The 265 zones, their boroughs and polygons</td><td><code>taxi_zone_lookup.csv</code>, <code>taxi_zones.zip</code></td><td><code>dispatch.zones</code>, <code>ref.zones</code>, neighbours and centroids (<code>ref/</code>)</td></tr>
 <tr><td>NOAA GHCN-Daily</td><td>Central Park (USW00094728): precipitation, snow, temperatures per day; failed-QC values left out</td><td>2025, 165,966,645 bytes</td><td><code>gold.dim_weather_day</code></td></tr>
 <tr><td>Fee rates</td><td>BCF 2.75% (measured only, no primary source), sales tax 8.875%, congestion surcharge $2.75, CBD fee $1.50 from 2025-01-05, airport fee $2.50 (then $3.50 from 2026-03-15)</td><td><code>ref/fare_rules.csv</code></td><td>The fees reconciliation</td></tr>
@@ -333,7 +335,7 @@ watermark, as silver has consumed it, reaches <strong>D + 30 h</strong>: dropoff
 <div class="tbl"><table>
 <thead><tr><th>Area</th><th>Requirements</th></tr></thead>
 <tbody>
-<tr><td>Ingestion</td><td>FR-1 monthly files with ETag pinned · FR-2 full months into bronze and <code>silver.tlc_trips</code> under the contract · FR-3 replay a deterministic 5% sample of Uber's trips as trip lifecycles plus outbox events, with synthetic pings to Kafka · FR-4 log-based CDC into Kafka and bronze · FR-5 reference tables by a query-based pull · FR-6 NOAA weather</td></tr>
+<tr><td>Ingestion</td><td>FR-1 monthly files with ETag pinned · FR-2 Uber's trips of a month into bronze and <code>silver.tlc_trips</code> under the contract · FR-3 replay a deterministic 5% sample of Uber's trips as trip lifecycles plus outbox events, with synthetic pings to Kafka · FR-4 log-based CDC into Kafka and bronze · FR-5 reference tables by a query-based pull · FR-6 NOAA weather</td></tr>
 <tr><td>Processing</td><td>FR-7 the contract's expectations: <code>fail</code> quarantines, <code>flag</code> keeps the row with <code>dq_&lt;name&gt;</code>, <code>warn</code> alerts · FR-8 silver is effectively-once: stream events by <code>event_id</code>, CDC rows by (primary key, LSN) · FR-9 driver state is SCD2 as of commit time; rules count supply as of each window's end, so a rerun gives the same result</td></tr>
 <tr><td>Rules and alerts</td><td>FR-10 R1 surge, R2 long waits, R3 airport queue, R4 app outage per surge area over 15-minute simulated windows, thresholds in <code>ref.ops_rules</code> · FR-11 one alert per <code>alert_id = hash(rule, area, window_start)</code>, even on retry · FR-12 late data is never silent</td></tr>
 <tr><td>Analytics</td><td>FR-13 gold: the app's trips and driver shifts as a star schema; daily economics, zone x hour and weather through the

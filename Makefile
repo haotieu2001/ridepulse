@@ -24,7 +24,7 @@ help:
 	@echo "up / down / window-status         open or close a demo window now (Debezium + replayer)"
 	@echo "replay DATE=2025-01-06 SPEED=10   start the replay, or jump forward, at a day boundary"
 	@echo "bronze                            one streaming run, then the views (a window runs both)"
-	@echo "land-month MONTH=2025-01          land one HVFHV month in S3 (pinned to its ETag)"
+	@echo "land-month MONTH=2025-01          land Uber's trips of one HVFHV month in S3 (pinned to its ETag)"
 	@echo "land-zones / land-noaa YEAR=2025  land the zone files / one NOAA GHCN-Daily year"
 	@echo "forward [PREFIX=raw/...]          copy files already landed into the volume (new ones go by themselves)"
 	@echo "files                             landed files into bronze and silver (silver.tlc_trips, weather_day)"

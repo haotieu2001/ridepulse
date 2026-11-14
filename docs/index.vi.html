@@ -268,15 +268,17 @@ chọn chúng, và vì sao chỉ một region, xem <a href="#adr">ADR-0001</a>.<
 <section>
 <h2 id="data"><span class="num">2</span>Dữ liệu: cái gì thật, cái gì tự tạo</h2>
 <h3 id="data-real">Dữ liệu thật, được pin theo version</h3>
-<p>Mọi file tải về đều được pin: downloader stream file vào S3 dưới
-<code>raw/&lt;source&gt;/&lt;id&gt;/etag=&lt;etag&gt;/&lt;file&gt;</code> và ghi kèm một manifest gồm URL, ETag, Last-Modified,
-kích thước và SHA-256. ETag thay đổi nghĩa là file được công bố lại, sẽ land thành một version mới, không bao giờ ghi đè.
-Các cột của trip và cách chúng hoạt động nằm trong contract <code>contracts/tlc_trips.yaml</code>.</p>
+<p>Mọi file tải về đều được pin: file land vào S3 dưới
+<code>raw/&lt;source&gt;/&lt;id&gt;/etag=&lt;etag&gt;/&lt;file&gt;</code> kèm một manifest (URL, ETag, Last-Modified, kích
+thước, SHA-256). ETag thay đổi nghĩa là file được công bố lại, sẽ land thành một version mới, không bao giờ ghi đè. Một
+tháng trip chỉ land <strong>các chuyến của Uber</strong>: downloader bỏ các dòng của hãng khác, giữ nguyên thứ tự
+dòng (nên trip key không đổi), và land kết quả dưới <code>.../provider=HV0003/</code>; manifest giữ ETag của file gốc
+và số dòng trước, sau khi lọc. Từ landing trở đi, lakehouse không chứa chuyến của hãng nào khác. Các cột của trip và
+cách chúng hoạt động nằm trong contract <code>contracts/tlc_trips.yaml</code>.</p>
 <div class="tbl"><table>
 <thead><tr><th>Nguồn</th><th>Nội dung</th><th>Version</th><th>Dùng cho</th></tr></thead>
 <tbody>
-<tr><td>NYC TLC high-volume for-hire trips</td><td>Mỗi trip một row (ride pooled thì mỗi rider một row): thời gian, zone, số dặm, giá, phí, tiền trả driver. Công bố hằng tháng, khoảng hai tháng sau khi tháng kết thúc</td><td>2025-01: 20,405,666 rows, ETag <code>82b3922b...-94</code>; 2024-12: 21,068,851; 2024-01: 19,663,930</td><td>Các chuyến của Uber trong 01/2025 được replay (mẫu 5%) và đối soát với file này. 12/2024 và 01/2024 được
-land cho pipeline file; gold không đọc chúng</td></tr>
+<tr><td>NYC TLC high-volume for-hire trips</td><td>Mỗi trip một row (ride pooled thì mỗi rider một row): thời gian, zone, số dặm, giá, phí, tiền trả driver. Công bố hằng tháng, khoảng hai tháng sau khi tháng kết thúc</td><td>2025-01: 20,405,666 rows công bố, ETag <code>82b3922b...-94</code>; 75.26% của Uber được land</td><td>Chỉ 01/2025, và chỉ các chuyến của Uber (HV0003): mẫu 5% trong đó được replay và đối soát với phần còn lại của file</td></tr>
 <tr><td>NYC TLC taxi zones</td><td>265 zone, borough và polygon của chúng</td><td><code>taxi_zone_lookup.csv</code>, <code>taxi_zones.zip</code></td><td><code>dispatch.zones</code>, <code>ref.zones</code>, neighbours và centroids (<code>ref/</code>)</td></tr>
 <tr><td>NOAA GHCN-Daily</td><td>Central Park (USW00094728): lượng mưa, tuyết, nhiệt độ theo ngày; bỏ các giá trị fail QC</td><td>2025, 165,966,645 bytes</td><td><code>gold.dim_weather_day</code></td></tr>
 <tr><td>Mức phí</td><td>BCF 2.75% (chỉ đo được, không có nguồn chính thức), sales tax 8.875%, congestion surcharge $2.75, CBD fee $1.50 từ 2025-01-05, airport fee $2.50 (rồi $3.50 từ 2026-03-15)</td><td><code>ref/fare_rules.csv</code></td><td>Đối soát phí</td></tr>
@@ -333,7 +335,7 @@ watermark, theo phần silver đã tiêu thụ, đạt <strong>D + 30 h</strong>
 <div class="tbl"><table>
 <thead><tr><th>Mảng</th><th>Requirements</th></tr></thead>
 <tbody>
-<tr><td>Ingestion</td><td>FR-1 file hằng tháng có pin ETag · FR-2 cả tháng vào bronze và <code>silver.tlc_trips</code> theo contract · FR-3 replay một sample 5% deterministic các chuyến của Uber thành trip lifecycle kèm outbox events, cùng pings synthetic vào Kafka · FR-4 log-based CDC vào Kafka và bronze · FR-5 bảng reference qua query-based pull · FR-6 thời tiết NOAA</td></tr>
+<tr><td>Ingestion</td><td>FR-1 file hằng tháng có pin ETag · FR-2 các chuyến của Uber trong một tháng vào bronze và <code>silver.tlc_trips</code> theo contract · FR-3 replay một sample 5% deterministic các chuyến của Uber thành trip lifecycle kèm outbox events, cùng pings synthetic vào Kafka · FR-4 log-based CDC vào Kafka và bronze · FR-5 bảng reference qua query-based pull · FR-6 thời tiết NOAA</td></tr>
 <tr><td>Processing</td><td>FR-7 các expectation của contract: <code>fail</code> thì quarantine, <code>flag</code> giữ row với <code>dq_&lt;name&gt;</code>, <code>warn</code> thì cảnh báo · FR-8 silver là effectively-once: stream events theo <code>event_id</code>, CDC rows theo (primary key, LSN) · FR-9 driver state là SCD2 theo commit time; rules đếm supply tại thời điểm cuối mỗi window, nên chạy lại cho cùng kết quả</td></tr>
 <tr><td>Rules và alerts</td><td>FR-10 R1 surge, R2 chờ lâu, R3 hàng chờ sân bay, R4 app outage cho mỗi surge area trên window simulated 15 phút, ngưỡng trong <code>ref.ops_rules</code> · FR-11 mỗi <code>alert_id = hash(rule, area, window_start)</code> chỉ một alert, kể cả khi retry · FR-12 dữ liệu trễ không bao giờ im lặng</td></tr>
 <tr><td>Analytics</td><td>FR-13 gold: các chuyến của app và shift của driver dạng star schema; kinh tế hằng ngày, zone x giờ và thời tiết qua

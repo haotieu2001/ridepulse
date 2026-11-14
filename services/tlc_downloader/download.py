@@ -1,30 +1,37 @@
-"""Land source files in the S3 landing bucket exactly as published, pinned to their version.
+"""Land source files in the S3 landing bucket, pinned to their version.
 
     uv run python -m services.tlc_downloader fhvhv 2025-01     # one HVFHV trip month
     uv run python -m services.tlc_downloader zones             # zone lookup + zone shapefile
     uv run python -m services.tlc_downloader noaa 2025         # GHCN-Daily, one year (all stations)
 
-Each file is streamed from the source into S3 (no local copy) under a key that contains the source
-ETag:  raw/<source>/<id>/etag=<etag>/<file name>
+Files land under a key that contains the source ETag:  raw/<source>/<id>/etag=<etag>/<file name>
 The TLC re-publishes months, so a new version lands next to the old one, never over it. A manifest
 at manifests/<source>/<id>/<file name>.json records the current version (URL, ETag, Last-Modified,
 size, sha256, S3 key) and every earlier one. Re-running is a no-op while the source ETag is unchanged.
+
+Zones and NOAA files are streamed into S3 as published. A trip month is the app's company's trips only: the file
+is downloaded, its other licences' rows dropped (row groups in order, so every trip key stays the same), and the
+result lands under .../etag=<etag>/provider=<licence>/; the manifest keeps the source ETag and both row counts.
 """
 from __future__ import annotations
 
 import hashlib
 import http.client
 import json
+import tempfile
 import time
 import urllib.parse
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Protocol
+
+from contracts.trip_key import APP_PROVIDER
 
 
 class Readable(Protocol):
     """What the downloader streams through: anything with read(n), an HTTP response or a hashing wrapper."""
-    def read(self, n: int = -1) -> bytes: ...
+    def read(self, n: int = -1, /) -> bytes: ...
 
 TLC = "https://d37ci6vzurychx.cloudfront.net"
 NOAA = "https://noaa-ghcn-pds.s3.amazonaws.com"
@@ -36,6 +43,7 @@ class Source:
     source: str      # tlc_fhvhv, tlc_zones, noaa_ghcnd
     id: str          # 2025-01, current, 2025
     url: str
+    keep_provider: str | None = None   # a trip month: land only this licence's rows
 
     @property
     def file_name(self) -> str:
@@ -46,14 +54,15 @@ class Source:
         return f"manifests/{self.source}/{self.id}/{self.file_name}.json"
 
     def raw_key(self, etag: str) -> str:
-        return f"raw/{self.source}/{self.id}/etag={etag}/{self.file_name}"
+        kept = f"provider={self.keep_provider}/" if self.keep_provider else ""
+        return f"raw/{self.source}/{self.id}/etag={etag}/{kept}{self.file_name}"
 
 
 def sources(kind: str, arg: str | None = None) -> list[Source]:
     if kind == "fhvhv":
         datetime.strptime(arg or "", "%Y-%m")   # validates YYYY-MM
         assert arg is not None
-        return [Source("tlc_fhvhv", arg, f"{TLC}/trip-data/fhvhv_tripdata_{arg}.parquet")]
+        return [Source("tlc_fhvhv", arg, f"{TLC}/trip-data/fhvhv_tripdata_{arg}.parquet", keep_provider=APP_PROVIDER)]
     if kind == "zones":
         return [Source("tlc_zones", "current", f"{TLC}/misc/taxi_zone_lookup.csv"),
                 Source("tlc_zones", "current", f"{TLC}/misc/taxi_zones.zip")]
@@ -184,6 +193,9 @@ class Version:
     sha256: str
     s3_key: str
     landed_at: str
+    provider: str | None = None      # set when only one licence's rows landed
+    source_rows: int | None = None   # rows in the published file
+    rows: int | None = None          # rows landed
 
 
 def _clean_etag(etag: str | None) -> str:
@@ -199,7 +211,8 @@ class ShortBody(Exception):
     pass
 
 
-def _stream_once(src: Source, etag: str, key: str, store: Store, pause_s: float):
+def _get(src: Source, etag: str, pause_s: float, sink) -> tuple[_Hashing, str]:
+    """GET the file and pass its body to sink(readable, last_modified), checking the ETag and the length."""
     with _request(src.url, "GET", pause_s=pause_s) as resp:
         got = _clean_etag(resp.headers.get("ETag"))
         if got != etag:
@@ -207,11 +220,54 @@ def _stream_once(src: Source, etag: str, key: str, store: Store, pause_s: float)
         expected = int(resp.headers["Content-Length"])
         last_modified = resp.headers.get("Last-Modified", "")
         body = _Hashing(resp)
-        store.upload(key, body, {"source-url": src.url, "source-etag": etag,
-                                 "source-last-modified": last_modified})
+        sink(body, last_modified)
     if body.size != expected:
         raise ShortBody(f"{src.url}: got {body.size} bytes, Content-Length said {expected}")
     return body, last_modified
+
+
+def keep_rows(source: Path, out: Path, provider: str) -> tuple[int, int]:
+    """Copy a TLC trip file keeping one licence's rows, row group by row group in file order (memory stays at
+    one row group). Returns (rows read, rows kept)."""
+    import pyarrow.compute as pc
+    import pyarrow.parquet as pq
+
+    reader, writer, read, kept = pq.ParquetFile(source), None, 0, 0
+    try:
+        for g in range(reader.num_row_groups):
+            table = reader.read_row_group(g)
+            part = table.filter(pc.equal(table["hvfhs_license_num"], provider))
+            writer = writer or pq.ParquetWriter(out, table.schema)
+            writer.write_table(part)
+            read, kept = read + table.num_rows, kept + part.num_rows
+    finally:
+        if writer:
+            writer.close()
+    return read, kept
+
+
+def _land_once(src: Source, etag: str, key: str, store: Store, pause_s: float) -> dict:
+    """One attempt at landing the file under key: streamed as published, or, for a trip month, one licence's rows."""
+    meta = {"source-url": src.url, "source-etag": etag}
+    if not src.keep_provider:
+        body, last_modified = _get(src, etag, pause_s,
+                                   lambda b, lm: store.upload(key, b, {**meta, "source-last-modified": lm}))
+        return {"last_modified": last_modified, "size": body.size, "sha256": body.sha256.hexdigest()}
+    with tempfile.TemporaryDirectory() as tmp:
+        published, kept = Path(tmp) / "published.parquet", Path(tmp) / "kept.parquet"
+
+        def save(b: Readable, _last_modified: str) -> None:
+            with open(published, "wb") as f:
+                while chunk := b.read(1 << 20):
+                    f.write(chunk)
+
+        _, last_modified = _get(src, etag, pause_s, save)
+        source_rows, rows = keep_rows(published, kept, src.keep_provider)
+        with open(kept, "rb") as f:
+            body = _Hashing(f)
+            store.upload(key, body, {**meta, "provider": src.keep_provider})
+    return {"last_modified": last_modified, "size": body.size, "sha256": body.sha256.hexdigest(),
+            "provider": src.keep_provider, "source_rows": source_rows, "rows": rows}
 
 
 def land(src: Source, store: Store, *, pause_s: float = 30.0, now=None) -> tuple[str, Version]:
@@ -219,13 +275,15 @@ def land(src: Source, store: Store, *, pause_s: float = 30.0, now=None) -> tuple
     with _request(src.url, "HEAD", pause_s=pause_s) as head:
         etag = _clean_etag(head.headers.get("ETag"))
     manifest = store.get_json(src.manifest_key)
-    if manifest and manifest["current"]["etag"] == etag and store.exists(manifest["current"]["s3_key"]):
-        return "unchanged", Version(**manifest["current"])
+    current = (manifest or {}).get("current", {})
+    if (current.get("etag") == etag and current.get("provider") == src.keep_provider
+            and store.exists(current["s3_key"])):
+        return "unchanged", Version(**current)
 
     key = src.raw_key(etag)
     for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
         try:
-            body, last_modified = _stream_once(src, etag, key, store, pause_s)
+            got = _land_once(src, etag, key, store, pause_s)
             break
         except (http.client.IncompleteRead, ConnectionError, TimeoutError, ShortBody):
             # a dropped stream: the failed multipart upload is aborted by boto3, so just start over
@@ -233,8 +291,9 @@ def land(src: Source, store: Store, *, pause_s: float = 30.0, now=None) -> tuple
                 raise
             time.sleep(pause_s * attempt)
 
-    version = Version(src.url, etag, last_modified, body.size, body.sha256.hexdigest(), key,
-                      (now or datetime.now(UTC)).isoformat(timespec="seconds"))
+    version = Version(src.url, etag, got["last_modified"], got["size"], got["sha256"], key,
+                      (now or datetime.now(UTC)).isoformat(timespec="seconds"), got.get("provider"),
+                      got.get("source_rows"), got.get("rows"))
     history = (manifest or {}).get("history", [])
     if manifest:
         history = [manifest["current"], *history]
