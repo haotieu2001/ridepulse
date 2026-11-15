@@ -135,4 +135,9 @@ DANH SÁCH THAY ĐỔI CHỜ LÀM (làm một đợt sau khi đọc xong, rồi 
          - test: chuyển db/tests/test_replay_runs.sql sang pytest
          - migration mới V009: DROP FUNCTION start_replay, advance_watermark (không sửa V001, V002)
          - thứ tự deploy: code mới trước, V009 sau
-  [ ] 5. ...
+  [ ] 5. Bảng trips chỉ nhận chuyến của Uber (đã chọn 15/11):
+         - V009 (cùng file với mục 4): đổi CHECK provider_code IN (4 hãng) thành provider_code = 'HV0003'
+         - comment cột driver_arrived_at còn "(Lyft before 2025)": comment trong V001 không sửa được (migration
+           đã chạy), nên ghi lại ý đúng trong V009 bằng COMMENT ON COLUMN
+         - thêm test: chèn chuyến HV0005 vào trips thì bị từ chối
+  [ ] 6. ...
