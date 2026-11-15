@@ -25,7 +25,7 @@ VÒNG 1. ĐƯỜNG ĐI CỦA MỘT CHUYẾN XE (cốt lõi)
   2. Tải file TLC
      [x] services/tlc_downloader/download.py
   3. Prep: cắt lát dữ liệu
-     [ ] services/prep/prep.py
+     [x] services/prep/prep.py
      [ ] services/prep/store.py
   4. Schema Postgres + outbox
      [ ] db/migrations/V001__dispatch.sql
@@ -118,4 +118,11 @@ DANH SÁCH THAY ĐỔI CHỜ LÀM (làm một đợt sau khi đọc xong, rồi 
          - bỏ: HEAD, thư mục etag=..., lịch sử phiên bản
          - file đặt ở raw/tlc_fhvhv/2025-01/fhvhv_tripdata_2025-01.parquet
          - prep, ingest đọc theo tháng; contract bỏ cột source_etag (hoặc đổi thành source_sha256)
-  [ ] 2. ...
+  [ ] 2. services/prep/prep.py, docstring dòng 6: bỏ "(the version its manifest calls current)",
+         dấu vết của ETag (manifest giờ phẳng, không còn trường current)
+  [ ] 3. services/prep/prep.py: xoá <prefix>/_manifest.json ngay đầu một lần chạy thật
+         - vì sao: sau khi bỏ ETag, chạy lại ghi đè lên cùng derived/replay/<month>; trong lúc ghi, manifest
+           cũ vẫn còn nên replayer có thể đọc lát mới theo manifest cũ (sha256 lệch)
+         - sau khi sửa: thư mục chưa có manifest = chưa xong, replayer chờ thay vì đọc nhầm
+         - thêm test: chạy lại bị dừng giữa chừng thì không còn manifest
+  [ ] 4. ...
