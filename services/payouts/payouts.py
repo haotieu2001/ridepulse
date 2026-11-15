@@ -10,7 +10,7 @@ The file stays internally valid, as a real processor's would: entry count, entry
 and file controls match the entries written. Only a comparison with earnings finds the errors. Banks are fictional:
 routing numbers are made from the driver id with a valid ABA check digit, accounts likewise, never real ones.
 
-Lands like any other source (config/file_sources.json "payouts_ach"): raw/payouts_ach/<week>/etag=<md5>/<file>,
+Lands like any other source (config/file_sources.json "payouts_ach"): raw/payouts_ach/<week>/<file>,
 then the forwarder and the ingest job. The ledger goes to derived/payouts/<week>/planted.json.
 
     python -m services.payouts generate --week 2025-01-06 --bucket <landing>
@@ -109,9 +109,9 @@ def nacha(entries: list[Entry], week: date, created: datetime) -> str:
     return "\n".join(recs) + "\n"
 
 
-def landed_key(week: date, body: bytes) -> str:
-    """raw/<source>/<id>/etag=<etag>/<file>, as the downloader lands everything: a single PUT's ETag is its MD5."""
-    return f"raw/payouts_ach/{week}/etag={hashlib.md5(body).hexdigest()}/payouts_{week}.ach"
+def landed_key(week: date) -> str:
+    """raw/<source>/<id>/<file>, as the downloader lands everything."""
+    return f"raw/payouts_ach/{week}/payouts_{week}.ach"
 
 
 def earnings_sql(catalog: str, week: date) -> str:
@@ -123,7 +123,7 @@ def earnings_sql(catalog: str, week: date) -> str:
 def generate(week: date, earnings: dict[str, int], s3, bucket: str, created: datetime) -> dict:
     entries, ledger = plant(earnings, week)
     body = nacha(entries, week, created).encode()
-    key = landed_key(week, body)
+    key = landed_key(week)
     s3.put_object(Bucket=bucket, Key=key, Body=body, ContentType="text/plain")
     s3.put_object(Bucket=bucket, Key=f"derived/payouts/{week}/planted.json", ContentType="application/json",
                   Body=json.dumps({"week": str(week), "file": key, "planted": ledger}, indent=2).encode())

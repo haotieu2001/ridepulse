@@ -8,7 +8,7 @@ from services.databricks_api import Databricks
 from services.forwarder.forwarder import forward, registry, volume_path
 
 SOURCES = registry()
-KEY = "raw/tlc_fhvhv/2025-01/etag=abc123/fhvhv_tripdata_2025-01.parquet"
+KEY = "raw/tlc_fhvhv/2025-01/fhvhv_tripdata_2025-01.parquet"
 
 
 def event(key: str, bucket: str = "landing") -> dict:
@@ -35,13 +35,13 @@ class FakeApi:
 
 def test_a_registered_raw_file_goes_to_the_same_key_in_the_volume():
     assert volume_path(KEY, "ridepulse_dev", SOURCES) == f"/Volumes/ridepulse_dev/raw/landing/{KEY}"
-    noaa = "raw/noaa_ghcnd/2025/etag=e/2025.csv.gz"
+    noaa = "raw/noaa_ghcnd/2025/2025.csv.gz"
     assert volume_path(noaa, "c", SOURCES) == f"/Volumes/c/raw/landing/{noaa}"
 
 
 def test_everything_else_is_left_alone():
     for key in ["manifests/tlc_fhvhv/2025-01/x.json", "derived/replay/2025-01/h=00/part.parquet",
-                "raw/tlc_zones/current/etag=e/taxi_zones.zip", "raw/tlc_fhvhv/", "raw"]:
+                "raw/tlc_zones/current/taxi_zones.zip", "raw/tlc_fhvhv/", "raw"]:
         assert volume_path(key, "c", SOURCES) is None, key
 
 

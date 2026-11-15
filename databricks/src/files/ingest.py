@@ -8,7 +8,8 @@
 Sources come from config/file_sources.json (a copy, as with every file the bundle ships). Bronze is a stream with
 availableNow, so a run reads only files it hasn't read (checkpoints in the raw.checkpoints volume). Silver is
 rebuilt for each file bronze holds that silver doesn't, written with REPLACE WHERE source_file, so loading a
-file again changes nothing (FR-15). A re-published month lands under a new ETag, as a new file.
+file again changes nothing (FR-15). A file landed again over the same key isn't read again by Auto Loader: to reload
+one, delete its rows from bronze and silver first (the demo lands each file once).
 
 A job task, not a pipeline: Free Edition runs one active pipeline per type, and the streaming one runs in demo
 windows. trip_key needs the whole file in order (a collision's suffix counts rows before it), which is why silver
@@ -51,14 +52,6 @@ FLAGS = {"shared_request": "shared_request_flag", "shared_match": "shared_match_
          "wav_request": "wav_request_flag", "wav_match": "wav_match_flag"}
 
 
-def etag_of(path: str) -> str:
-    """The source ETag from a landed key: raw/<source>/<id>/etag=<etag>/<file>."""
-    found = re.search(r"/etag=([^/]+)/", path)
-    if not found:
-        raise ValueError(f"no etag= in {path}")
-    return found.group(1)
-
-
 def month_of(path: str) -> str:
     found = re.search(r"/raw/tlc_fhvhv/(\d{4}-\d{2})/", path)
     if not found:
@@ -92,7 +85,7 @@ def positions(spark: SparkSession, row_group_sizes: list[int]) -> DataFrame:
     return spark.createDataFrame(rows, "row_group INT, first_row BIGINT, rows BIGINT")
 
 
-def tlc_trips(raw: DataFrame, groups: DataFrame, cbd_zone_ids: list[int], contract: dict, etag: str) -> DataFrame:
+def tlc_trips(raw: DataFrame, groups: DataFrame, cbd_zone_ids: list[int], contract: dict) -> DataFrame:
     """One TLC file's rows (bronze) as silver.tlc_trips: the contract's columns plus a dq_<name> per flag check."""
     df = with_cbd_fee(raw)
     base = F.expr(SPARK_BASE_TRIP_KEY_SQL)
@@ -112,7 +105,7 @@ def tlc_trips(raw: DataFrame, groups: DataFrame, cbd_zone_ids: list[int], contra
         F.expr(spark_in_replay_sql("_base_key", "hvfhs_license_num")).alias("in_sample"),   # the app's trips (contract 2.0)
         F.col("hvfhs_license_num").alias("provider_code"), "dispatching_base_num",
         F.nullif(F.col("originating_base_num"), F.lit("")).alias("originating_base_num"),
-        F.col("_source_file").alias("source_file"), F.lit(etag).alias("source_etag"), "row_group",
+        F.col("_source_file").alias("source_file"), "row_group",
         (F.col("_row_index") - F.col("first_row")).alias("row_offset"),
         ts("request_datetime").alias("requested_at"), ts("on_scene_datetime").alias("driver_arrived_at"),
         ts("pickup_datetime").alias("picked_up_at"), ts("dropoff_datetime").alias("dropped_off_at"),
@@ -247,7 +240,7 @@ class Ingest:
                 raise RuntimeError(f"{file} fails the contract, nothing loaded: {failed}")
             meta = pq.ParquetFile(file.removeprefix("dbfs:")).metadata
             groups = positions(self.spark, [meta.row_group(g).num_rows for g in range(meta.num_row_groups)])
-            self.replace(tlc_trips(raw, groups, cbd, self.contract, etag_of(file)), s["silver"], file)
+            self.replace(tlc_trips(raw, groups, cbd, self.contract), s["silver"], file)
             print(f"{s['silver']}: {file}: {raw.count()} rows")
 
     def silver_weather(self) -> None:

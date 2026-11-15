@@ -26,5 +26,5 @@ def test_something_lands_every_registered_source():
     from services.payouts.payouts import landed_key
     from services.tlc_downloader.download import sources
     landed = {s.source for kind, arg in [("fhvhv", "2025-01"), ("noaa", "2025"), ("zones", None)] for s in sources(kind, arg)}
-    landed.add(landed_key(date(2025, 1, 6), b"").split("/")[1])   # the payout generator (#31)
+    landed.add(landed_key(date(2025, 1, 6)).split("/")[1])   # the payout generator (#31)
     assert set(REGISTRY["sources"]) <= landed   # a registered source nothing lands would wait forever

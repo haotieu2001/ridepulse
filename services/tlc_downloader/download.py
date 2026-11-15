@@ -1,17 +1,15 @@
-"""Land source files in the S3 landing bucket, pinned to their version.
+"""Land source files in the S3 landing bucket.
 
-    uv run python -m services.tlc_downloader fhvhv 2025-01     # one HVFHV trip month
+    uv run python -m services.tlc_downloader fhvhv 2025-01     # one HVFHV trip month: Uber's trips
     uv run python -m services.tlc_downloader zones             # zone lookup + zone shapefile
     uv run python -m services.tlc_downloader noaa 2025         # GHCN-Daily, one year (all stations)
 
-Files land under a key that contains the source ETag:  raw/<source>/<id>/etag=<etag>/<file name>
-The TLC re-publishes months, so a new version lands next to the old one, never over it. A manifest
-at manifests/<source>/<id>/<file name>.json records the current version (URL, ETag, Last-Modified,
-size, sha256, S3 key) and every earlier one. Re-running is a no-op while the source ETag is unchanged.
+Each file lands at raw/<source>/<id>/<file name>, with a manifest at manifests/<source>/<id>/<file name>.json
+(URL, size, sha256, S3 key, when). The demo lands each file once; running again lands it again, over the old one.
 
-Zones and NOAA files are streamed into S3 as published. A trip month is the app's company's trips only: the file
-is downloaded, its other licences' rows dropped (row groups in order, so every trip key stays the same), and the
-result lands under .../etag=<etag>/provider=<licence>/; the manifest keeps the source ETag and both row counts.
+Zones and NOAA files are streamed into S3 as published. A trip month is the app's company's trips only: the file is
+downloaded, the other licences' rows dropped (row groups in order, so every trip key stays the same), and the result
+lands; the manifest adds the licence kept and the row counts before and after.
 """
 from __future__ import annotations
 
@@ -50,12 +48,12 @@ class Source:
         return self.url.rsplit("/", 1)[1]
 
     @property
+    def raw_key(self) -> str:
+        return f"raw/{self.source}/{self.id}/{self.file_name}"
+
+    @property
     def manifest_key(self) -> str:
         return f"manifests/{self.source}/{self.id}/{self.file_name}.json"
-
-    def raw_key(self, etag: str) -> str:
-        kept = f"provider={self.keep_provider}/" if self.keep_provider else ""
-        return f"raw/{self.source}/{self.id}/etag={etag}/{kept}{self.file_name}"
 
 
 def sources(kind: str, arg: str | None = None) -> list[Source]:
@@ -77,9 +75,7 @@ def sources(kind: str, arg: str | None = None) -> list[Source]:
 # --- the two outside worlds, behind small interfaces so tests can replace them ------------------
 
 class Store(Protocol):
-    def get_json(self, key: str) -> dict | None: ...
     def put_json(self, key: str, value: dict) -> None: ...
-    def exists(self, key: str) -> bool: ...
     def upload(self, key: str, stream: Readable, metadata: dict[str, str]) -> None: ...
 
 
@@ -89,24 +85,9 @@ class S3Store:
         self.bucket = bucket
         self.s3 = client or boto3.client("s3")
 
-    def get_json(self, key):
-        try:
-            return json.loads(self.s3.get_object(Bucket=self.bucket, Key=key)["Body"].read())
-        except self.s3.exceptions.NoSuchKey:
-            return None
-
     def put_json(self, key, value):
         self.s3.put_object(Bucket=self.bucket, Key=key, Body=json.dumps(value, indent=2).encode(),
                            ContentType="application/json")
-
-    def exists(self, key):
-        try:
-            self.s3.head_object(Bucket=self.bucket, Key=key)
-            return True
-        except self.s3.exceptions.ClientError as e:
-            if e.response["Error"]["Code"] in ("404", "NoSuchKey"):
-                return False
-            raise
 
     def upload(self, key, stream, metadata):
         # upload_fileobj streams in multipart chunks: memory stays small for a 500 MB month
@@ -135,31 +116,31 @@ class _Response:
         self.conn.close()
 
 
-def _open(url: str, method: str, redirects: int = 3) -> _Response:
+def _open(url: str, redirects: int = 3) -> _Response:
     # http.client rather than urllib: urllib always sends "Connection: close", and NOAA's S3 bucket
     # then sends headers but no body (measured: 0 bytes in 60 s; the same request without the
     # header reads 20 MB in 2.6 s). curl doesn't send it either.
     parts = urllib.parse.urlsplit(url)
     conn_cls = http.client.HTTPSConnection if parts.scheme == "https" else http.client.HTTPConnection
     conn = conn_cls(parts.netloc, timeout=60)
-    conn.request(method, parts.path + (f"?{parts.query}" if parts.query else ""),
+    conn.request("GET", parts.path + (f"?{parts.query}" if parts.query else ""),
                  headers={"User-Agent": USER_AGENT, "Accept": "*/*"})
     resp = conn.getresponse()
     if resp.status in (301, 302, 303, 307, 308) and redirects:
         location = urllib.parse.urljoin(url, resp.getheader("Location", ""))
         conn.close()
-        return _open(location, method, redirects - 1)
+        return _open(location, redirects - 1)
     if resp.status != 200:
         conn.close()
         raise HTTPStatusError(url, resp.status)
     return _Response(conn, resp)
 
 
-def _request(url: str, method: str, attempts: int = 6, pause_s: float = 30.0) -> _Response:
+def _request(url: str, attempts: int = 6, pause_s: float = 30.0) -> _Response:
     """TLC's CloudFront answers 403 after bursts of downloads: retry 403/429/5xx with a pause."""
     for attempt in range(1, attempts + 1):
         try:
-            return _open(url, method)
+            return _open(url)
         except HTTPStatusError as e:
             if e.status not in (403, 429, 500, 502, 503, 504) or attempt == attempts:
                 raise
@@ -171,7 +152,7 @@ def _request(url: str, method: str, attempts: int = 6, pause_s: float = 30.0) ->
 
 
 class _Hashing:
-    """A read-through wrapper that hashes and counts the bytes as S3 consumes them."""
+    """A read-through wrapper that hashes and counts the bytes as they pass."""
     def __init__(self, raw: Readable):
         self.raw, self.sha256, self.size = raw, hashlib.sha256(), 0
 
@@ -185,23 +166,15 @@ class _Hashing:
 # --- the logic -----------------------------------------------------------------------------------
 
 @dataclass
-class Version:
+class Landed:
     url: str
-    etag: str
-    last_modified: str
+    s3_key: str
     size: int
     sha256: str
-    s3_key: str
     landed_at: str
     provider: str | None = None      # set when only one licence's rows landed
     source_rows: int | None = None   # rows in the published file
     rows: int | None = None          # rows landed
-
-
-def _clean_etag(etag: str | None) -> str:
-    if not etag:
-        raise ValueError("source sent no ETag; can't pin the version")
-    return etag.strip().removeprefix("W/").strip('"')
 
 
 DOWNLOAD_ATTEMPTS = 3
@@ -211,19 +184,15 @@ class ShortBody(Exception):
     pass
 
 
-def _get(src: Source, etag: str, pause_s: float, sink) -> tuple[_Hashing, str]:
-    """GET the file and pass its body to sink(readable, last_modified), checking the ETag and the length."""
-    with _request(src.url, "GET", pause_s=pause_s) as resp:
-        got = _clean_etag(resp.headers.get("ETag"))
-        if got != etag:
-            raise RuntimeError(f"{src.url} changed between HEAD ({etag}) and GET ({got}); run again")
+def _get(src: Source, pause_s: float, sink) -> _Hashing:
+    """GET the file and pass its body to sink(readable); a body shorter than Content-Length is refused."""
+    with _request(src.url, pause_s=pause_s) as resp:
         expected = int(resp.headers["Content-Length"])
-        last_modified = resp.headers.get("Last-Modified", "")
         body = _Hashing(resp)
-        sink(body, last_modified)
+        sink(body)
     if body.size != expected:
         raise ShortBody(f"{src.url}: got {body.size} bytes, Content-Length said {expected}")
-    return body, last_modified
+    return body
 
 
 def keep_rows(source: Path, out: Path, provider: str) -> tuple[int, int]:
@@ -246,57 +215,42 @@ def keep_rows(source: Path, out: Path, provider: str) -> tuple[int, int]:
     return read, kept
 
 
-def _land_once(src: Source, etag: str, key: str, store: Store, pause_s: float) -> dict:
-    """One attempt at landing the file under key: streamed as published, or, for a trip month, one licence's rows."""
-    meta = {"source-url": src.url, "source-etag": etag}
+def _land_once(src: Source, store: Store, pause_s: float) -> dict:
+    """One attempt: stream the file into S3 as published, or, for a trip month, land one licence's rows."""
+    meta = {"source-url": src.url}
     if not src.keep_provider:
-        body, last_modified = _get(src, etag, pause_s,
-                                   lambda b, lm: store.upload(key, b, {**meta, "source-last-modified": lm}))
-        return {"last_modified": last_modified, "size": body.size, "sha256": body.sha256.hexdigest()}
+        body = _get(src, pause_s, lambda b: store.upload(src.raw_key, b, meta))
+        return {"size": body.size, "sha256": body.sha256.hexdigest()}
     with tempfile.TemporaryDirectory() as tmp:
         published, kept = Path(tmp) / "published.parquet", Path(tmp) / "kept.parquet"
 
-        def save(b: Readable, _last_modified: str) -> None:
+        def save(b: Readable) -> None:
             with open(published, "wb") as f:
                 while chunk := b.read(1 << 20):
                     f.write(chunk)
 
-        _, last_modified = _get(src, etag, pause_s, save)
+        _get(src, pause_s, save)
         source_rows, rows = keep_rows(published, kept, src.keep_provider)
         with open(kept, "rb") as f:
             body = _Hashing(f)
-            store.upload(key, body, {**meta, "provider": src.keep_provider})
-    return {"last_modified": last_modified, "size": body.size, "sha256": body.sha256.hexdigest(),
-            "provider": src.keep_provider, "source_rows": source_rows, "rows": rows}
+            store.upload(src.raw_key, body, {**meta, "provider": src.keep_provider})
+    return {"size": body.size, "sha256": body.sha256.hexdigest(), "provider": src.keep_provider,
+            "source_rows": source_rows, "rows": rows}
 
 
-def land(src: Source, store: Store, *, pause_s: float = 30.0, now=None) -> tuple[str, Version]:
-    """Land one source file. Returns ("unchanged" | "landed", the current version)."""
-    with _request(src.url, "HEAD", pause_s=pause_s) as head:
-        etag = _clean_etag(head.headers.get("ETag"))
-    manifest = store.get_json(src.manifest_key)
-    current = (manifest or {}).get("current", {})
-    if (current.get("etag") == etag and current.get("provider") == src.keep_provider
-            and store.exists(current["s3_key"])):
-        return "unchanged", Version(**current)
-
-    key = src.raw_key(etag)
+def land(src: Source, store: Store, *, pause_s: float = 30.0, now=None) -> Landed:
+    """Land one source file and write its manifest. A dropped download is retried from the start."""
     for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
         try:
-            got = _land_once(src, etag, key, store, pause_s)
+            got = _land_once(src, store, pause_s)
             break
         except (http.client.IncompleteRead, ConnectionError, TimeoutError, ShortBody):
             # a dropped stream: the failed multipart upload is aborted by boto3, so just start over
             if attempt == DOWNLOAD_ATTEMPTS:
                 raise
             time.sleep(pause_s * attempt)
-
-    version = Version(src.url, etag, got["last_modified"], got["size"], got["sha256"], key,
-                      (now or datetime.now(UTC)).isoformat(timespec="seconds"), got.get("provider"),
-                      got.get("source_rows"), got.get("rows"))
-    history = (manifest or {}).get("history", [])
-    if manifest:
-        history = [manifest["current"], *history]
-    store.put_json(src.manifest_key, {"source": src.source, "id": src.id, "current": asdict(version),
-                                      "history": history})
-    return "landed", version
+    landed = Landed(src.url, src.raw_key, got["size"], got["sha256"],
+                    (now or datetime.now(UTC)).isoformat(timespec="seconds"), got.get("provider"),
+                    got.get("source_rows"), got.get("rows"))
+    store.put_json(src.manifest_key, {"source": src.source, "id": src.id, **asdict(landed)})
+    return landed

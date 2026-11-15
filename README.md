@@ -85,7 +85,7 @@ make bootstrap-plan && make bootstrap-apply   # state bucket, GitHub OIDC roles,
 make landing-plan && make landing-apply       # the landing bucket
 make confluent-plan && make confluent-apply   # topics, ACLs, schemas
 make db-migrate && make db-seed              # the dispatch schema, zones, fare rules
-make land-month MONTH=2025-01                 # Uber's trips of one TLC month, pinned to its ETag (also land-zones, land-noaa)
+make land-month MONTH=2025-01                 # Uber's trips of one TLC month (also land-zones, land-noaa)
 make prep MONTH=2025-01                       # contract check, Uber's 5% sample, event-time slices
 make replayer-plan && make replayer-apply     # replayer, notifier, the window Lambda
 make debezium-plan && make debezium-up        # Debezium; let its first boot finish

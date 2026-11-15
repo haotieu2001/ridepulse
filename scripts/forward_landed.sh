@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Copy files already in the landing bucket into the volume (#26): the forwarder Lambda, invoked once per raw/ key with
 # the same event S3 would send. For files landed before the forwarder existed, or after it failed. Safe to repeat:
-# a key holds its ETag, so copying it again writes the same bytes. The forwarder skips sources not registered.
+# copying a key again writes its current bytes. The forwarder skips sources not registered.
 #
 # Usage: scripts/forward_landed.sh [PREFIX]     e.g. raw/tlc_fhvhv/2025-01/
 set -euo pipefail

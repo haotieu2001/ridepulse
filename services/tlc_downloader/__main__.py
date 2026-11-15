@@ -18,8 +18,9 @@ def main() -> int:
         p.error("--bucket or LANDING_BUCKET is required")
     store = S3Store(a.bucket)
     for src in sources(a.kind, a.arg):
-        status, v = land(src, store)
-        print(f"{status:9} {src.url}\n          s3://{a.bucket}/{v.s3_key}  {v.size:,} B  sha256 {v.sha256[:12]}")
+        v = land(src, store)
+        rows = f"  {v.rows:,} of {v.source_rows:,} rows ({v.provider})" if v.provider else ""
+        print(f"landed {src.url}\n       s3://{a.bucket}/{v.s3_key}  {v.size:,} B  sha256 {v.sha256[:12]}{rows}")
     return 0
 
 

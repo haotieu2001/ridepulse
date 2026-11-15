@@ -17,7 +17,7 @@ from services.prep.supply import heat_map, staffing
 from .test_prep import MONTH, REPLAYED, ROWS, SCHEMA, land, row
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
-PREFIX = output_prefix(MONTH, "etag-1")
+PREFIX = output_prefix(MONTH)
 
 
 @pytest.fixture
@@ -96,5 +96,5 @@ def test_a_new_utilisation_rebuilds_and_the_same_one_is_a_no_op(tmp_path):
     status, _ = prep(MONTH, store, target_utilisation=0.8, log=lambda *_: None)
     assert status == "prepared"
     assert store.get_json(f"{PREFIX}/staffing.json")["target_utilisation"] == 0.8
-    assert store.get_json(pointer_key(MONTH))["current"]["target_utilisation"] == 0.8
+    assert store.get_json(pointer_key(MONTH))["target_utilisation"] == 0.8
     assert prep(MONTH, store, target_utilisation=0.8, log=lambda *_: None)[0] == "unchanged"
