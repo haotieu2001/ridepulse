@@ -26,10 +26,10 @@ VÒNG 1. ĐƯỜNG ĐI CỦA MỘT CHUYẾN XE (cốt lõi)
      [x] services/tlc_downloader/download.py
   3. Prep: cắt lát dữ liệu
      [x] services/prep/prep.py
-     [ ] services/prep/store.py
+     [x] services/prep/store.py
   4. Schema Postgres + outbox
-     [ ] db/migrations/V001__dispatch.sql
-     [ ] db/migrations/V002__replay_runs.sql   (V003-V008: thay đổi nhỏ về sau)
+     [x] db/migrations/V001__dispatch.sql
+     [x] db/migrations/V002__replay_runs.sql   (V003-V008: thay đổi nhỏ về sau)
   5. Replayer: đóng vai app
      [ ] services/replayer/handler.py  điểm vào của Lambda
      [ ] services/replayer/tick.py     trái tim: một tick, một transaction
@@ -125,4 +125,14 @@ DANH SÁCH THAY ĐỔI CHỜ LÀM (làm một đợt sau khi đọc xong, rồi 
            cũ vẫn còn nên replayer có thể đọc lát mới theo manifest cũ (sha256 lệch)
          - sau khi sửa: thư mục chưa có manifest = chưa xong, replayer chờ thay vì đọc nhầm
          - thêm test: chạy lại bị dừng giữa chừng thì không còn manifest
-  [ ] 4. ...
+  [ ] 4. Thay 2 function Postgres bằng Python (đã chọn 15/11: project chủ yếu là Python):
+         - advance_watermark (gọi ở services/replayer/tick.py): câu INSERT ... ON CONFLICT ... greatest(...)
+           viết thẳng trong tick.py, vẫn bảo đảm đồng hồ không lùi
+         - start_replay (gọi ở tick.py): hàm Python trong một transaction: LOCK TABLE replay_runs, đọc đồng
+           hồ FOR UPDATE, kiểm tra luật (không lùi giờ, chỉ bắt đầu lúc nửa đêm), đóng lần chạy cũ, thêm lần
+           chạy mới, chỉnh đồng hồ; lỗi thì cả transaction huỷ
+         - giữ: trigger set_updated_at (path C cần updated_at luôn đúng), view replayed_days, các CHECK
+         - test: chuyển db/tests/test_replay_runs.sql sang pytest
+         - migration mới V009: DROP FUNCTION start_replay, advance_watermark (không sửa V001, V002)
+         - thứ tự deploy: code mới trước, V009 sau
+  [ ] 5. ...
