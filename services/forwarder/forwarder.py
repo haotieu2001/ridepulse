@@ -2,12 +2,12 @@
 source's raw file into a Unity Catalog volume, at the same key. Free Edition can't read our bucket (no external
 locations, ADR-0001), so files reach Databricks through the Files API instead.
 
-    s3://ridepulse-landing-dev-<account>/raw/tlc_fhvhv/2025-01/etag=<etag>/fhvhv_tripdata_2025-01.parquet
-      -> /Volumes/ridepulse_dev/raw/landing/raw/tlc_fhvhv/2025-01/etag=<etag>/fhvhv_tripdata_2025-01.parquet
+    s3://ridepulse-landing-dev-<account>/raw/tlc_fhvhv/2025-01/fhvhv_tripdata_2025-01.parquet
+      -> /Volumes/ridepulse_dev/raw/landing/raw/tlc_fhvhv/2025-01/fhvhv_tripdata_2025-01.parquet
 
 Only sources in config/file_sources.json are copied; anything else (manifests/, derived/, another source) is left
 alone. The S3 body is streamed into the PUT, so a 500 MB month never sits in memory. Copying the same key again
-overwrites it with the same bytes (the key holds the ETag), so a retried event changes nothing. Runs as the
+overwrites it with the key's current bytes, so a retried event changes nothing. Runs as the
 ridepulse-forwarder service principal, which may write this one volume (ADR-0002).
 """
 from __future__ import annotations

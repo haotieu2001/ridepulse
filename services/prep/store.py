@@ -18,8 +18,8 @@ def pointer_key(month: str) -> str:
     return f"manifests/replay/{month}/prep.json"
 
 
-def output_prefix(month: str, etag: str) -> str:
-    return f"derived/replay/{month}/etag={etag}"
+def output_prefix(month: str) -> str:
+    return f"derived/replay/{month}"
 
 
 def slice_name(hour: datetime) -> str:

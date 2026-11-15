@@ -11,8 +11,7 @@ replayer can apply tick by tick.
 3. Keeps the app's sample (`in_replay`: Uber's trips in the 5% bucket; another licence's trip in the bucket is
    counted as sample_other_company and skipped) and builds each trip's 4 lifecycle events. Their due times are
    forced into lifecycle order (ADR-0004 §5); payloads carry the raw TLC values.
-4. Writes each event into the hourly slice in which it is due, under a prefix pinned to the source
-   ETag:  derived/replay/<month>/etag=<etag>/events/YYYY/MM/DD/HH.jsonl.gz
+4. Writes each event into the hourly slice in which it is due:  derived/replay/<month>/events/YYYY/MM/DD/HH.jsonl.gz
    A month's slices start up to an hour before the month (early requests) and end after it (late
    dropoffs), so an hour at a month boundary has a slice in each of the two months' prefixes.
    Lines in a slice are ordered by (due_at, lifecycle step, trip_key).
@@ -20,12 +19,12 @@ replayer can apply tick by tick.
    (services/prep/supply.py).
 6. Writes quarantine.jsonl.gz and _manifest.json (counts, every slice with its event count and
    sha256), then points manifests/replay/<month>/prep.json at it. The manifest is written last: a
-   prefix without one is an unfinished run. An hour with no events has no slice file; the manifest
-   is the list of slices.
+   prefix without one is an unfinished run. The replayer reads only the slices the manifest lists, so
+   a rerun's leftovers from an earlier run are never read.
 
 Slice content is deterministic on any machine, and the gzip bytes too on one Python version (no
 timestamp, but the header's OS byte differs between 3.12 and 3.13, and it is covered by the
-manifest's sha256). A rerun for an unchanged source ETag and format is a no-op unless forced.
+manifest's sha256). A rerun for an unchanged source file (its sha256) and format is a no-op unless forced.
 """
 from __future__ import annotations
 
@@ -51,7 +50,7 @@ from contracts.trip_key import APP_PROVIDER, KEY_FIELDS, SAMPLE_MODULUS, SEPARAT
 from .store import EVENT_TYPES, DirStore, S3Store, Store, output_prefix, pointer_key, slice_name, source_manifest_key  # noqa: F401  (re-exported)
 from .supply import DEFAULT_TARGET_UTILISATION, heat_map, sign_on_zones, staffing
 
-FORMAT_VERSION = 4      # bump when the outputs' layout or content change (3: sign-on zones; 4: Uber's trips only)
+FORMAT_VERSION = 5      # bump when the outputs' layout or content change (4: Uber's trips only; 5: no ETag in paths)
 ASSIGN_DELAY = timedelta(seconds=30)
 PROVIDERS = ("HV0002", "HV0003", "HV0004", "HV0005")
 BATCH_ROWS = 50_000
@@ -257,25 +256,24 @@ def prep(month: str, store: Store, *, source_file: pathlib.Path | None = None, f
     src = store.get_json(source_manifest_key(month))
     if not src:
         raise RuntimeError(f"{month} isn't landed: no {source_manifest_key(month)} (run make land-month)")
-    current = src["current"]
-    prefix = output_prefix(month, current["etag"])
+    prefix = output_prefix(month)
     pointer = store.get_json(pointer_key(month))
-    if (not force and pointer and pointer["current"]["source_etag"] == current["etag"]
-            and pointer["current"]["format_version"] == FORMAT_VERSION
-            and pointer["current"].get("target_utilisation") == target_utilisation
+    if (not force and pointer and pointer.get("source_sha256") == src["sha256"]
+            and pointer.get("format_version") == FORMAT_VERSION
+            and pointer.get("target_utilisation") == target_utilisation
             and (manifest := store.get_json(f"{prefix}/_manifest.json"))):
         return "unchanged", manifest
 
     with tempfile.TemporaryDirectory() as tmp:
         if source_file is None:
-            source_file = pathlib.Path(tmp) / pathlib.Path(current["s3_key"]).name
-            log(f"downloading {current['s3_key']}")
-            store.download(current["s3_key"], source_file)
+            source_file = pathlib.Path(tmp) / pathlib.Path(src["s3_key"]).name
+            log(f"downloading {src['s3_key']}")
+            store.download(src["s3_key"], source_file)
         digest = hashlib.sha256()
         with open(source_file, "rb") as f:
             while chunk := f.read(1 << 20):
                 digest.update(chunk)
-        if digest.hexdigest() != current["sha256"]:
+        if digest.hexdigest() != src["sha256"]:
             raise RuntimeError(f"{source_file} isn't the landed version (sha256 differs from the manifest)")
 
         stats: Counter = Counter()
@@ -305,7 +303,7 @@ def prep(month: str, store: Store, *, source_file: pathlib.Path | None = None, f
                                if k.startswith(f"quarantined.{scope}.")}
     manifest = {
         "month": month, "format_version": FORMAT_VERSION,
-        "source": {"s3_key": current["s3_key"], "etag": current["etag"], "sha256": current["sha256"]},
+        "source": {"s3_key": src["s3_key"], "sha256": src["sha256"]},
         "rows": stats["rows"], "app_provider": APP_PROVIDER, "sample_rows": stats["sample_rows"],
         "sample_other_company": stats["sample_other_company"],
         "sample_key_collisions": stats["sample_key_collisions"],
@@ -321,11 +319,7 @@ def prep(month: str, store: Store, *, source_file: pathlib.Path | None = None, f
     }
     # Run facts (prepared_at, run time, memory) live only in the manifests, never in the slices.
     store.put_bytes(f"{prefix}/_manifest.json", json.dumps(manifest, indent=2).encode(), "application/json")
-    current_ptr = {"source_etag": current["etag"], "format_version": FORMAT_VERSION, "prefix": prefix,
-                   "target_utilisation": target_utilisation, "prepared_at": manifest["prepared_at"]}
-    history = (pointer or {}).get("history", [])
-    if pointer and pointer["current"]["prefix"] != prefix:
-        history = [pointer["current"], *history]
-    store.put_bytes(pointer_key(month), json.dumps({"month": month, "current": current_ptr, "history": history},
-                                                   indent=2).encode(), "application/json")
+    ptr = {"month": month, "prefix": prefix, "source_sha256": src["sha256"], "format_version": FORMAT_VERSION,
+           "target_utilisation": target_utilisation, "prepared_at": manifest["prepared_at"]}
+    store.put_bytes(pointer_key(month), json.dumps(ptr, indent=2).encode(), "application/json")
     return "prepared", manifest

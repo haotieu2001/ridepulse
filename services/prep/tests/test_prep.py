@@ -48,16 +48,16 @@ def row(request, pickup_after_s=300, trip_s=900, arrival_after_s=120, sampled=Tr
     raise AssertionError("no nudge found")
 
 
-def land(store_root, rows, etag="etag-1", row_group_size=3):
+def land(store_root, rows, row_group_size=3):
     """Write the month the way the downloader lands it: raw file + manifest."""
     store_root.mkdir(parents=True, exist_ok=True)
     path = store_root / "src.parquet"
     pq.write_table(pa.Table.from_pylist(rows, schema=SCHEMA), path, row_group_size=row_group_size)
-    key = f"raw/tlc_fhvhv/{MONTH}/etag={etag}/fhvhv_tripdata_{MONTH}.parquet"
+    key = f"raw/tlc_fhvhv/{MONTH}/fhvhv_tripdata_{MONTH}.parquet"
     store = DirStore(store_root)
     store.put_bytes(key, path.read_bytes(), "application/octet-stream")
-    store.put_bytes(source_manifest_key(MONTH), json.dumps({"current": {
-        "etag": etag, "s3_key": key, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}}).encode(), "")
+    store.put_bytes(source_manifest_key(MONTH), json.dumps({
+        "s3_key": key, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}).encode(), "")
     return store
 
 
@@ -111,7 +111,7 @@ def test_counts_and_quarantine(run):
                                           "v001_dropoff_not_before_pickup": 1}
     assert m["quarantined"]["all"]["v001_dropoff_not_before_pickup"] == 2   # one of them isn't sampled
     assert m["quarantined"]["all"]["provider_known"] == 1                   # counted over the file, not replayed
-    q = [json.loads(x) for x in gzip.decompress((store.root / output_prefix(MONTH, "etag-1")
+    q = [json.loads(x) for x in gzip.decompress((store.root / output_prefix(MONTH)
                                                   / "quarantine.jsonl.gz").read_bytes()).splitlines()]
     assert {x["reason"] for x in q} == set(m["quarantined"]["sample"])
     assert not {x["trip_key"] for x in q} & {trip_key(r) for r in OTHER_COMPANIES}
@@ -174,7 +174,6 @@ def test_rerun_is_a_no_op_and_force_rewrites_identical_bytes(tmp_path):
     status, again = prep(MONTH, store, force=True, log=lambda *_: None)
     assert status == "prepared"
     assert {s["key"]: (store.root / s["key"]).read_bytes() for s in again["slices"]} == before
-    assert store.get_json(pointer_key(MONTH))["history"] == []
 
 
 def test_row_group_size_does_not_change_the_output(tmp_path):
@@ -184,15 +183,15 @@ def test_row_group_size_does_not_change_the_output(tmp_path):
     assert [s["sha256"] for s in ma["slices"]] == [s["sha256"] for s in mb["slices"]]
 
 
-def test_republished_month_goes_to_a_new_prefix(tmp_path):
+def test_a_month_landed_again_with_other_bytes_is_prepared_again(tmp_path):
     store = land(tmp_path, ROWS)
-    prep(MONTH, store, log=lambda *_: None)
-    land(tmp_path, ROWS[:-1], etag="etag-2")
-    status, m = prep(MONTH, store, log=lambda *_: None)
+    _, first = prep(MONTH, store, log=lambda *_: None)
+    land(tmp_path, ROWS[:-1])
+    status, again = prep(MONTH, store, log=lambda *_: None)
     pointer = store.get_json(pointer_key(MONTH))
-    assert status == "prepared" and pointer["current"]["prefix"] == output_prefix(MONTH, "etag-2")
-    assert [h["source_etag"] for h in pointer["history"]] == ["etag-1"]
-    assert (tmp_path / output_prefix(MONTH, "etag-1") / "_manifest.json").exists()
+    assert status == "prepared" and pointer["prefix"] == output_prefix(MONTH)
+    assert pointer["source_sha256"] == again["source"]["sha256"] != first["source"]["sha256"]
+    assert store.get_json(f"{output_prefix(MONTH)}/_manifest.json") == again
 
 
 def test_refuses_a_local_file_that_is_not_the_landed_version(tmp_path):

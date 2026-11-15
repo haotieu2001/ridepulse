@@ -1,8 +1,7 @@
 data "aws_caller_identity" "current" {}
 
-# Raw files exactly as downloaded, under keys that include the source ETag, so a re-published TLC
-# month lands next to the old one instead of over it (services/tlc_downloader). Manifests say which
-# version is current. Prep job outputs (slices, heat map, targets) go under derived/.
+# Raw files as landed by services/tlc_downloader (raw/<source>/<id>/<file>, a trip month as Uber's trips only),
+# each with a manifest under manifests/. Prep job outputs (slices, heat map, targets) go under derived/.
 resource "aws_s3_bucket" "landing" {
   bucket = "ridepulse-landing-${var.env}-${data.aws_caller_identity.current.account_id}"
 

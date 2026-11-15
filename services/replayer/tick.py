@@ -112,14 +112,14 @@ class Slices:
             if pointer is None:
                 self.manifests[month] = None
             else:
-                manifest = must_json(self.store, f"{pointer['current']['prefix']}/_manifest.json")
+                manifest = must_json(self.store, f"{pointer['prefix']}/_manifest.json")
                 self.manifests[month] = {s["hour"]: s["key"] for s in manifest["slices"]}
         return self.manifests[month]
 
     def prefix(self, month: str) -> str | None:
         self._slice_keys(month)
         pointer = self.store.get_json(pointer_key(month)) if self.manifests[month] is not None else None
-        return pointer["current"]["prefix"] if pointer else None
+        return pointer["prefix"] if pointer else None
 
     def due(self, after: datetime, until: datetime) -> list[dict]:
         low, high = after.isoformat(timespec="seconds"), until.isoformat(timespec="seconds")

@@ -1,6 +1,6 @@
 {
   "_doc": "Which trips the app replays: the provider's trips (HV0003 = Uber) whose trip key falls in the 1-in-modulus hash bucket (20 = 5%). Definition: contracts/trip_key.py, in_replay. Changing either value changes the sample, a major contract change: bump contract_version here and the version in contracts/tlc_trips.yaml together.",
-  "contract_version": "2.0.0",
+  "contract_version": "3.0.0",
   "modulus": 20,
   "provider": "HV0003"
 }

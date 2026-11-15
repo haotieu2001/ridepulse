@@ -9,14 +9,14 @@ from .seed import seed_sql
 
 
 def landed_zones(bucket: str) -> str:
-    """The lookup version the downloader's manifest calls current."""
+    """The landed zone lookup."""
     from services.tlc_downloader.download import S3Store, sources
     src = next(s for s in sources("zones") if s.file_name == "taxi_zone_lookup.csv")
-    store = S3Store(bucket)
-    manifest = store.get_json(src.manifest_key)
-    if not manifest:
-        raise SystemExit(f"zones aren't landed: no {src.manifest_key} (run make land-zones)")
-    return store.s3.get_object(Bucket=bucket, Key=manifest["current"]["s3_key"])["Body"].read().decode("utf-8-sig")
+    s3 = S3Store(bucket).s3
+    try:
+        return s3.get_object(Bucket=bucket, Key=src.raw_key)["Body"].read().decode("utf-8-sig")
+    except s3.exceptions.NoSuchKey:
+        raise SystemExit(f"zones aren't landed: no {src.raw_key} (run make land-zones)") from None
 
 
 def main() -> int:

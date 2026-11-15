@@ -44,5 +44,5 @@ def test_the_file_is_valid_nacha_with_matching_controls():
 
 
 def test_the_landed_key_follows_the_landing_layout():
-    key = landed_key(WEEK, b"x")
-    assert key == "raw/payouts_ach/2025-01-06/etag=9dd4e461268c8034f5c8564e155c67a6/payouts_2025-01-06.ach"
+    key = landed_key(WEEK)
+    assert key == "raw/payouts_ach/2025-01-06/payouts_2025-01-06.ach"

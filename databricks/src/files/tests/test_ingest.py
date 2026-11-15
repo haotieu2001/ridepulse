@@ -12,12 +12,12 @@ ROOT = pathlib.Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(ROOT / "databricks/src/files"))
 pyspark = pytest.importorskip("pyspark")
 
-from ingest import control_mismatches, etag_of, fail_counts, month_of, payouts, positions, tlc_trips, weather_day  # noqa: E402
+from ingest import control_mismatches, fail_counts, month_of, payouts, positions, tlc_trips, weather_day  # noqa: E402
 
 from contracts.trip_key import in_replay, trip_key  # noqa: E402
 
 CONTRACT = yaml.safe_load((ROOT / "contracts/tlc_trips.yaml").read_text())
-FILE = "dbfs:/Volumes/c/raw/landing/raw/tlc_fhvhv/2025-01/etag=abc-94/fhvhv_tripdata_2025-01.parquet"
+FILE = "dbfs:/Volumes/c/raw/landing/raw/tlc_fhvhv/2025-01/fhvhv_tripdata_2025-01.parquet"
 TLC = ("hvfhs_license_num STRING, dispatching_base_num STRING, originating_base_num STRING, request_datetime TIMESTAMP_NTZ, "
        "on_scene_datetime TIMESTAMP_NTZ, pickup_datetime TIMESTAMP_NTZ, dropoff_datetime TIMESTAMP_NTZ, PULocationID INT, "
        "DOLocationID INT, trip_miles DOUBLE, trip_time BIGINT, base_passenger_fare DOUBLE, tolls DOUBLE, bcf DOUBLE, "
@@ -65,18 +65,18 @@ def test_in_sample_is_the_apps_trips_only(spark):
     # Contract 2.0: the app replays Uber's trips, so a Lyft trip in the bucket isn't in the sample.
     rows = [in_bucket(0, "HV0003"), in_bucket(1, "HV0005")]
     out = {r.provider_code: r.in_sample for r in tlc_trips(spark.createDataFrame(rows, TLC), positions(spark, [2]),
-                                                             [161], CONTRACT, "abc-94").collect()}
+                                                             [161], CONTRACT).collect()}
     assert out == {"HV0003": True, "HV0005": False}
 
 
-def test_paths_carry_the_etag_and_the_month():
-    assert etag_of(FILE) == "abc-94" and month_of(FILE) == "2025-01"
+def test_paths_carry_the_month():
+    assert month_of(FILE) == "2025-01"
 
 
 def test_silver_rows_follow_the_contract_and_the_python_key(spark):
     rows = [row(0), row(1, pu=264, origin=""), row(2), row(3, pu=10, do=10, fee=0.0)]   # 0 and 2: one pooled ride
     raw = spark.createDataFrame(rows, TLC)
-    out = {r.row_offset + 2 * r.row_group: r for r in tlc_trips(raw, positions(spark, [2, 2]), [161, 230], CONTRACT, "abc-94").collect()}
+    out = {r.row_offset + 2 * r.row_group: r for r in tlc_trips(raw, positions(spark, [2, 2]), [161, 230], CONTRACT).collect()}
 
     assert out[0].trip_key == trip_key(source(rows[0])) and out[2].trip_key == trip_key(source(rows[2]), 2)
     assert out[2].trip_key == out[0].trip_key + "-2"   # the second of the collision, in file order
@@ -84,7 +84,7 @@ def test_silver_rows_follow_the_contract_and_the_python_key(spark):
     assert [(out[i].row_group, out[i].row_offset) for i in range(4)] == [(0, 0), (0, 1), (1, 0), (1, 1)]
 
     r = out[0]
-    assert (r.provider_code, r.source_etag, r.source_file, r.pickup_date.isoformat()) == ("HV0003", "abc-94", FILE, "2025-01-10")
+    assert (r.provider_code, r.source_file, r.pickup_date.isoformat()) == ("HV0003", FILE, "2025-01-10")
     assert (r.duration_s, r.wait_for_car_min, r.request_to_pickup_min) == (1200, Decimal("3.00"), Decimal("5.00"))
     assert r.rider_total == Decimal("29.58") and r.platform_take == Decimal("5.00")   # 20 + .55 + 1.78 + 2.75 + 1.5 + 3
     assert r.touches_cbd and not out[3].touches_cbd and r.access_a_ride is False
@@ -93,7 +93,7 @@ def test_silver_rows_follow_the_contract_and_the_python_key(spark):
 
 def test_a_month_before_the_cbd_fee_has_it_null(spark):
     raw = spark.createDataFrame([row(0)], TLC).drop("cbd_congestion_fee")
-    r = tlc_trips(raw, positions(spark, [1]), [161], CONTRACT, "e").first()
+    r = tlc_trips(raw, positions(spark, [1]), [161], CONTRACT).first()
     assert r.cbd_fee is None and r.rider_total == Decimal("28.08")
 
 
@@ -125,7 +125,7 @@ def test_a_payout_file_parses_to_its_entries_and_its_controls_hold(spark):
     from services.payouts.payouts import nacha, plant
     week = datetime(2025, 1, 6).date()
     entries, _ = plant({f"D{n:04d}": 5000 + n for n in range(1, 8)}, week)
-    path = "dbfs:/Volumes/c/raw/landing/raw/payouts_ach/2025-01-06/etag=e/payouts_2025-01-06.ach"
+    path = "dbfs:/Volumes/c/raw/landing/raw/payouts_ach/2025-01-06/payouts_2025-01-06.ach"
     lines = nacha(entries, week, datetime(2025, 1, 13, 6, 0)).splitlines()
     raw = spark.createDataFrame([(v, path) for v in lines], "value STRING, _source_file STRING")
     rows = sorted((r.driver_id, r.amount_cents, int(r.trace_number[8:])) for r in payouts(raw).collect())

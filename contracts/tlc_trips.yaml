@@ -10,7 +10,7 @@
 # What each column means: docs/index.html#data.
 
 contract: tlc_trips
-version: 2.0.0
+version: 3.0.0
 status: active
 owner: platform (Hao Tieu)
 consumers: [silver.tlc_trips, silver.trip_events, gold.*]
@@ -21,7 +21,7 @@ change_policy: >
 source:
   publisher: NYC Taxi & Limousine Commission, via NYC Open Data (no usage restrictions; cite TLC)
   file: fhvhv_tripdata_YYYY-MM.parquet, published about 2 months after month end, sometimes re-published
-  pinning: ETag + Last-Modified per file; a changed ETag is a re-publication, reloaded as a new version
+  landing: raw/tlc_fhvhv/<month>/<file>, Uber's rows only, with a manifest (URL, size, sha256); landed once per month
   time_zone: New York wall clock with no offset; read as TIMESTAMP_NTZ
   grain: one row per trip (a pooled ride with two riders is two rows)
 
@@ -51,7 +51,6 @@ columns:
   - {name: dispatching_base_num, type: STRING, nullable: false, from: dispatching_base_num}
   - {name: originating_base_num, type: STRING, nullable: true, from: originating_base_num}
   - {name: source_file, type: STRING, nullable: false, from: "_metadata.file_path"}
-  - {name: source_etag, type: STRING, nullable: false, from: download metadata}
   - {name: row_group, type: INT, nullable: false, from: parquet reader}
   - {name: row_offset, type: BIGINT, nullable: false, from: parquet reader, note: "trip_key collision tiebreaker"}
 
