@@ -1,0 +1,121 @@
+THỨ TỰ ĐỌC CODE: uber-nyc-lakehouse (repo haotieu2001/ridepulse)
+File này: docs/reading-order.vi.txt (đánh dấu [x] khi đọc xong, commit để máy khác cũng thấy).
+Cập nhật: 2026-11-15, theo main sau khi bỏ ETag (#143).
+Đường dẫn tính từ thư mục gốc của repo.
+Trước khi đọc: git pull (trong terminal ngoài Claude Code).
+
+Gợi ý nhịp đọc:
+- Vòng 1 quan trọng nhất: đọc chậm, đọc kèm test.
+- Vòng 2 và 4: đọc lướt, cần thì quay lại.
+- Vòng 3: đọc kỹ nếu nhắm vị trí data platform / DevOps (phỏng vấn hay hỏi).
+- Docstring đầu mỗi file giải thích file làm gì và vì sao: đọc nó trước.
+
+
+VÒNG 0. BỨC TRANH (khoảng 30 phút)
+  [ ] README.md
+  [ ] Makefile                         danh sách lệnh vận hành
+  [ ] docs/index.vi.html               mục 1-4
+
+
+VÒNG 1. ĐƯỜNG ĐI CỦA MỘT CHUYẾN XE (cốt lõi)
+  1. Định nghĩa chuyến, mẫu Uber
+     [x] contracts/trip_key.py         khoá chuyến (băm 6 cột), in_sample, in_replay
+     [x] contracts/sample.json         chọn chuyến nào: Uber (HV0003), 5%
+     [x] contracts/tlc_trips.yaml      data contract: cột, kiểu, luật kiểm tra
+  2. Tải file TLC
+     [x] services/tlc_downloader/download.py
+  3. Prep: cắt lát dữ liệu
+     [ ] services/prep/prep.py
+     [ ] services/prep/store.py
+  4. Schema Postgres + outbox
+     [ ] db/migrations/V001__dispatch.sql
+     [ ] db/migrations/V002__replay_runs.sql   (V003-V008: thay đổi nhỏ về sau)
+  5. Replayer: đóng vai app
+     [ ] services/replayer/handler.py  điểm vào của Lambda
+     [ ] services/replayer/tick.py     trái tim: một tick, một transaction
+     [ ] services/replayer/pings.py
+  6. Debezium (đọc WAL, đẩy vào Kafka)
+     [ ] infra/terraform/debezium/user_data.sh.tftpl
+     [ ] infra/terraform/debezium/env/
+  7. Bronze, rồi silver
+     [ ] databricks/src/bronze/pipeline.py
+     [ ] databricks/src/silver/silver.py
+     [ ] databricks/src/silver/silver_logic.py
+     [ ] databricks/src/silver/state.py
+     [ ] databricks/src/silver/expectations.yml
+  8. Rule R1-R4 + cảnh báo
+     [ ] databricks/src/ref/ops_rules.yml      ngưỡng (sửa config, không sửa code)
+     [ ] databricks/src/ops/rule_logic.py
+     [ ] databricks/src/ops/rules.py
+     [ ] databricks/src/ops/alerts.py
+     [ ] services/notifier/notifier.py
+  9. Cổng hằng ngày, gold, đối soát
+     [ ] databricks/src/daily/gate.py
+     [ ] databricks/src/gold/build.py  app_events, app_trips, fct_trips, metric_view_yaml, recon_*
+  10. Dashboard, Genie
+     [ ] databricks/src/bi/build_dashboard.py
+     [ ] databricks/src/bi/genie_space.json
+     [ ] scripts/bi/genie_space.py
+
+
+VÒNG 2. PHẦN PHỤ TRỢ DỮ LIỆU
+  Mô hình tài xế giả (ADR-0003)
+     [ ] services/prep/supply.py
+     [ ] services/replayer/supply.py
+     [ ] databricks/src/ops/supply_logic.py
+     [ ] databricks/src/ops/supply.py
+  Sự cố bơm vào lúc demo
+     [ ] services/replayer/incidents.py
+  File và bảng tham chiếu
+     [ ] services/forwarder/forwarder.py       S3 sang UC Volume
+     [ ] databricks/src/files/ingest.py        file TLC vào silver.tlc_trips
+     [ ] databricks/src/ref/ref.py
+     [ ] services/seed/seed.py                 zone, biểu phí vào Postgres
+     [ ] ref/                                  dữ liệu zone, biểu phí
+  Payout giả lập (cho đối soát)
+     [ ] services/payouts/payouts.py
+  Views job (KPI, health check)
+     [ ] databricks/src/views/refresh.py
+     [ ] databricks/src/views/health.py
+  Schema sự kiện
+     [ ] contracts/events/*.schema.json
+     [ ] contracts/events/driver_location.avsc
+  Cấu hình
+     [ ] config/cdc_tables.json
+     [ ] config/window.json
+     [ ] config/file_sources.json
+
+
+VÒNG 3. HẠ TẦNG VÀ TRIỂN KHAI (theo thứ tự dựng hệ thống)
+     [ ] infra/terraform/bootstrap/    state bucket, GitHub OIDC, budget
+     [ ] infra/terraform/landing/      S3, forwarder
+     [ ] infra/terraform/confluent/    topic, ACL, schema
+     [ ] infra/terraform/debezium/main.tf
+     [ ] infra/terraform/replayer/     Lambda, lịch, giám sát
+     [ ] services/window/window.py     mở/đóng demo window
+     [ ] infra/terraform/databricks/   danh tính, quyền, secret
+     [ ] databricks/databricks.yml + databricks/resources/*.yml   bundle: pipeline, job, dashboard
+     [ ] .github/workflows/ci.yml
+     [ ] .github/workflows/deploy.yml  stg -> stg_smoke -> live (có người duyệt)
+     [ ] .github/workflows/prep.yml
+     [ ] scripts/*.sh                  db.sh, as_ci.sh, debezium_down.sh, sql.sh, ec2_run.sh, ssm_to_secret.sh, ...
+
+
+VÒNG 4. CHẤT LƯỢNG
+     [ ] Thư mục tests/ trong từng phần. Bắt đầu với:
+         databricks/src/gold/tests/test_build.py
+         services/replayer/tests/test_tick.py
+     [ ] ci/cdc/ + phần CDC trong ci.yml       test CDC thật trong CI
+     [ ] contracts/validation/                 kiểm tra contract trên file thật
+     [ ] scripts/drills/                       diễn tập sự cố
+     [ ] scripts/measure/alerts.py             đo latency cảnh báo
+     [ ] scripts/supply/                       bộ mô phỏng tham chiếu cho test
+
+
+DANH SÁCH THAY ĐỔI CHỜ LÀM (làm một đợt sau khi đọc xong, rồi test một lần)
+  [x] 1. Bỏ ETag ở downloader (đã chọn B, 15/11) - PR #143, đã merge 15/11:
+         - giữ: thử lại khi lỗi mạng, kiểm tra đủ byte, SHA-256
+         - bỏ: HEAD, thư mục etag=..., lịch sử phiên bản
+         - file đặt ở raw/tlc_fhvhv/2025-01/fhvhv_tripdata_2025-01.parquet
+         - prep, ingest đọc theo tháng; contract bỏ cột source_etag (hoặc đổi thành source_sha256)
+  [ ] 2. ...
