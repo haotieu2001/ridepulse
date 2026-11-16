@@ -3,6 +3,9 @@ File này: docs/reading-order.vi.txt (đánh dấu [x] khi đọc xong, commit �
 Cập nhật: 2026-11-15, theo main sau khi bỏ ETag (#143).
 Đường dẫn tính từ thư mục gốc của repo.
 Trước khi đọc: git pull (trong terminal ngoài Claude Code).
+Tài liệu học kèm sơ đồ (mở bằng trình duyệt): docs/learning-guide.vi.html
+  - vòng 1 end to end, setup hiện tại và cách làm ở production
+  - kiến thức nền: streaming, watermark, CDC, slot/offset, outbox, SCD1/SCD2
 
 Gợi ý nhịp đọc:
 - Vòng 1 quan trọng nhất: đọc chậm, đọc kèm test.
